@@ -151,7 +151,7 @@ pub async fn login() -> Result<(), String> {
     // Block on the one incoming request. Spawn to a blocking thread so we
     // don't stall the async runtime.
     let expected_state = state.clone();
-    let code = tokio::task::spawn_blocking(move || wait_for_code(listener, &expected_state))
+    let code = tokio::task::spawn_blocking(move || wait_for_code(listener, &expected_state, LOGIN_TIMEOUT))
         .await
         .map_err(|e| e.to_string())??;
 
@@ -160,16 +160,34 @@ pub async fn login() -> Result<(), String> {
     Ok(())
 }
 
+const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Accepts one connection, parses the `code`/`state` from the GET line,
 /// writes a friendly HTML page back, and returns the code.
-fn wait_for_code(listener: TcpListener, expected_state: &str) -> Result<String, String> {
-    for stream in listener.incoming() {
-        let mut stream = match stream {
-            Ok(s) => s,
+/// Gives up after LOGIN_TIMEOUT, so a closed browser tab doesn't leave the app
+/// waiting forever with the port held.
+fn wait_for_code(listener: TcpListener, expected_state: &str, timeout: std::time::Duration) -> Result<String, String> {
+    let deadline = std::time::Instant::now() + timeout;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    loop {
+        let mut stream = match listener.accept() {
+            Ok((s, _)) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return Err("no answer from Spotify in 3 minutes, try again".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                continue;
+            }
             Err(_) => continue,
         };
+        // the accepted socket may inherit non-blocking mode; reads need a bounded block
+        let _ = stream.set_nonblocking(false);
+        let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
         let mut buf = [0u8; 2048];
-        let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
+        // a browser preconnect may never send a request: skip it, keep listening
+        let Ok(n) = stream.read(&mut buf) else { continue };
         let req = String::from_utf8_lossy(&buf[..n]);
 
         // First line: "GET /callback?code=...&state=... HTTP/1.1"
@@ -216,7 +234,6 @@ fn wait_for_code(listener: TcpListener, expected_state: &str) -> Result<String, 
             }
         }
     }
-    Err("listener closed without a callback".into())
 }
 
 async fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, String> {
@@ -390,6 +407,31 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn wait_for_code_times_out_without_a_callback() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let r = wait_for_code(l, "s", std::time::Duration::from_millis(200));
+        assert!(r.unwrap_err().contains("no answer"));
+    }
+
+    #[test]
+    fn wait_for_code_skips_a_silent_preconnect() {
+        use std::io::{Read, Write};
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let silent = std::net::TcpStream::connect(addr).unwrap();
+            drop(silent); // closes without a request: read returns 0 bytes
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(b"GET /callback?code=abc&state=s HTTP/1.1\r\n\r\n").unwrap();
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+        });
+        let r = wait_for_code(l, "s", std::time::Duration::from_secs(5));
+        client.join().unwrap();
+        assert_eq!(r.unwrap(), "abc");
+    }
     use super::*;
 
     const ALL: &str = "user-read-private user-read-email playlist-read-private playlist-read-collaborative user-read-playback-state user-modify-playback-state user-read-recently-played";

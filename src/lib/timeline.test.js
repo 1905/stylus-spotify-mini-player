@@ -32,11 +32,14 @@ describe("buildRun", () => {
     expect(past.map((x) => x.track.uri)).toEqual([T(2).uri]);
   });
 
-  it("after Prev: past never repeats now or a visible next track", () => {
-    // was on 2, pressed Prev: 2 observed as played, now is 1 again, 2 is back in the queue
-    const run = buildRun({ history: hist(2, 1, 3), now: T(1), queue: [T(2), T(4)] });
-    expect(run.map((x) => `${x.role}:${x.track.id}`)).toEqual(["past:t3", "now:t1", "next:t2", "next:t4"]);
-    expect(run.every((x) => x.key.endsWith("~0"))).toBe(true);
+  it("past never repeats now, at any depth", () => {
+    const run = buildRun({ history: hist(2, 1, 3), now: T(1), queue: [T(4)] });
+    expect(run.map((x) => `${x.role}:${x.track.id}`)).toEqual(["past:t3", "past:t2", "now:t1", "next:t4"]);
+  });
+
+  it("queued repeats keep their past plays (a short playlist on repeat)", () => {
+    const run = buildRun({ history: hist(3, 2, 1), now: T(1), queue: [T(2), T(3), T(1)] });
+    expect(run.filter((x) => x.role === "past").map((x) => x.track.id)).toEqual(["t2", "t3"]);
   });
 
   it("consecutive duplicate uris collapse", () => {

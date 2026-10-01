@@ -10,13 +10,12 @@ export function buildRun({ history = [], now = null, queue = [] } = {}, { maxPas
 
   const next = (queue || []).filter(Boolean).slice(0, maxNext);
 
-  // 1. skip rows already on screen as now or next (after Prev, the track you left is
-  //    both "played" and up next), 2. collapse consecutive duplicates, 3. take maxPast, reverse
-  const shown = new Set([now, ...next].filter(Boolean).map((t) => t.uri));
+  // 1. skip rows of the current track (it is on screen as now), 2. collapse consecutive
+  //    duplicates, 3. take maxPast, reverse. Queued repeats keep their past plays.
   const past = [];
   for (const t of tracks) {
     if (past.length >= maxPast) break;
-    if (shown.has(t.uri)) continue;
+    if (now && t.uri === now.uri) continue;
     if (past.length && past[past.length - 1].uri === t.uri) continue;
     past.push(t);
   }

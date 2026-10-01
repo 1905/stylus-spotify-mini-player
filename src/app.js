@@ -11,6 +11,7 @@ const ERROR_POLL_MS = 4000;
 const QUEUE_EVERY = 10; // ticks
 const HOLD_MS = 1500; // ignore polled is_playing right after a play/pause click
 const SESSION_MATCH_MS = 15 * 60 * 1000; // a session row this close to an API row is the same play
+const PLAYED_MS = 30 * 1000; // Spotify counts a play after 30s; a track skipped sooner isn't history
 const small = matchMedia("(max-width: 899px)");
 
 const state = {
@@ -113,14 +114,19 @@ let pollTimer = null;
 let inFlight = false;
 let pollAgain = false;
 let tick = 0;
+let pollEpoch = 0; // bumped on every start/stop: a poll from an older epoch must not touch state
 
 function startPolling() {
+  pollEpoch++;
   polling = true;
+  inFlight = false;
+  pollAgain = false;
   tick = 0;
   schedule(0);
 }
 
 function stopPolling() {
+  pollEpoch++;
   polling = false;
   clearTimeout(pollTimer);
   pollTimer = null;
@@ -141,12 +147,15 @@ function kick() {
 async function poll() {
   pollTimer = null;
   if (!polling) return;
+  const epoch = pollEpoch;
   inFlight = true;
   let delay = POLL_MS;
   try {
-    await refresh();
+    await refresh(epoch);
+    if (epoch !== pollEpoch) return;
     state.error = null;
   } catch (e) {
+    if (epoch !== pollEpoch) return; // stale: the session it belonged to is gone
     inFlight = false;
     if (isCode(e, "AUTH_EXPIRED")) return expire();
     if (!state.error && state.loaded) toast("Can't reach Spotify. Retrying.");
@@ -163,9 +172,11 @@ async function poll() {
   schedule(delay);
 }
 
-async function refresh() {
+async function refresh(epoch) {
   const s = await invoke("playback_state");
+  if (epoch !== pollEpoch) return; // a newer session took over while this one waited
   tick++;
+  const leftAt = progress(); // how far the old "now" got, before this poll overwrites it
 
   // active but no track = an ad or a podcast episode: keep the device, show no cover
   state.other = Boolean(s && s.active && !(s.track && s.track.uri));
@@ -176,7 +187,7 @@ async function refresh() {
 
   if (!s || !s.active || state.other) {
     const hadNow = Boolean(state.now);
-    if (hadNow) observe(state.now);
+    if (hadNow) observe(state.now, leftAt);
     state.now = null;
     if (!state.other) state.isPlaying = false;
     state.progressMs = 0;
@@ -199,7 +210,7 @@ async function refresh() {
   const t = s.track;
   const changed = !state.now || state.now.uri !== t.uri;
   if (changed || !state.loaded) {
-    if (state.now && changed) observe(state.now);
+    if (state.now && changed) observe(state.now, leftAt);
     state.now = t;
     await Promise.all([loadQueue(), loadHistory()]);
     state.loaded = true;
@@ -213,7 +224,8 @@ async function refresh() {
 }
 
 /** Remember a track that just left "now", in case recently-played lags behind. */
-function observe(track) {
+function observe(track, playedMs) {
+  if (playedMs < Math.min(PLAYED_MS, (track.duration_ms || 0) / 2)) return; // skipped, not played
   state.session.unshift({ track, played_at: new Date().toISOString() });
   state.session.length = Math.min(state.session.length, 50);
 }
