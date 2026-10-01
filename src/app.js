@@ -36,6 +36,7 @@ const state = {
   holdUntil: 0,
   queue: [],
   recent: [], // get_recently_played, newest first
+  historyOk: false, // false after a failed history fetch: periodic ticks retry it
   session: [], // tracks observed leaving "now" while the app is open
   loaded: false,
   error: null,
@@ -83,6 +84,12 @@ function showLogin(kind) {
   stopPolling();
   authSession++;
   playlistsLoading = false; // a load from the old session will never finish
+  // the next login may be another account: drop everything that belonged to this one
+  playlists = null;
+  listScroll = 0;
+  $("libList").innerHTML = "";
+  $("run").replaceChildren();
+  Object.assign(state, { mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null });
   closeOverlay();
   state.loginKind = LOGIN_COPY[kind] ? kind : "login";
   const copy = LOGIN_COPY[state.loginKind];
@@ -134,6 +141,7 @@ function startPolling() {
   pollAgain = false;
   tick = 0;
   state.loaded = false; // full fetch and render: a stopped poll may have skipped one
+  state.now = null; // unknown what played during the gap: don't record the old track as played
   schedule(0);
 }
 
@@ -218,6 +226,7 @@ async function refresh(epoch) {
     if (epoch !== pollEpoch) return;
     if (queue) state.queue = queue;
     if (recent) state.recent = recent;
+    state.historyOk = Boolean(recent);
     if (devices) setDevices(devices);
     state.loaded = true;
     renderNow();
@@ -225,8 +234,17 @@ async function refresh(epoch) {
     if (track) paint(track.cover);
   } else if (tick % QUEUE_EVERY === 0 && mode !== "other") {
     // between changes only the queue (song) or the device list (idle) can move
-    const fresh = await fetchOr(track ? "get_queue" : "list_devices");
-    if (epoch !== pollEpoch || !fresh) return;
+    const [fresh, recent] = await Promise.all([
+      fetchOr(track ? "get_queue" : "list_devices"),
+      state.historyOk ? null : fetchOr("get_recently_played"),
+    ]);
+    if (epoch !== pollEpoch) return;
+    if (recent) {
+      state.recent = recent;
+      state.historyOk = true;
+      renderRun();
+    }
+    if (!fresh) return renderChrome();
     if (track && !sameUris(fresh, state.queue)) {
       state.queue = fresh;
       renderRun();

@@ -288,6 +288,8 @@ What shipped differs from the text above in these places:
 - **Auth.** Tokens are cached in memory under one async mutex, which also serializes refreshes. Spotify rotates refresh tokens. Every HTTP call has a 5s connect and 15s total deadline. The login callback listener gives up after 3 minutes.
 - **Stale responses.** Every `invoke` belongs to a login session. A response from before a logout never settles, so it can't log out the new session. Within a session, a poll epoch ignores polls from before a stop or restart. A restart always re-renders in full.
 - **History merge** (`mergeHistory` in `lib/timeline.js`). Session plays match recently-played rows one-to-one, closest time first, within 15 min. A replay stays until the API reports it.
+- **Logout** clears all account data: playlists cache, history, session plays, queue and the rendered run. The next login may be another account.
+- **After a polling gap** (hidden window), the first poll never records the old track as played. A failed history fetch is retried every 10th tick until it succeeds.
 - **Search albums** return `{id, name, artists, cover}` only.
 - **Dev harness** has an extra `ad` scenario. `window.__mock.handlers` lets QA inject failures. `src/markup.test.js` fails if `dev/index.html` drifts from `src/index.html`.
 - **Not checked** in the real Tauri WKWebView window. Web harness only, per the user.
