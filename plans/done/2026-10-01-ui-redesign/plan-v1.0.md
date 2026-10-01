@@ -1,7 +1,7 @@
 # The Run — Redesign Implementation Plan v1.0
 
 **Date:** 2026-10-01
-**Status:** in-progress, paused 2026-10-02 after T6 (user: "dont run anything"). Next: T7.
+**Status:** done 2026-10-02. T7 QA, T8 fixes, T9: 20 Astra rounds (last: no issues), /simplify, spec reconciled, merged to main.
 
 ## Progress (as of 2026-10-02)
 
@@ -12,9 +12,9 @@
 | T3+T4 harness + lib | ✓ done | 21/21 vitest. `dev/fixture.json` holds real data: 5 playlists, 20 queue, 30 real recent plays. Font self-hosted (WOFF2) |
 | T5 stage UI | ✓ done | commit `151c7d1`. History left, up next right, FLIP on track change verified, colour from cover |
 | T6 library + search | ✓ done | commit `c458cbe`. Library sheet, search overlay, Esc, scrub aligned to cover, left-edge sliver removed |
-| T7 Sonnet QA | ✗ not done | the agent was dispatched but stopped when the session exited, so there are no results. Re-dispatch from scratch |
-| T8 fix loop | pending | known bug (orchestrator saw it): search album captions are clipped by the panel bottom (`p2/search-1440.png`) |
-| T9 exit gate | pending | Astra loop until 0 crit/high, `/simplify`, reconcile spec, merge to `main`, notify |
+| T7 Sonnet QA | ✓ done | 24 shots (12 scenarios × 2 viewports). 2 real bugs (album captions clipped, Prev duplicates) + 5 small |
+| T8 fix loop | ✓ done | commit `635adc2`. Re-sweep: only the album fix changed |
+| T9 exit gate | ✓ done | Astra rounds 1–20, every confirmed finding fixed and browser-tested; round 20: no issues. `/simplify` −165 lines. 28 vitest, 18 cargo tests |
 
 **Repo:** branch `feat/the-run-redesign` is pushed to `github.com/1905/rust-spotify` (private). Last commit is `c458cbe`, and the tree was clean after it. `main` still holds only the bootstrap commit.
 
