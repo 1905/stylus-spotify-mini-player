@@ -1,0 +1,1548 @@
+{
+ "playlists": [
+  {
+   "id": "6gjLMUErW2TsOl8cGAxbo7",
+   "name": "Mia",
+   "images": [
+    {
+     "height": 640,
+     "url": "https://mosaic.scdn.co/640/ab67616d00001e024dcb6c5df15cf74596ab25a4ab67616d00001e029e2f95ae77cf436017ada9cbab67616d00001e02bc805943adb4adde1555b130ab67616d00001e02ea3ef7697cfd5705b8f47521",
+     "width": 640
+    },
+    {
+     "height": 300,
+     "url": "https://mosaic.scdn.co/300/ab67616d00001e024dcb6c5df15cf74596ab25a4ab67616d00001e029e2f95ae77cf436017ada9cbab67616d00001e02bc805943adb4adde1555b130ab67616d00001e02ea3ef7697cfd5705b8f47521",
+     "width": 300
+    },
+    {
+     "height": 60,
+     "url": "https://mosaic.scdn.co/60/ab67616d00001e024dcb6c5df15cf74596ab25a4ab67616d00001e029e2f95ae77cf436017ada9cbab67616d00001e02bc805943adb4adde1555b130ab67616d00001e02ea3ef7697cfd5705b8f47521",
+     "width": 60
+    }
+   ],
+   "tracks": {
+    "total": 15
+   }
+  },
+  {
+   "id": "0gCOBBt9PJVPltc6moPGug",
+   "name": "Audiophile Mix",
+   "images": [
+    {
+     "height": 640,
+     "url": "https://mosaic.scdn.co/640/ab67616d00001e0217378ec9ece13f0ba9d86ec5ab67616d00001e02ab1de7a28d96c3044b7c2dd0ab67616d00001e02b5b9ef714b83c177f8425d8dab67616d00001e02e0f03f5fd443de7fe838dbb2",
+     "width": 640
+    },
+    {
+     "height": 300,
+     "url": "https://mosaic.scdn.co/300/ab67616d00001e0217378ec9ece13f0ba9d86ec5ab67616d00001e02ab1de7a28d96c3044b7c2dd0ab67616d00001e02b5b9ef714b83c177f8425d8dab67616d00001e02e0f03f5fd443de7fe838dbb2",
+     "width": 300
+    },
+    {
+     "height": 60,
+     "url": "https://mosaic.scdn.co/60/ab67616d00001e0217378ec9ece13f0ba9d86ec5ab67616d00001e02ab1de7a28d96c3044b7c2dd0ab67616d00001e02b5b9ef714b83c177f8425d8dab67616d00001e02e0f03f5fd443de7fe838dbb2",
+     "width": 60
+    }
+   ],
+   "tracks": {
+    "total": 50
+   }
+  },
+  {
+   "id": "60uDnfzTGJWGfwpSzukVjL",
+   "name": "Goodbye",
+   "images": [
+    {
+     "height": 640,
+     "url": "https://mosaic.scdn.co/640/ab67616d00001e025ccbf2c32c94e95c90566883ab67616d00001e0276f2cb2ac2670e125a4670caab67616d00001e02a46d603701aa0342e8cca64eab67616d00001e02ef7a0e5fe792c4310fdeed3f",
+     "width": 640
+    },
+    {
+     "height": 300,
+     "url": "https://mosaic.scdn.co/300/ab67616d00001e025ccbf2c32c94e95c90566883ab67616d00001e0276f2cb2ac2670e125a4670caab67616d00001e02a46d603701aa0342e8cca64eab67616d00001e02ef7a0e5fe792c4310fdeed3f",
+     "width": 300
+    },
+    {
+     "height": 60,
+     "url": "https://mosaic.scdn.co/60/ab67616d00001e025ccbf2c32c94e95c90566883ab67616d00001e0276f2cb2ac2670e125a4670caab67616d00001e02a46d603701aa0342e8cca64eab67616d00001e02ef7a0e5fe792c4310fdeed3f",
+     "width": 60
+    }
+   ],
+   "tracks": {
+    "total": 16
+   }
+  },
+  {
+   "id": "16rzOJ2faZsJeQb2Edk6SK",
+   "name": "Off Planet (Throwing Snow Remix)",
+   "images": [
+    {
+     "height": 640,
+     "url": "https://mosaic.scdn.co/640/ab67616d00001e0236c20d83a181c2b88a513156ab67616d00001e02c82b8f9126b7623e0ea5b88fab67616d00001e02d54cbe27c3fcf9947d0f2239ab67616d00001e02d573278c86bf15c826d14bfe",
+     "width": 640
+    },
+    {
+     "height": 300,
+     "url": "https://mosaic.scdn.co/300/ab67616d00001e0236c20d83a181c2b88a513156ab67616d00001e02c82b8f9126b7623e0ea5b88fab67616d00001e02d54cbe27c3fcf9947d0f2239ab67616d00001e02d573278c86bf15c826d14bfe",
+     "width": 300
+    },
+    {
+     "height": 60,
+     "url": "https://mosaic.scdn.co/60/ab67616d00001e0236c20d83a181c2b88a513156ab67616d00001e02c82b8f9126b7623e0ea5b88fab67616d00001e02d54cbe27c3fcf9947d0f2239ab67616d00001e02d573278c86bf15c826d14bfe",
+     "width": 60
+    }
+   ],
+   "tracks": {
+    "total": 759
+   }
+  },
+  {
+   "id": "15ZLsjkOpDjFkuYH0umEGm",
+   "name": "#1609 - Elon Musk",
+   "images": [
+    {
+     "height": null,
+     "url": "https://i.scdn.co/image/ab67656300005f1fc78127c49f76022559ef3527",
+     "width": null
+    }
+   ],
+   "tracks": {
+    "total": 1
+   }
+  }
+ ],
+ "playlistTracks": {
+  "6gjLMUErW2TsOl8cGAxbo7": [
+   {
+    "id": "1CPZ5BxNNd0n0nF4Orb9JS",
+    "uri": "spotify:track:1CPZ5BxNNd0n0nF4Orb9JS",
+    "name": "Golden",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 194607
+   },
+   {
+    "id": "3RXUgPNIbUgFxsDWuBQEt6",
+    "uri": "spotify:track:3RXUgPNIbUgFxsDWuBQEt6",
+    "name": "How It’s Done",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 176059
+   },
+   {
+    "id": "5sBDrrtLGbV64QJnEqfjer",
+    "uri": "spotify:track:5sBDrrtLGbV64QJnEqfjer",
+    "name": "What It Sounds Like",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 250268
+   },
+   {
+    "id": "0MHStU0muAIEMbwdnebYu2",
+    "uri": "spotify:track:0MHStU0muAIEMbwdnebYu2",
+    "name": "Takedown",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 182016
+   },
+   {
+    "id": "09CtPGIpYB4BrO8qb1RGsF",
+    "uri": "spotify:track:09CtPGIpYB4BrO8qb1RGsF",
+    "name": "Sorry",
+    "artists": "Justin Bieber",
+    "album": "Purpose (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f46b9d202509a8f7384b90de",
+    "duration_ms": 200786
+   },
+   {
+    "id": "2tpWsVSb9UEmDRxAl1zhX1",
+    "uri": "spotify:track:2tpWsVSb9UEmDRxAl1zhX1",
+    "name": "Counting Stars",
+    "artists": "OneRepublic",
+    "album": "Native",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739e2f95ae77cf436017ada9cb",
+    "duration_ms": 257265
+   },
+   {
+    "id": "7JJmb5XwzOO8jgpou264Ml",
+    "uri": "spotify:track:7JJmb5XwzOO8jgpou264Ml",
+    "name": "There's Nothing Holdin' Me Back",
+    "artists": "Shawn Mendes",
+    "album": "Illuminate (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ea3ef7697cfd5705b8f47521",
+    "duration_ms": 199440
+   },
+   {
+    "id": "2UbVnbE5FH6008mAm6Mmgw",
+    "uri": "spotify:track:2UbVnbE5FH6008mAm6Mmgw",
+    "name": "Run",
+    "artists": "OneRepublic",
+    "album": "Run",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738120d2b107af14b1bf67cd06",
+    "duration_ms": 169010
+   },
+   {
+    "id": "7x5xYW5W42OGPAdHUyyguy",
+    "uri": "spotify:track:7x5xYW5W42OGPAdHUyyguy",
+    "name": "Locked Away (feat. Adam Levine)",
+    "artists": "R. City, Adam Levine",
+    "album": "What Dreams Are Made Of",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27374b157379e7686df3d0850a4",
+    "duration_ms": 227475
+   },
+   {
+    "id": "161DnLWsx1i3u1JT05lzqU",
+    "uri": "spotify:track:161DnLWsx1i3u1JT05lzqU",
+    "name": "Talking to the Moon",
+    "artists": "Bruno Mars",
+    "album": "Doo-Wops & Hooligans",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737039c1c841fc3dfa2ad8a0d8",
+    "duration_ms": 217866
+   },
+   {
+    "id": "1whAXVGN8AdfrnoXNIXfJf",
+    "uri": "spotify:track:1whAXVGN8AdfrnoXNIXfJf",
+    "name": "Truth or Dare",
+    "artists": "Tyla",
+    "album": "TYLA",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273cc9e6203ed1182fe83b98985",
+    "duration_ms": 190392
+   },
+   {
+    "id": "6vn8dvUpDC4YeaAh3BI25r",
+    "uri": "spotify:track:6vn8dvUpDC4YeaAh3BI25r",
+    "name": "I'm Still Standing",
+    "artists": "Taron Egerton",
+    "album": "Sing (Original Motion Picture Soundtrack Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27370120e0cfe4add0fb2eba28b",
+    "duration_ms": 187853
+   },
+   {
+    "id": "5hx7w26Zi3zafMgvMTUqF6",
+    "uri": "spotify:track:5hx7w26Zi3zafMgvMTUqF6",
+    "name": "SNAP",
+    "artists": "Rosa Linn",
+    "album": "SNAP",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273927f72f3739f256fb01d1470",
+    "duration_ms": 179551
+   },
+   {
+    "id": "2gQPv5jvVPqU2a9HhMNO1v",
+    "uri": "spotify:track:2gQPv5jvVPqU2a9HhMNO1v",
+    "name": "Toxic",
+    "artists": "BoyWithUke",
+    "album": "Toxic",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27382a18aa0d3374049c6b78f6a",
+    "duration_ms": 168020
+   },
+   {
+    "id": "3zkWCteF82vJwv0hRLba76",
+    "uri": "spotify:track:3zkWCteF82vJwv0hRLba76",
+    "name": "Stitches",
+    "artists": "Shawn Mendes",
+    "album": "Handwritten",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27375bd5306fb4669a15ee74eff",
+    "duration_ms": 206880
+   }
+  ],
+  "0gCOBBt9PJVPltc6moPGug": [
+   {
+    "id": "3JpzqRcjxif901JZKAPLn6",
+    "uri": "spotify:track:3JpzqRcjxif901JZKAPLn6",
+    "name": "Mos 6581",
+    "artists": "Carbon Based Lifeforms",
+    "album": "Hydroponic Garden",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ab1de7a28d96c3044b7c2dd0",
+    "duration_ms": 440000
+   },
+   {
+    "id": "4nQZtkIyr1U3CJ0ZmE4f6C",
+    "uri": "spotify:track:4nQZtkIyr1U3CJ0ZmE4f6C",
+    "name": "DRAWN OUT LIKE AN ACHE",
+    "artists": "Lorn",
+    "album": "REMNANT",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273b5b9ef714b83c177f8425d8d",
+    "duration_ms": 250687
+   },
+   {
+    "id": "5z0QLEpkbUh00SevSuYxOh",
+    "uri": "spotify:track:5z0QLEpkbUh00SevSuYxOh",
+    "name": "Divine Moments of Truth",
+    "artists": "Shpongle",
+    "album": "Are You Shpongled?",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2",
+    "duration_ms": 620333
+   },
+   {
+    "id": "2KZAI37A6imv9FrvFM7WTV",
+    "uri": "spotify:track:2KZAI37A6imv9FrvFM7WTV",
+    "name": "Generations",
+    "artists": "Mano Le Tough",
+    "album": "Trails",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27317378ec9ece13f0ba9d86ec5",
+    "duration_ms": 265413
+   },
+   {
+    "id": "5YcqLilTaxiTHxjX31kjeN",
+    "uri": "spotify:track:5YcqLilTaxiTHxjX31kjeN",
+    "name": "1983",
+    "artists": "Ten Walls, Domas Aleksa",
+    "album": "Queen",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27396275f993a07bdc40d87f91a",
+    "duration_ms": 189314
+   },
+   {
+    "id": "4LkejFo7l7D36wrUfgs10W",
+    "uri": "spotify:track:4LkejFo7l7D36wrUfgs10W",
+    "name": "For – Peter – Toilet Brushes – More",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 1009000
+   },
+   {
+    "id": "2BndJYJQ17UcEeUFJP5JmY",
+    "uri": "spotify:track:2BndJYJQ17UcEeUFJP5JmY",
+    "name": "Paradise Circus",
+    "artists": "Massive Attack, Hope Sandoval",
+    "album": "Heligoland",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273852aaa233e122f1dbfefcf00",
+    "duration_ms": 297774
+   },
+   {
+    "id": "7G7qAvwD7kGBRnY9D1G0o3",
+    "uri": "spotify:track:7G7qAvwD7kGBRnY9D1G0o3",
+    "name": "Avratz",
+    "artists": "Infected Mushroom",
+    "album": "Converting Vegetarians",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27323fad8bd3a0351c0e183f075",
+    "duration_ms": 623866
+   },
+   {
+    "id": "643gyipSU7dkmrFhJ8UAIm",
+    "uri": "spotify:track:643gyipSU7dkmrFhJ8UAIm",
+    "name": "Pulsewidth",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works 85-92",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27338906032688bb13b135ce19a",
+    "duration_ms": 228053
+   },
+   {
+    "id": "2AACF7qh9u5qWxxLyHhwSd",
+    "uri": "spotify:track:2AACF7qh9u5qWxxLyHhwSd",
+    "name": "Train",
+    "artists": "Younger Brother",
+    "album": "Vaccine",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2732e5247eb1ef12ec0966b0d80",
+    "duration_ms": 449666
+   },
+   {
+    "id": "6IT02SvltW0WtmxF9mxeBf",
+    "uri": "spotify:track:6IT02SvltW0WtmxF9mxeBf",
+    "name": "Silk & Roses",
+    "artists": "Nordlight & David",
+    "album": "A Deep Dive",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f16e76424c8579a75f208e80",
+    "duration_ms": 455847
+   },
+   {
+    "id": "2sW8fmnISifQTRgnRrQTYW",
+    "uri": "spotify:track:2sW8fmnISifQTRgnRrQTYW",
+    "name": "Roads",
+    "artists": "Portishead",
+    "album": "Dummy",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273dc20397b139223620af148f6",
+    "duration_ms": 303973
+   },
+   {
+    "id": "7pM9cLbrgRGX1hHElTX92m",
+    "uri": "spotify:track:7pM9cLbrgRGX1hHElTX92m",
+    "name": "Acid Rain",
+    "artists": "Lorn",
+    "album": "The Maze To Nowhere",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734e7be339cee55cf14e6bc50f",
+    "duration_ms": 172473
+   },
+   {
+    "id": "2j9YZ66Crpyi9Zd16Jut7j",
+    "uri": "spotify:track:2j9YZ66Crpyi9Zd16Jut7j",
+    "name": "Shpongle Spores",
+    "artists": "Shpongle",
+    "album": "Are You Shpongled?",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2",
+    "duration_ms": 436173
+   },
+   {
+    "id": "1QHWgXRQdbekMFbscWJRMh",
+    "uri": "spotify:track:1QHWgXRQdbekMFbscWJRMh",
+    "name": "Kykeon",
+    "artists": "Entheogenic",
+    "album": "Kykeon",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737e1dbad5b301aee621aeee63",
+    "duration_ms": 307160
+   },
+   {
+    "id": "3ja3agaXFeeKQCcwk6W1eR",
+    "uri": "spotify:track:3ja3agaXFeeKQCcwk6W1eR",
+    "name": "Las Parañas",
+    "artists": "Mees Dierdorp",
+    "album": "Aviar Alom",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27345446b344c52fc1e07f0bc89",
+    "duration_ms": 406269
+   },
+   {
+    "id": "7kEEo8jl4RGQjcFYEFmIEw",
+    "uri": "spotify:track:7kEEo8jl4RGQjcFYEFmIEw",
+    "name": "Went Missing",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 299066
+   },
+   {
+    "id": "7wAF8APlRYWKlIzidN4wzp",
+    "uri": "spotify:track:7wAF8APlRYWKlIzidN4wzp",
+    "name": "Floating",
+    "artists": "Ambyion, Shockline",
+    "album": "Floating",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273657775611aa9c74cdc4854c6",
+    "duration_ms": 251612
+   },
+   {
+    "id": "4o6Ufgnf7pT55tI4j78RkT",
+    "uri": "spotify:track:4o6Ufgnf7pT55tI4j78RkT",
+    "name": "Who Am I",
+    "artists": "Peace Orchestra",
+    "album": "Peace Orchestra",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273d0e8225109806fd9be09175a",
+    "duration_ms": 357826
+   },
+   {
+    "id": "6ryJQswzoXDmmFazg91c0c",
+    "uri": "spotify:track:6ryJQswzoXDmmFazg91c0c",
+    "name": "#1",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works Volume II",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738155dc4dae262f31d39d8296",
+    "duration_ms": 447800
+   },
+   {
+    "id": "6nPpCVYvtAPLeu3KySLDrK",
+    "uri": "spotify:track:6nPpCVYvtAPLeu3KySLDrK",
+    "name": "Psychic Gibbon",
+    "artists": "Younger Brother",
+    "album": "The Last Days Of Gravity",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27348a5185195990d92e4dd47eb",
+    "duration_ms": 451000
+   },
+   {
+    "id": "3NJgsL49NedjwvsrcoWlcq",
+    "uri": "spotify:track:3NJgsL49NedjwvsrcoWlcq",
+    "name": "Endeavour",
+    "artists": "Azaleh",
+    "album": "Endeavour",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ee6c6d7f1452fad23a70d406",
+    "duration_ms": 201459
+   },
+   {
+    "id": "4GhRWItcoyUAh5RmgQTHiV",
+    "uri": "spotify:track:4GhRWItcoyUAh5RmgQTHiV",
+    "name": "Icarus (feat. CoMa)",
+    "artists": "Synthetic Epiphany",
+    "album": "Icarus (feat. CoMa)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738b4958256e692260143447f0",
+    "duration_ms": 449253
+   },
+   {
+    "id": "4aMRygNyVjq7r9cgqdkQN5",
+    "uri": "spotify:track:4aMRygNyVjq7r9cgqdkQN5",
+    "name": "Folding",
+    "artists": "Lorn",
+    "album": "A/D, Music For Picture",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273b3aa5176106a556e5274642f",
+    "duration_ms": 87924
+   },
+   {
+    "id": "5ThP1U6kxJEuGV4pK9ims8",
+    "uri": "spotify:track:5ThP1U6kxJEuGV4pK9ims8",
+    "name": "Brain in a Fish Tank - Live",
+    "artists": "Shpongle",
+    "album": "Live in London (2013) (Live)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f8e3bdaa80afb907ef5192e4",
+    "duration_ms": 511500
+   },
+   {
+    "id": "2usrT8QIbIk9y0NEtQwS4j",
+    "uri": "spotify:track:2usrT8QIbIk9y0NEtQwS4j",
+    "name": "Intro",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 127920
+   },
+   {
+    "id": "4K4kedXFAuW6gn8iwgGFTw",
+    "uri": "spotify:track:4K4kedXFAuW6gn8iwgGFTw",
+    "name": "Poa Alpina",
+    "artists": "Biosphere",
+    "album": "Substrata + Man with a Movie Camera",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2733f1900e26ff44e8821bd8350",
+    "duration_ms": 251066
+   },
+   {
+    "id": "2X4Cj5zIdnav7767iPiDou",
+    "uri": "spotify:track:2X4Cj5zIdnav7767iPiDou",
+    "name": "Said and Done",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 578933
+   },
+   {
+    "id": "6MFTr9Id56RwjiUq5CONhC",
+    "uri": "spotify:track:6MFTr9Id56RwjiUq5CONhC",
+    "name": "Alone",
+    "artists": "Fyze",
+    "album": "Fading",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2730d1fcc43dd7b15eb7facfd73",
+    "duration_ms": 245624
+   },
+   {
+    "id": "4kLyPZvYQE2N1K2rFQ3e6a",
+    "uri": "spotify:track:4kLyPZvYQE2N1K2rFQ3e6a",
+    "name": "Waves",
+    "artists": "Max Cooper",
+    "album": "Emergence",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a24eb1aa0c049e3ca5f0b162",
+    "duration_ms": 331000
+   },
+   {
+    "id": "4fQEbOabaTSC80INS7cD3Q",
+    "uri": "spotify:track:4fQEbOabaTSC80INS7cD3Q",
+    "name": "#4",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works Volume II",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738155dc4dae262f31d39d8296",
+    "duration_ms": 279666
+   },
+   {
+    "id": "4VxaUj96W2jw9UOtKHu51p",
+    "uri": "spotify:track:4VxaUj96W2jw9UOtKHu51p",
+    "name": "Goodbye",
+    "artists": "Apparat, Soap&Skin",
+    "album": "The Devil's Walk",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27376f2cb2ac2670e125a4670ca",
+    "duration_ms": 256786
+   },
+   {
+    "id": "0YPuRrM2NwzdtuShUKkts6",
+    "uri": "spotify:track:0YPuRrM2NwzdtuShUKkts6",
+    "name": "G.O.A.T.",
+    "artists": "Polyphia",
+    "album": "New Levels New Devils",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737a799cc62e624fd6432779e3",
+    "duration_ms": 215998
+   },
+   {
+    "id": "4uJXr3G8CR8dkjmUKj7iKS",
+    "uri": "spotify:track:4uJXr3G8CR8dkjmUKj7iKS",
+    "name": "Moments Of Clarity",
+    "artists": "Eelke Kleijn",
+    "album": "Moments Of Clarity",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273c9d6472496b3af9079435dba",
+    "duration_ms": 265397
+   },
+   {
+    "id": "5VpMEN1kJMhBdCvtc2fE4k",
+    "uri": "spotify:track:5VpMEN1kJMhBdCvtc2fE4k",
+    "name": "Dancing People Are Never Wrong - Jan Blomqvist Remix Radio Edit",
+    "artists": "The Bianca Story",
+    "album": "Dancing People Are Never Wrong",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e61179a51c5ebc8f34472137",
+    "duration_ms": 216639
+   },
+   {
+    "id": "6pMtdOSLOtTtd7fmtqeqGg",
+    "uri": "spotify:track:6pMtdOSLOtTtd7fmtqeqGg",
+    "name": "Once Upon the Sea of Blissful Awareness",
+    "artists": "Shpongle",
+    "album": "Tales of the Inexpressible",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27312c9a218e8fb0c9dd2c64145",
+    "duration_ms": 450866
+   },
+   {
+    "id": "6si9uxnluUHhZBOx9oe1J9",
+    "uri": "spotify:track:6si9uxnluUHhZBOx9oe1J9",
+    "name": "Norrland",
+    "artists": "Gidge",
+    "album": "Autumn Bells",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739c72445324a38f73ba0fbb4a",
+    "duration_ms": 484682
+   },
+   {
+    "id": "188s885TL0EgDz07BShopC",
+    "uri": "spotify:track:188s885TL0EgDz07BShopC",
+    "name": "The Queen Of All Everything",
+    "artists": "Ott",
+    "album": "Skylon",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273be9084d4ba29c6a5e69251c6",
+    "duration_ms": 472400
+   },
+   {
+    "id": "1TSqX33n0SFrgsjEbn0rg7",
+    "uri": "spotify:track:1TSqX33n0SFrgsjEbn0rg7",
+    "name": "#2",
+    "artists": "Nils Frahm",
+    "album": "All Melody",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273d1474ac08537f5d9655552f2",
+    "duration_ms": 580016
+   },
+   {
+    "id": "3VbrfHyBiVjJxBSCMnjDhG",
+    "uri": "spotify:track:3VbrfHyBiVjJxBSCMnjDhG",
+    "name": "Komorebi",
+    "artists": "Catching Flies",
+    "album": "Silver Linings",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273078114e4b7451c51dec7049e",
+    "duration_ms": 230341
+   },
+   {
+    "id": "3xVTbxVNTcy3P0eBXlAIUh",
+    "uri": "spotify:track:3xVTbxVNTcy3P0eBXlAIUh",
+    "name": "Lit",
+    "artists": "Kiasmos",
+    "album": "Kiasmos",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273bb0ea18476f664df4f9fd460",
+    "duration_ms": 384763
+   },
+   {
+    "id": "3kMWvClYqkjWK5hjgDIyYy",
+    "uri": "spotify:track:3kMWvClYqkjWK5hjgDIyYy",
+    "name": "Fantasy",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 158240
+   },
+   {
+    "id": "30u5328ERA8OFk3qrla5m2",
+    "uri": "spotify:track:30u5328ERA8OFk3qrla5m2",
+    "name": "Natural Cause",
+    "artists": "Emancipator",
+    "album": "Dusk to Dawn",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273683812adb2b4eb20fb688c9d",
+    "duration_ms": 315768
+   },
+   {
+    "id": "1ym6WoyPytqbXcKYcnktlS",
+    "uri": "spotify:track:1ym6WoyPytqbXcKYcnktlS",
+    "name": "Rainy Nights",
+    "artists": "Azaleh",
+    "album": "Rainy Nights",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734df0b94280b7565961e73cdd",
+    "duration_ms": 226285
+   },
+   {
+    "id": "7dBbrLvzisvSSBPreD6nGS",
+    "uri": "spotify:track:7dBbrLvzisvSSBPreD6nGS",
+    "name": "Light Through The Veins",
+    "artists": "Jon Hopkins",
+    "album": "Insides",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e021ba9b3cb2f941c7934c87",
+    "duration_ms": 558493
+   },
+   {
+    "id": "7KRQoq9GeWeCm0ZAXg5XMb",
+    "uri": "spotify:track:7KRQoq9GeWeCm0ZAXg5XMb",
+    "name": "Ageispolis",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works 85-92",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27338906032688bb13b135ce19a",
+    "duration_ms": 323186
+   },
+   {
+    "id": "35dwFJhWGxOujWfqupuSJc",
+    "uri": "spotify:track:35dwFJhWGxOujWfqupuSJc",
+    "name": "The Aquatic Garden of Extra-Celestial Delights",
+    "artists": "Shpongle",
+    "album": "Museum of Consciousness",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273c8b7a789f217ffe8b043644d",
+    "duration_ms": 710361
+   },
+   {
+    "id": "4auPkl8KDB2a1kk4zj0HHp",
+    "uri": "spotify:track:4auPkl8KDB2a1kk4zj0HHp",
+    "name": "Quasar",
+    "artists": "Gidge",
+    "album": "New Light",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2732d5af1e395f56f69244a9778",
+    "duration_ms": 352215
+   },
+   {
+    "id": "5FE9EjOf2QaIEN74PxSJM7",
+    "uri": "spotify:track:5FE9EjOf2QaIEN74PxSJM7",
+    "name": "Miss You",
+    "artists": "trentemøller",
+    "album": "The Last Resort",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27312467d7cca4ad137bbf16b43",
+    "duration_ms": 247817
+   },
+   {
+    "id": "5626KdflSKfeDK7RJQfSrE",
+    "uri": "spotify:track:5626KdflSKfeDK7RJQfSrE",
+    "name": "Says",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 498000
+   }
+  ]
+ },
+ "queue": [
+  {
+   "id": "513Ndbo32DnhMfZdiUKnQW",
+   "uri": "spotify:track:513Ndbo32DnhMfZdiUKnQW",
+   "name": "On Hold - Jamie xx Remix",
+   "artists": "The xx, Jamie xx",
+   "album": "I See You (Remixes)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b27380ddfb1877a52549d5ee1ff6",
+   "duration_ms": 371533
+  },
+  {
+   "id": "2qKioq4HNraWk0DXH4Rdut",
+   "uri": "spotify:track:2qKioq4HNraWk0DXH4Rdut",
+   "name": "Infinity",
+   "artists": "The xx",
+   "album": "xx",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+   "duration_ms": 313386
+  },
+  {
+   "id": "1E5HgxGmPFETzZp6g929hu",
+   "uri": "spotify:track:1E5HgxGmPFETzZp6g929hu",
+   "name": "Chained",
+   "artists": "The xx",
+   "album": "Coexist",
+   "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+   "duration_ms": 167546
+  },
+  {
+   "id": "0l42kqoxQv5L6LZVqHdc2Q",
+   "uri": "spotify:track:0l42kqoxQv5L6LZVqHdc2Q",
+   "name": "Dangerous",
+   "artists": "The xx",
+   "album": "I See You",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
+   "duration_ms": 250000
+  },
+  {
+   "id": "51fK4tBe0X09zb6KgGSsKX",
+   "uri": "spotify:track:51fK4tBe0X09zb6KgGSsKX",
+   "name": "Seasons Run",
+   "artists": "The xx",
+   "album": "I See You (Deluxe)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a158601b8622fd62f97f019f",
+   "duration_ms": 260292
+  },
+  {
+   "id": "2C5YDhSJqLFCHrymIBzNSg",
+   "uri": "spotify:track:2C5YDhSJqLFCHrymIBzNSg",
+   "name": "Say Something Loving",
+   "artists": "The xx",
+   "album": "I See You",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
+   "duration_ms": 238373
+  },
+  {
+   "id": "5rFpYRlh0KDmlGiuk525QB",
+   "uri": "spotify:track:5rFpYRlh0KDmlGiuk525QB",
+   "name": "Reunion & Sunset - Live",
+   "artists": "The xx",
+   "album": "Coexist (Deluxe)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b2737af446276606879354126948",
+   "duration_ms": 482026
+  },
+  {
+   "id": "2p60pcvouN5mX6xDYE2cFf",
+   "uri": "spotify:track:2p60pcvouN5mX6xDYE2cFf",
+   "name": "Tides",
+   "artists": "The xx",
+   "album": "Coexist",
+   "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+   "duration_ms": 181000
+  },
+  {
+   "id": "7ygrTWuppClAgsCa8QD5go",
+   "uri": "spotify:track:7ygrTWuppClAgsCa8QD5go",
+   "name": "Heart Skipped A Beat",
+   "artists": "The xx",
+   "album": "xx",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+   "duration_ms": 242266
+  },
+  {
+   "id": "4Xs4CSjF2hz4DC6cnm5YRy",
+   "uri": "spotify:track:4Xs4CSjF2hz4DC6cnm5YRy",
+   "name": "Reunion",
+   "artists": "The xx",
+   "album": "Coexist",
+   "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+   "duration_ms": 237173
+  },
+  {
+   "id": "5UBBJnFxsfjFxfrtvErQoH",
+   "uri": "spotify:track:5UBBJnFxsfjFxfrtvErQoH",
+   "name": "Crystalised",
+   "artists": "The xx",
+   "album": "xx",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+   "duration_ms": 201946
+  },
+  {
+   "id": "61WE54H3MD9N5P56Mpr6TN",
+   "uri": "spotify:track:61WE54H3MD9N5P56Mpr6TN",
+   "name": "Replica",
+   "artists": "The xx",
+   "album": "I See You",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
+   "duration_ms": 249000
+  },
+  {
+   "id": "6n8Ypn9YvoHBzCGRUo9uCu",
+   "uri": "spotify:track:6n8Ypn9YvoHBzCGRUo9uCu",
+   "name": "Reconsider - Jamie xx Edit",
+   "artists": "The xx",
+   "album": "Jamie xx Edits",
+   "cover": "https://i.scdn.co/image/ab67616d0000b27336e0f29bd75b796101726eaf",
+   "duration_ms": 331643
+  },
+  {
+   "id": "10QOoEpAFpA45zJqp8culW",
+   "uri": "spotify:track:10QOoEpAFpA45zJqp8culW",
+   "name": "Naive",
+   "artists": "The xx",
+   "album": "I See You (Deluxe)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a158601b8622fd62f97f019f",
+   "duration_ms": 214518
+  },
+  {
+   "id": "0Cr3j6qhDItBeFbAzdXtN2",
+   "uri": "spotify:track:0Cr3j6qhDItBeFbAzdXtN2",
+   "name": "VCR",
+   "artists": "The xx",
+   "album": "xx",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+   "duration_ms": 177093
+  },
+  {
+   "id": "5hnx6uqwVsIj7L8D4ME4Li",
+   "uri": "spotify:track:5hnx6uqwVsIj7L8D4ME4Li",
+   "name": "Lips",
+   "artists": "The xx",
+   "album": "I See You",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
+   "duration_ms": 200626
+  },
+  {
+   "id": "3zsRP8rH1kaIAo9fmiP4El",
+   "uri": "spotify:track:3zsRP8rH1kaIAo9fmiP4El",
+   "name": "Angels",
+   "artists": "The xx",
+   "album": "Coexist",
+   "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+   "duration_ms": 171653
+  },
+  {
+   "id": "0eZmfIreBsmixv3LMZpdDH",
+   "uri": "spotify:track:0eZmfIreBsmixv3LMZpdDH",
+   "name": "Insects - Bonus",
+   "artists": "The xx",
+   "album": "xx (Deluxe)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+   "duration_ms": 148746
+  },
+  {
+   "id": "0zGxmR5JVtMNAETyXsEwVk",
+   "uri": "spotify:track:0zGxmR5JVtMNAETyXsEwVk",
+   "name": "Teardrops - Bonus",
+   "artists": "The xx",
+   "album": "xx (Deluxe)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+   "duration_ms": 231466
+  },
+  {
+   "id": "4nkrSzVWLOJ2fWKoW3jleI",
+   "uri": "spotify:track:4nkrSzVWLOJ2fWKoW3jleI",
+   "name": "Blood Red Moon - Demo - Bonus",
+   "artists": "The xx",
+   "album": "xx (Deluxe)",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+   "duration_ms": 133266
+  }
+ ],
+ "now": {
+  "id": "5g9gehXKpP3X9pbxZqrnYc",
+  "uri": "spotify:track:5g9gehXKpP3X9pbxZqrnYc",
+  "name": "Do You Mind? - Bonus",
+  "artists": "The xx",
+  "album": "xx (Deluxe)",
+  "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+  "duration_ms": 217186
+ },
+ "recent": [
+  {
+   "track": {
+    "id": "15y44uyGiDqQWLlhc1Rj9l",
+    "uri": "spotify:track:15y44uyGiDqQWLlhc1Rj9l",
+    "name": "Together",
+    "artists": "The xx",
+    "album": "Fiction EP",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2735998bc5e570f7cec5fc2cb95",
+    "duration_ms": 325968
+   },
+   "played_at": "2026-10-01T15:40:10.450Z"
+  },
+  {
+   "track": {
+    "id": "2usrT8QIbIk9y0NEtQwS4j",
+    "uri": "spotify:track:2usrT8QIbIk9y0NEtQwS4j",
+    "name": "Intro",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 127920
+   },
+   "played_at": "2026-10-01T15:34:43.959Z"
+  },
+  {
+   "track": {
+    "id": "2usrT8QIbIk9y0NEtQwS4j",
+    "uri": "spotify:track:2usrT8QIbIk9y0NEtQwS4j",
+    "name": "Intro",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 127920
+   },
+   "played_at": "2026-10-01T15:26:47.137Z"
+  },
+  {
+   "track": {
+    "id": "1TZ6mjoUGwBsJfrniU7uVU",
+    "uri": "spotify:track:1TZ6mjoUGwBsJfrniU7uVU",
+    "name": "My Head Feels Like a Frisbee - Remastered",
+    "artists": "Shpongle",
+    "album": "Tales of the Inexpressible (2018 Remaster)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2735ccbf2c32c94e95c90566883",
+    "duration_ms": 533586
+   },
+   "played_at": "2026-10-01T15:24:38.621Z"
+  },
+  {
+   "track": {
+    "id": "1J8qQPeInR5uOgKSKAbusk",
+    "uri": "spotify:track:1J8qQPeInR5uOgKSKAbusk",
+    "name": "Whyme",
+    "artists": "Nuage",
+    "album": "Whyme",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e1d2c0878b13c390a858fdee",
+    "duration_ms": 220444
+   },
+   "played_at": "2026-10-01T15:10:29.437Z"
+  },
+  {
+   "track": {
+    "id": "57rqH0ceGjerSdSBrDqhCX",
+    "uri": "spotify:track:57rqH0ceGjerSdSBrDqhCX",
+    "name": "Youth’s Fountain",
+    "artists": "Bonobo, Nilüfer Yanya",
+    "album": "Distance in Static",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273dd6e0f2e911f3d04f576aba9",
+    "duration_ms": 238051
+   },
+   "played_at": "2026-10-01T15:06:48.481Z"
+  },
+  {
+   "track": {
+    "id": "3a0yln15XkgCtd7MWOvJlX",
+    "uri": "spotify:track:3a0yln15XkgCtd7MWOvJlX",
+    "name": "When Devils Became Gods",
+    "artists": "Mark Barrott",
+    "album": "The Exit Diaries",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a7b6898b69cf08e10aff3216",
+    "duration_ms": 344000
+   },
+   "played_at": "2026-10-01T15:02:49.915Z"
+  },
+  {
+   "track": {
+    "id": "6kYfkZMRWI6t0dvfHilSv3",
+    "uri": "spotify:track:6kYfkZMRWI6t0dvfHilSv3",
+    "name": "Take Ur Time",
+    "artists": "Baril",
+    "album": "One More Rush",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ecec6ec082ed977d6d0315d2",
+    "duration_ms": 240000
+   },
+   "played_at": "2026-10-01T14:57:05.475Z"
+  },
+  {
+   "track": {
+    "id": "57AirOkRR9ZhvhqLJzYR8q",
+    "uri": "spotify:track:57AirOkRR9ZhvhqLJzYR8q",
+    "name": "Shark Island - Catching Flies Remix",
+    "artists": "Thylacine, Catching Flies",
+    "album": "Shark Island (Catching Flies Remix)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734a8a2ba31631cf0977c513d3",
+    "duration_ms": 199500
+   },
+   "played_at": "2026-10-01T14:53:04.966Z"
+  },
+  {
+   "track": {
+    "id": "5MQsyoSmKvGypaAqhYWiMC",
+    "uri": "spotify:track:5MQsyoSmKvGypaAqhYWiMC",
+    "name": "Haïve",
+    "artists": "il:lo",
+    "album": "Haïve",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273b5b5405f7efa4e75ff254be3",
+    "duration_ms": 295042
+   },
+   "played_at": "2026-10-01T14:49:44.955Z"
+  },
+  {
+   "track": {
+    "id": "6G8PvwqMFIZS4y5tTNbAPv",
+    "uri": "spotify:track:6G8PvwqMFIZS4y5tTNbAPv",
+    "name": "Lemonder",
+    "artists": "BICEP",
+    "album": "Air / Lemonder / Viper",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273393c9807f16285559134dc8e",
+    "duration_ms": 268134
+   },
+   "played_at": "2026-10-01T14:44:49.490Z"
+  },
+  {
+   "track": {
+    "id": "3SyiwKSFhhIAz1Bb89ihdF",
+    "uri": "spotify:track:3SyiwKSFhhIAz1Bb89ihdF",
+    "name": "ID700",
+    "artists": "Bonobo",
+    "album": "Distance in Static",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273dd6e0f2e911f3d04f576aba9",
+    "duration_ms": 236820
+   },
+   "played_at": "2026-10-01T14:40:20.843Z"
+  },
+  {
+   "track": {
+    "id": "3xc7bCqu3GCGsCEPvsMKtk",
+    "uri": "spotify:track:3xc7bCqu3GCGsCEPvsMKtk",
+    "name": "Over a God",
+    "artists": "Lake Turner",
+    "album": "Over a God / Centre",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27380880074a2fbe44dc123ca88",
+    "duration_ms": 190991
+   },
+   "played_at": "2026-10-01T12:52:01.807Z"
+  },
+  {
+   "track": {
+    "id": "7BFas680Min4xYCsY6ahin",
+    "uri": "spotify:track:7BFas680Min4xYCsY6ahin",
+    "name": "Another Way",
+    "artists": "BlauDisS",
+    "album": "Another Way",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273689160af47b3297ccbaecd2c",
+    "duration_ms": 204000
+   },
+   "played_at": "2026-10-01T12:49:24.239Z"
+  },
+  {
+   "track": {
+    "id": "7lI3zJrVFPjs9nrUKushQ3",
+    "uri": "spotify:track:7lI3zJrVFPjs9nrUKushQ3",
+    "name": "Tornasol",
+    "artists": "Tomas Novoa",
+    "album": "Tornasol",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273496eb21d70d44a895570d361",
+    "duration_ms": 283099
+   },
+   "played_at": "2026-10-01T12:46:27.720Z"
+  },
+  {
+   "track": {
+    "id": "2kNHVQKQ1x4IqUXLiwCZ2g",
+    "uri": "spotify:track:2kNHVQKQ1x4IqUXLiwCZ2g",
+    "name": "Streetlight",
+    "artists": "Tokari",
+    "album": "Streetlight",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2736a17ca72a33ca647fa85610a",
+    "duration_ms": 200112
+   },
+   "played_at": "2026-10-01T12:42:13.351Z"
+  },
+  {
+   "track": {
+    "id": "1QjW4QZZRteiy1vETeTWsV",
+    "uri": "spotify:track:1QjW4QZZRteiy1vETeTWsV",
+    "name": "Chiyu",
+    "artists": "Lycoriscoris",
+    "album": "Chiyu",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273878c5c9ac42cbb0c19de8205",
+    "duration_ms": 295766
+   },
+   "played_at": "2026-10-01T12:39:22.616Z"
+  },
+  {
+   "track": {
+    "id": "1FUyF33DUKAiH4qqLxHyVX",
+    "uri": "spotify:track:1FUyF33DUKAiH4qqLxHyVX",
+    "name": "All the Memories",
+    "artists": "John Hayes, il:lo",
+    "album": "Closer",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27368fe23ec8935748bdee139a1",
+    "duration_ms": 232665
+   },
+   "played_at": "2026-10-01T12:34:48.226Z"
+  },
+  {
+   "track": {
+    "id": "7e8Wki1CdVlIhKxjkAhUbs",
+    "uri": "spotify:track:7e8Wki1CdVlIhKxjkAhUbs",
+    "name": "Sirenas fantasmales",
+    "artists": "Boreas1550",
+    "album": "Un poco de fantasmas",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273b4484401d92bdd6ab82b6819",
+    "duration_ms": 185861
+   },
+   "played_at": "2026-10-01T12:31:04.345Z"
+  },
+  {
+   "track": {
+    "id": "6xVwNMT37VI5fDDTTtJZXm",
+    "uri": "spotify:track:6xVwNMT37VI5fDDTTtJZXm",
+    "name": "Of Love",
+    "artists": "Lemon And Soul, Or Mahapatra, Okaya",
+    "album": "Drowning in the Sea of Love",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2733265008db285a52734f7f8d4",
+    "duration_ms": 324500
+   },
+   "played_at": "2026-10-01T12:27:58.509Z"
+  },
+  {
+   "track": {
+    "id": "5owp8jetXfOVlooRFSydzP",
+    "uri": "spotify:track:5owp8jetXfOVlooRFSydzP",
+    "name": "Emerald Loop",
+    "artists": "Silk Static",
+    "album": "Thoughts Unclouded",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737dd2dedf5e9cf6743b357000",
+    "duration_ms": 198750
+   },
+   "played_at": "2026-10-01T12:23:31.941Z"
+  },
+  {
+   "track": {
+    "id": "1DJ2dQRsuZDkP9qnETlYqr",
+    "uri": "spotify:track:1DJ2dQRsuZDkP9qnETlYqr",
+    "name": "XXI",
+    "artists": "Avoure",
+    "album": "XXI",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f7cfa83f783cb98c355abec9",
+    "duration_ms": 233658
+   },
+   "played_at": "2026-10-01T12:20:54.493Z"
+  },
+  {
+   "track": {
+    "id": "6Ab25h5ukxIQMPBUKpEadv",
+    "uri": "spotify:track:6Ab25h5ukxIQMPBUKpEadv",
+    "name": "Night Trip - Original Mix",
+    "artists": "Rautu",
+    "album": "Horizon",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739b9d8aff37035a197bb06ca7",
+    "duration_ms": 188575
+   },
+   "played_at": "2026-10-01T12:17:17.476Z"
+  },
+  {
+   "track": {
+    "id": "0X3xZ99xijHP00GzLL419z",
+    "uri": "spotify:track:0X3xZ99xijHP00GzLL419z",
+    "name": "Night Train",
+    "artists": "Al Lethbridge",
+    "album": "The Road Less Travelled",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27348dc4e170e2eedf2058b9ab1",
+    "duration_ms": 182181
+   },
+   "played_at": "2026-10-01T12:14:13.970Z"
+  },
+  {
+   "track": {
+    "id": "2efvJXth0Dx2c0XdcsT3y4",
+    "uri": "spotify:track:2efvJXth0Dx2c0XdcsT3y4",
+    "name": "Embers into Flames",
+    "artists": "Tineidae",
+    "album": "Dead Chapters",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273d4916ab0a57d16348ec16d1c",
+    "duration_ms": 214379
+   },
+   "played_at": "2026-10-01T12:11:11.574Z"
+  },
+  {
+   "track": {
+    "id": "7wmkVwtNrqqHRG4CFpCPvb",
+    "uri": "spotify:track:7wmkVwtNrqqHRG4CFpCPvb",
+    "name": "Grounded",
+    "artists": "Jameson Nathan Jones",
+    "album": "Signals",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a52719c4c156849d1dabb0ec",
+    "duration_ms": 243843
+   },
+   "played_at": "2026-10-01T12:07:53.456Z"
+  },
+  {
+   "track": {
+    "id": "2reXqzBn2vGtj4furwfF9u",
+    "uri": "spotify:track:2reXqzBn2vGtj4furwfF9u",
+    "name": "Jenn",
+    "artists": "Niklas Paschburg",
+    "album": "The Six Billion Dollar Man (Original Motion Picture Soundtrack)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2731fc8244745d5536b92d8e0b6",
+    "duration_ms": 121982
+   },
+   "played_at": "2026-10-01T12:03:51.884Z"
+  },
+  {
+   "track": {
+    "id": "2awXwP6rA74Gp7rDpRovZm",
+    "uri": "spotify:track:2awXwP6rA74Gp7rDpRovZm",
+    "name": "Shadow Cutting - Refracted",
+    "artists": "Ben Chatwin",
+    "album": "Refractions",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27371726f6d273164a62f955e07",
+    "duration_ms": 219095
+   },
+   "played_at": "2026-10-01T12:01:49.377Z"
+  },
+  {
+   "track": {
+    "id": "54KVbLZi755vI53RPEHI42",
+    "uri": "spotify:track:54KVbLZi755vI53RPEHI42",
+    "name": "Drown Me Slow",
+    "artists": "Christian Cohle",
+    "album": "Holy Trouble",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273915a5f6f13382f416369f239",
+    "duration_ms": 271106
+   },
+   "played_at": "2026-10-01T11:58:09.052Z"
+  },
+  {
+   "track": {
+    "id": "2x4URKOfu07mSIxfiEovN9",
+    "uri": "spotify:track:2x4URKOfu07mSIxfiEovN9",
+    "name": "Oppressor",
+    "artists": "Marina Ortega Mira",
+    "album": "Oppressor",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273bf76e25b9bd3c5c38b4eff9a",
+    "duration_ms": 179400
+   },
+   "played_at": "2026-10-01T11:53:38.193Z"
+  }
+ ],
+ "search": {
+  "query": "the xx",
+  "tracks": [
+   {
+    "id": "2usrT8QIbIk9y0NEtQwS4j",
+    "uri": "spotify:track:2usrT8QIbIk9y0NEtQwS4j",
+    "name": "Intro",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 127920
+   },
+   {
+    "id": "5UBBJnFxsfjFxfrtvErQoH",
+    "uri": "spotify:track:5UBBJnFxsfjFxfrtvErQoH",
+    "name": "Crystalised",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 201946
+   },
+   {
+    "id": "3zsRP8rH1kaIAo9fmiP4El",
+    "uri": "spotify:track:3zsRP8rH1kaIAo9fmiP4El",
+    "name": "Angels",
+    "artists": "The xx",
+    "album": "Coexist",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+    "duration_ms": 171653
+   },
+   {
+    "id": "52fFB9VZ9tiJFLMxpu08Ee",
+    "uri": "spotify:track:52fFB9VZ9tiJFLMxpu08Ee",
+    "name": "The XX Intro - Remix",
+    "artists": "Makrill",
+    "album": "Tropical Summer",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273277b3b9898267ae1782a40fa",
+    "duration_ms": 127212
+   },
+   {
+    "id": "2dIi21bJASzEKP20LIutOE",
+    "uri": "spotify:track:2dIi21bJASzEKP20LIutOE",
+    "name": "Intro",
+    "artists": "The xx",
+    "album": "xx (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+    "duration_ms": 127920
+   },
+   {
+    "id": "5Nu5Uyoauauy9LFePYL1Z3",
+    "uri": "spotify:track:5Nu5Uyoauauy9LFePYL1Z3",
+    "name": "Late Night",
+    "artists": "ODESZA",
+    "album": "A Moment Apart",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27345951a69fe39a6e163122eab",
+    "duration_ms": 228590
+   },
+   {
+    "id": "59wlTaYOL5tDUgXnbBQ3my",
+    "uri": "spotify:track:59wlTaYOL5tDUgXnbBQ3my",
+    "name": "A Moment Apart",
+    "artists": "ODESZA",
+    "album": "A Moment Apart",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27345951a69fe39a6e163122eab",
+    "duration_ms": 234244
+   },
+   {
+    "id": "6aw5G0HhAmyqM2OlqjTjOb",
+    "uri": "spotify:track:6aw5G0HhAmyqM2OlqjTjOb",
+    "name": "Waiting",
+    "artists": "The Adams",
+    "album": "The Adams",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273535749cdd3ac5452d99289be",
+    "duration_ms": 239386
+   },
+   {
+    "id": "5j7HESfa8OXs3hTqQ1ZvnR",
+    "uri": "spotify:track:5j7HESfa8OXs3hTqQ1ZvnR",
+    "name": "Sunshine",
+    "artists": "The Panturas",
+    "album": "Mabuk Laut",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2733d3e53004945125cfeeeadc5",
+    "duration_ms": 254400
+   },
+   {
+    "id": "67YVZ8XKist6XE3Usm0cZt",
+    "uri": "spotify:track:67YVZ8XKist6XE3Usm0cZt",
+    "name": "Telenovia",
+    "artists": "Reality Club",
+    "album": "What Do You Really Know?",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2736019b1ddb28634421cc291a0",
+    "duration_ms": 321082
+   }
+  ],
+  "albums": [
+   {
+    "id": "2av2ZSHlvD7rvLSsMvtYCG",
+    "uri": "spotify:album:2av2ZSHlvD7rvLSsMvtYCG",
+    "name": "xx",
+    "artists": "The xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "year": "2009",
+    "total_tracks": 11
+   },
+   {
+    "id": "10p4597ekqFOqMbttkxggC",
+    "uri": "spotify:album:10p4597ekqFOqMbttkxggC",
+    "name": "xx (Deluxe)",
+    "artists": "The xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+    "year": "2025",
+    "total_tracks": 16
+   },
+   {
+    "id": "6Zw6NKh3oIUhDRMOyBmsUU",
+    "uri": "spotify:album:6Zw6NKh3oIUhDRMOyBmsUU",
+    "name": "I See You",
+    "artists": "The xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
+    "year": "2017",
+    "total_tracks": 10
+   },
+   {
+    "id": "4SXTQ305LjMh2DBHA3CXIW",
+    "uri": "spotify:album:4SXTQ305LjMh2DBHA3CXIW",
+    "name": "Coexist",
+    "artists": "The xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+    "year": "2012",
+    "total_tracks": 11
+   },
+   {
+    "id": "65Cv3vNkIELlviHOdDC0mn",
+    "uri": "spotify:album:65Cv3vNkIELlviHOdDC0mn",
+    "name": "The XX Intro - Remix (Sax Edition)",
+    "artists": "Ruben Schiavo",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739c33e091ae323d5351f13d06",
+    "year": "2021",
+    "total_tracks": 1
+   },
+   {
+    "id": "3QEcVzuZAa1uSqu5Hl7iSQ",
+    "uri": "spotify:album:3QEcVzuZAa1uSqu5Hl7iSQ",
+    "name": "the XX",
+    "artists": "Yakki",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737ee32ebc728661f91a587bc1",
+    "year": "2024",
+    "total_tracks": 1
+   },
+   {
+    "id": "6EjtRvsWa1wRYJgeJOROI3",
+    "uri": "spotify:album:6EjtRvsWa1wRYJgeJOROI3",
+    "name": "Agterplaas",
+    "artists": "The Adams",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273848d417028ad1eb2f8ff9c26",
+    "year": "2019",
+    "total_tracks": 11
+   },
+   {
+    "id": "4Io5vWtmV1rFj4yirKb4y4",
+    "uri": "spotify:album:4Io5vWtmV1rFj4yirKb4y4",
+    "name": "Rage Against The Machine - XX (20th Anniversary Special Edition)",
+    "artists": "Rage Against The Machine",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27354ab617bc2d4974ab6ffbece",
+    "year": "1992",
+    "total_tracks": 25
+   },
+   {
+    "id": "3Wm3ClGYmjW6pRTu2QLmqr",
+    "uri": "spotify:album:3Wm3ClGYmjW6pRTu2QLmqr",
+    "name": "+imeless",
+    "artists": "rumahsakit",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273802834f323484393d5161365",
+    "year": "2015",
+    "total_tracks": 10
+   },
+   {
+    "id": "0jDClrox8tW0f2g82gVc3D",
+    "uri": "spotify:album:0jDClrox8tW0f2g82gVc3D",
+    "name": "Obrolan Jam 3 Pagi",
+    "artists": "Lomba Sihir",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2730974d9c2ed2931adb196b25f",
+    "year": "2025",
+    "total_tracks": 16
+   }
+  ]
+ },
+ "albumTracks": {
+  "2av2ZSHlvD7rvLSsMvtYCG": [
+   {
+    "id": "2usrT8QIbIk9y0NEtQwS4j",
+    "uri": "spotify:track:2usrT8QIbIk9y0NEtQwS4j",
+    "name": "Intro",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 127920
+   },
+   {
+    "id": "0Cr3j6qhDItBeFbAzdXtN2",
+    "uri": "spotify:track:0Cr3j6qhDItBeFbAzdXtN2",
+    "name": "VCR",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 177093
+   },
+   {
+    "id": "5UBBJnFxsfjFxfrtvErQoH",
+    "uri": "spotify:track:5UBBJnFxsfjFxfrtvErQoH",
+    "name": "Crystalised",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 201946
+   },
+   {
+    "id": "0Rqwa6i410IwhTiugt6vXi",
+    "uri": "spotify:track:0Rqwa6i410IwhTiugt6vXi",
+    "name": "Islands",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 160720
+   },
+   {
+    "id": "7ygrTWuppClAgsCa8QD5go",
+    "uri": "spotify:track:7ygrTWuppClAgsCa8QD5go",
+    "name": "Heart Skipped A Beat",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 242266
+   },
+   {
+    "id": "3kMWvClYqkjWK5hjgDIyYy",
+    "uri": "spotify:track:3kMWvClYqkjWK5hjgDIyYy",
+    "name": "Fantasy",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 158240
+   },
+   {
+    "id": "74quLhuRBoSU6zMagxUQZC",
+    "uri": "spotify:track:74quLhuRBoSU6zMagxUQZC",
+    "name": "Shelter",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 270240
+   },
+   {
+    "id": "0G1Lnbm8oXN5Wzn9e729gK",
+    "uri": "spotify:track:0G1Lnbm8oXN5Wzn9e729gK",
+    "name": "Basic Space",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 188120
+   },
+   {
+    "id": "2qKioq4HNraWk0DXH4Rdut",
+    "uri": "spotify:track:2qKioq4HNraWk0DXH4Rdut",
+    "name": "Infinity",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 313386
+   },
+   {
+    "id": "0ibXYHIS1vPqpkm1LoIWZR",
+    "uri": "spotify:track:0ibXYHIS1vPqpkm1LoIWZR",
+    "name": "Night Time",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 216853
+   },
+   {
+    "id": "4dSI5Fa2sDC5HTNvH88o07",
+    "uri": "spotify:track:4dSI5Fa2sDC5HTNvH88o07",
+    "name": "Stars",
+    "artists": "The xx",
+    "album": "xx",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+    "duration_ms": 262640
+   }
+  ]
+ }
+}

@@ -1,0 +1,131 @@
+<!doctype html>
+<!-- keep markup in sync with src/index.html -->
+<!-- Dev harness: serve the project root (npm run dev:web) and open /dev/index.html?s=<scenario> -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Player (dev)</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../src/styles.css" />
+    <script src="mock.js"></script>
+    <script type="module" src="../src/app.js"></script>
+  </head>
+  <body>
+    <div id="bgA" class="bg is-on" aria-hidden="true"></div>
+    <div id="bgB" class="bg" aria-hidden="true"></div>
+    <div class="grain" aria-hidden="true"></div>
+
+    <section id="login" class="login" hidden>
+      <div class="login-run" aria-hidden="true">
+        <div>
+          <i style="--s: .232; --o: .24"></i><i style="--s: .274; --o: .34"></i><i style="--s: .326; --o: .46"></i><i style="--s: .395; --o: .62"></i>
+        </div>
+        <i class="is-now"></i>
+        <div>
+          <i style="--s: .447; --o: .9"></i><i style="--s: .447; --o: .9"></i><i style="--s: .447; --o: .9"></i><i style="--s: .447; --o: .9"></i><i style="--s: .447; --o: .9"></i>
+        </div>
+      </div>
+      <div class="login-copy">
+        <h1 id="loginTitle" class="login-title">Your music, in order</h1>
+        <p id="loginSub" class="login-sub">Connect Spotify to see what played, what's playing, and what's next.</p>
+        <button id="loginBtn" class="btn btn-solid" type="button">Connect Spotify</button>
+        <p id="loginError" class="login-error" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <main id="stage" class="stage" hidden>
+      <header class="topbar">
+        <div class="topbar-tools">
+          <button id="libraryBtn" class="btn btn-ghost" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h3v15H4zM9.5 4.5h3v15h-3zM15.2 5.3l2.9-.8 3.9 14.5-2.9.8z" /></svg>
+            Library
+          </button>
+          <button id="searchBtn" class="btn btn-ghost" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
+            Search
+          </button>
+        </div>
+        <div id="device" class="device" hidden><span class="device-dot"></span><span class="device-name"></span></div>
+      </header>
+
+      <div id="run" class="run" aria-label="Played, now playing, and up next"></div>
+
+      <section class="now" aria-live="polite">
+        <h1 id="nowTitle" class="now-title"></h1>
+        <p id="nowArtist" class="now-artist"></p>
+        <p id="nowAlbum" class="now-album"></p>
+        <p id="emptyState" class="now-empty" hidden></p>
+      </section>
+
+      <footer class="transport">
+        <div class="scrub-row">
+          <span id="curTime" class="time">0:00</span>
+          <div id="scrub" class="scrub" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="-1">
+            <div id="scrubFill" class="scrub-fill"></div>
+          </div>
+          <span id="durTime" class="time">0:00</span>
+        </div>
+        <div class="controls">
+          <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.6v12.8c0 .8-.9 1.3-1.6.8L8.6 12.8a1 1 0 0 1 0-1.6l8.8-6.4c.7-.5 1.6 0 1.6.8z" /></svg>
+          </button>
+          <button id="playBtn" class="ctl ctl-play" type="button" aria-label="Play">
+            <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>
+            <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>
+          </button>
+          <button id="nextBtn" class="ctl" type="button" aria-label="Next">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5h-2.2v14H18zM5 5.6v12.8c0 .8.9 1.3 1.6.8l8.8-6.4a1 1 0 0 0 0-1.6L6.6 4.8C5.9 4.3 5 4.8 5 5.6z" /></svg>
+          </button>
+        </div>
+      </footer>
+    </main>
+
+    <div id="library" class="overlay overlay-library" hidden>
+      <div class="backdrop" data-close></div>
+      <aside id="sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Library" tabindex="-1">
+        <header class="sheet-bar">
+          <h2 id="libTitle" class="sheet-title">Library</h2>
+          <button id="libBack" class="btn btn-ghost btn-back" type="button" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            Library
+          </button>
+          <button class="icon-btn" type="button" data-close aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+          </button>
+        </header>
+        <div id="sheetBody" class="sheet-body">
+          <div id="libLevel1">
+            <p id="listStatus" class="status" role="status" hidden></p>
+            <div id="libList" class="rows"></div>
+          </div>
+          <div id="libDetail" hidden>
+            <div class="detail-head">
+              <div id="detailCover" class="art detail-cover"></div>
+              <div class="detail-meta">
+                <h2 id="detailName" class="sheet-title detail-name"></h2>
+                <p id="detailSub" class="detail-sub"></p>
+                <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
+              </div>
+            </div>
+            <p id="detailStatus" class="status" role="status" hidden></p>
+            <div id="detailRows" class="rows"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div id="search" class="overlay overlay-search" hidden>
+      <div class="backdrop" data-close></div>
+      <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
+        <label class="palette-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
+          <input id="searchInput" type="text" placeholder="Songs or albums" aria-label="Search songs or albums" autocomplete="off" spellcheck="false" />
+        </label>
+        <div id="searchResults" class="palette-results" hidden></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

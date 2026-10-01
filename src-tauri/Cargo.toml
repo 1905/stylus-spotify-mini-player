@@ -1,0 +1,27 @@
+[package]
+name = "rust-spotify"
+version = "0.1.0"
+description = "Spotify profile and playlists"
+edition = "2021"
+
+[lib]
+name = "rust_spotify_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+dirs = "5"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
