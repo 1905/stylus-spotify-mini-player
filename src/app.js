@@ -622,7 +622,9 @@ function showSeek(ms) {
 async function seekTo(ms) {
   showSeek(ms);
   const positionMs = state.progressMs;
-  await withDevice(() => invoke("seek", { positionMs }));
+  const uri = state.now && state.now.uri;
+  // queued behind slower commands: by its turn the track may have changed, and the position is for this one
+  await withDevice(() => (state.now && state.now.uri === uri ? invoke("seek", { positionMs }) : null));
   kick();
 }
 
@@ -820,6 +822,7 @@ function onSearchInput() {
 }
 
 function searchMessage(text) {
+  overlayRev++;
   searchHits = { tracks: [], albums: [] };
   const box = $("searchResults");
   box.innerHTML = `<p class="status">${esc(text)}</p>`;
@@ -860,6 +863,7 @@ async function runSearch(q, gen) {
     html += `</div></section>`;
   }
   const box = $("searchResults");
+  overlayRev++; // replaced results are a new view
   box.innerHTML = html;
   box.hidden = false;
   box.scrollTop = 0;
