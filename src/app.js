@@ -19,7 +19,8 @@ const $ = (id) => document.getElementById(id);
 const POLL_MS = 1000;
 const ERROR_POLL_MS = 4000;
 const QUEUE_EVERY = 10; // ticks
-const HOLD_MS = 1500; // ignore polled is_playing right after a play/pause click
+const HOLD_MS = 1500; // keep a local seek position this long against polls that may lag
+const PLAY_LAG_MS = 500; // Spotify can report the old play state this long after a command lands
 // played_at is when a play ended, the same moment we see a track leave: closer than this = same play
 const SESSION_MATCH_MS = 2 * 60 * 1000;
 const PLAYED_MS = 30 * 1000; // Spotify counts a play after 30s; a track skipped sooner isn't history
@@ -34,7 +35,6 @@ const state = {
   isPlaying: false,
   progressMs: 0,
   progressAt: 0,
-  holdUntil: 0,
   seekHoldUntil: 0,
   listenedMs: 0, // real playing time of "now" (seeks and pauses don't count)
   listenAt: 0,
@@ -93,6 +93,8 @@ function showLogin(kind) {
   clearTimeout(seekTimer); // nor a debounced seek
   changesPending = 0;
   settleAfter = 0;
+  playPending = 0;
+  playSettleAfter = 0;
   state.gen.search++;
   state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
@@ -223,7 +225,8 @@ async function refresh(epoch) {
 
   if (active) {
     state.device = { id: s.device_id, name: s.device_name };
-    if (performance.now() > state.holdUntil) state.isPlaying = Boolean(s.is_playing);
+    // a play/pause still queued (or just landed) outranks what this poll saw
+    if (playPending === 0 && startedAt >= playSettleAfter) state.isPlaying = Boolean(s.is_playing);
   } else {
     state.isPlaying = false;
   }
@@ -604,6 +607,8 @@ async function playUris(uris) {
 }
 
 let playSeq = 0; // counts play/pause clicks: only the latest one may undo the UI
+let playPending = 0; // play/pause commands queued or running
+let playSettleAfter = 0; // a poll must start after this to overwrite the play state
 
 /** Flip play/pause at once in the UI; the command joins the player chain in click order. */
 async function togglePlay() {
@@ -612,13 +617,16 @@ async function togglePlay() {
   state.progressMs = progress();
   state.progressAt = performance.now();
   const want = (state.isPlaying = !state.isPlaying);
-  state.holdUntil = performance.now() + HOLD_MS;
   renderChrome();
   const seq = ++playSeq;
+  const sess = authSession;
+  playPending++;
   const ok = await withDevice(async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")));
+  if (sess !== authSession) return; // logged out meanwhile: the counters were reset
+  if (--playPending === 0) playSettleAfter = performance.now() + PLAY_LAG_MS;
   if (!ok && seq === playSeq) {
     state.isPlaying = !want; // the device still has the state before this click
-    state.holdUntil = 0;
+    playSettleAfter = 0;
     renderChrome();
   }
   kick();
@@ -716,10 +724,14 @@ function onImgError(e) {
 }
 
 /** A playable track row. num: show the position; art: show the cover (album rows skip it, it's the same every row). */
+const isLocal = (uri) => String(uri).startsWith("spotify:local:");
+
 function trackRow(t, i, { num, art }) {
   const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}`;
+  const local = isLocal(t.uri);
+  const tip = local ? `${t.name} (a local file: play it in Spotify)` : t.name;
   return (
-    `<button class="row row-track${kind}" type="button" data-i="${i}" title="${esc(t.name)}">` +
+    `<button class="row row-track${kind}" type="button" data-i="${i}" title="${esc(tip)}"${local ? " disabled" : ""}>` +
     (num ? `<span class="row-num">${i + 1}</span>` : "") +
     (art ? `<span class="art row-art">${artHtml(t.cover, t.name)}</span>` : "") +
     `<span class="row-text"><span class="row-title">${esc(t.name)}</span><span class="row-sub">${esc(t.artists)}</span></span>` +
@@ -827,11 +839,12 @@ async function openDetail(src) {
   if (!album) setText("detailSub", plural(detailTracks.length, "track", "tracks"));
   setText("detailStatus", detailTracks.length ? "" : album ? "This album is empty." : "This playlist is empty.");
   $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: !album })).join("");
-  $("detailPlay").disabled = !detailTracks.length;
+  $("detailPlay").disabled = !detailTracks.some((t) => !isLocal(t.uri));
 }
 
 async function playDetailFrom(i) {
-  const uris = detailTracks.slice(i).map((t) => t.uri);
+  // Spotify lists local files in playlists but rejects them in play requests
+  const uris = detailTracks.slice(i).map((t) => t.uri).filter((u) => !isLocal(u));
   const rev = overlayRev;
   if ((await playUris(uris)) && rev === overlayRev) closeOverlay();
 }

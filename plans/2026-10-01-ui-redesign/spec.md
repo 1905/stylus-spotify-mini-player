@@ -292,6 +292,8 @@ What shipped differs from the text above in these places:
 - **After a polling gap** (hidden window), the first poll never records the old track as played. A failed history fetch is retried every 10th tick until it succeeds.
 - **Player commands** (play, pause, next, previous, seek, play from Library/Search) run in one ordered chain. Spotify doesn't promise order across player endpoints. Every click joins the chain in click order, so the last action wins. A command queued before a logout is dropped. Play/pause flips the UI at once and reverts only if the latest click fails. Login saves new tokens under the token lock.
 - **Seek** is blocked from the moment a track change is asked for until a poll started after it lands. During that time the screen still shows the old track's position. Each seek carries the track generation of its click or keypress and is dropped if the track changed. Keyboard seek moves the bar at once and sends 1 seek after 250ms of quiet. A held arrow key doesn't queue dozens of seeks in front of Pause. A slow Play from Library or Search closes the overlay only if the user is still on that view.
+- **Play state**: a poll doesn't overwrite a play/pause that is still queued, or one that landed less than 500ms before the poll started.
+- **Local files** in playlists show as dimmed, disabled rows. They are left out of play requests, because Spotify rejects them.
 - **Search albums** return `{id, name, artists, cover}` only.
 - **Dev harness** has an extra `ad` scenario. `window.__mock.handlers` lets QA inject failures. `src/markup.test.js` fails if `dev/index.html` drifts from `src/index.html`.
 - **Not checked** in the real Tauri WKWebView window. Web harness only, per the user.

@@ -733,6 +733,16 @@ svg {
   background: rgba(246, 244, 248, 0.07);
 }
 
+/* local files: listed, but Spotify can't start them from here */
+.row:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.row:disabled:hover {
+  background: none;
+}
+
 .row:focus-visible,
 .album:focus-visible {
   outline-offset: -2px;
