@@ -93,10 +93,9 @@ pub fn load_tokens() -> Option<Tokens> {
     serde_json::from_str(&data).ok()
 }
 
-fn save_tokens(t: &Tokens) {
-    if let Ok(json) = serde_json::to_string_pretty(t) {
-        let _ = std::fs::write(token_path(), json);
-    }
+fn save_tokens(t: &Tokens) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(t).map_err(|e| e.to_string())?;
+    std::fs::write(token_path(), json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
 }
 
 /// Moves tokens.json aside to tokens.json.invalid (overwriting) so the next
@@ -159,7 +158,7 @@ pub async fn login() -> Result<(), String> {
     let tokens = exchange_code(&code, &verifier).await?;
     // under the lock: a refresh still in flight must not overwrite or invalidate these
     let mut cached = TOKENS.lock().await;
-    save_tokens(&tokens);
+    save_tokens(&tokens)?;
     *cached = Some(tokens);
     Ok(())
 }
@@ -336,7 +335,8 @@ pub async fn valid_access_token() -> Result<String, String> {
     if let Some(rt) = tr.refresh_token {
         tokens.refresh_token = rt;
     }
-    save_tokens(tokens);
+    // best effort: the fresh token is in memory, so this session keeps working if the disk write fails
+    let _ = save_tokens(tokens);
     Ok(tokens.access_token.clone())
 }
 
