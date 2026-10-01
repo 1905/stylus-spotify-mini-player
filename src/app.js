@@ -15,10 +15,10 @@ const PLAYED_MS = 30 * 1000; // Spotify counts a play after 30s; a track skipped
 const small = matchMedia("(max-width: 899px)");
 
 const state = {
-  auth: null,
   loginKind: "login",
   device: null, // {id, name}
   devices: null, // last list_devices result, null = unknown
+  mode: "idle", // "track": a song plays, "other": an ad or podcast plays, "idle": nothing
   now: null,
   isPlaying: false,
   progressMs: 0,
@@ -30,7 +30,6 @@ const state = {
   loaded: false,
   error: null,
   overlay: null,
-  other: false, // a device is active but plays something that isn't a song
   gen: { detail: 0, search: 0 },
 };
 
@@ -72,7 +71,6 @@ const LOGIN_COPY = {
 
 function showLogin(kind) {
   stopPolling();
-  returnFocus = null; // the stage is about to hide: nothing to give focus back to
   closeOverlay();
   state.loginKind = LOGIN_COPY[kind] ? kind : "login";
   const copy = LOGIN_COPY[state.loginKind];
@@ -105,6 +103,7 @@ async function onLogin() {
 
 function expire() {
   showLogin("ended");
+  $("loginBtn").focus(); // the stage the user was in is gone: land on the way back
 }
 
 // ---------- poll loop (sequential: next tick starts after this one ends) ----------
@@ -177,48 +176,50 @@ async function refresh(epoch) {
   if (epoch !== pollEpoch) return; // a newer session took over while this one waited
   tick++;
   const leftAt = progress(); // how far the old "now" got, before this poll overwrites it
+  const active = Boolean(s && s.active);
+  const track = active && s.track && s.track.uri ? s.track : null;
+  const mode = track ? "track" : active ? "other" : "idle";
+  const modeChanged = mode !== state.mode;
+  state.mode = mode;
 
-  // active but no track = an ad or a podcast episode: keep the device, show no cover
-  state.other = Boolean(s && s.active && !(s.track && s.track.uri));
-  if (state.other) {
+  if (active) {
     state.device = { id: s.device_id, name: s.device_name };
     if (performance.now() > state.holdUntil) state.isPlaying = Boolean(s.is_playing);
+  } else {
+    state.isPlaying = false;
   }
-
-  if (!s || !s.active || state.other) {
-    const hadNow = Boolean(state.now);
-    if (hadNow) observe(state.now, leftAt);
-    state.now = null;
-    if (!state.other) state.isPlaying = false;
-    state.progressMs = 0;
-    if (hadNow || !state.loaded || tick % QUEUE_EVERY === 0) {
-      await Promise.all([discover(), loadHistory()]);
-      state.queue = [];
-      state.loaded = true;
-      renderNow();
-      renderRun();
-    }
-    renderChrome();
-    return;
-  }
-
-  state.device = { id: s.device_id, name: s.device_name };
-  if (performance.now() > state.holdUntil) state.isPlaying = Boolean(s.is_playing);
-  state.progressMs = s.progress_ms || 0;
+  state.progressMs = track ? s.progress_ms || 0 : 0;
   state.progressAt = performance.now();
 
-  const t = s.track;
-  const changed = !state.now || state.now.uri !== t.uri;
-  if (changed || !state.loaded) {
-    if (state.now && changed) observe(state.now, leftAt);
-    state.now = t;
-    await Promise.all([loadQueue(), loadHistory()]);
+  const changed = (state.now && state.now.uri) !== (track && track.uri);
+  if (changed && state.now) observe(state.now, leftAt);
+  state.now = track;
+
+  if (changed || modeChanged || !state.loaded) {
+    // a song needs its queue; with no song, the device list says who could play
+    const [queue, recent, devices] = await Promise.all([
+      track ? fetchOr("get_queue") : [],
+      fetchOr("get_recently_played"),
+      track ? null : fetchOr("list_devices"),
+    ]);
+    if (epoch !== pollEpoch) return;
+    if (queue) state.queue = queue;
+    if (recent) state.recent = recent;
+    if (devices) setDevices(devices);
     state.loaded = true;
     renderNow();
     renderRun();
-    paint(t.cover);
-  } else if (tick % QUEUE_EVERY === 0) {
-    if (await loadQueue()) renderRun();
+    if (track) paint(track.cover);
+  } else if (tick % QUEUE_EVERY === 0 && mode !== "other") {
+    // between changes only the queue (song) or the device list (idle) can move
+    const fresh = await fetchOr(track ? "get_queue" : "list_devices");
+    if (epoch !== pollEpoch || !fresh) return;
+    if (track && !sameUris(fresh, state.queue)) {
+      state.queue = fresh;
+      renderRun();
+    } else if (!track && setDevices(fresh)) {
+      renderNow();
+    }
   }
   renderChrome();
 }
@@ -230,56 +231,47 @@ function observe(track, playedMs) {
   state.session.length = Math.min(state.session.length, 50);
 }
 
-async function loadQueue() {
+/** A list from Spotify, or null on failure (keep what we had). AUTH_EXPIRED always propagates. */
+async function fetchOr(cmd) {
   try {
-    const q = (await invoke("get_queue")) || [];
-    const same = q.length === state.queue.length && q.every((t, i) => t.uri === state.queue[i].uri);
-    state.queue = q;
-    return !same;
+    return (await invoke(cmd)) || [];
   } catch (e) {
     if (isCode(e, "AUTH_EXPIRED")) throw e;
-    return false; // keep the old queue
+    return null;
   }
 }
 
-async function loadHistory() {
-  try {
-    state.recent = (await invoke("get_recently_played")) || [];
-  } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) throw e;
-    // keep what we had; session history still fills the run
-  }
-}
+const sameUris = (a, b) => a.length === b.length && a.every((t, i) => t.uri === b[i].uri);
 
-/** recently-played + session-observed, deduped by uri+played_at, newest first. */
+/** recently-played + session-observed plays the API doesn't have yet, newest first. */
 function history() {
   const api = state.recent.filter((r) => r && r.track);
   const near = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) < SESSION_MATCH_MS;
   const extra = state.session.filter(
     (s) => !api.some((r) => r.track.uri === s.track.uri && near(r.played_at, s.played_at)),
   );
-  const seen = new Set();
   return [...api, ...extra]
-    .filter((r) => {
-      const k = `${r.track.uri}|${r.played_at}`;
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    })
     .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at));
 }
 
-async function discover() {
-  try {
-    const list = (await invoke("list_devices")) || [];
-    state.devices = list;
+/** Store a device list; with nothing playing, show its active (or first) device. Returns true if it changed. */
+function setDevices(list) {
+  const changed = JSON.stringify(list) !== JSON.stringify(state.devices);
+  state.devices = list;
+  if (state.mode === "idle") {
     const d = list.find((x) => x.is_active) || list[0];
-    if (!state.now) state.device = d ? { id: d.id, name: d.name } : null;
-    return d ? { id: d.id, name: d.name } : null;
-  } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) throw e;
-    return null;
+    state.device = d ? { id: d.id, name: d.name } : null;
   }
+  return changed;
+}
+
+/** Fetch devices for a transport command: the active (or first) one, or null. */
+async function discover() {
+  const list = await fetchOr("list_devices");
+  if (!list) return null;
+  setDevices(list);
+  const d = list.find((x) => x.is_active) || list[0];
+  return d ? { id: d.id, name: d.name } : null;
 }
 
 // ---------- the run ----------
@@ -294,15 +286,10 @@ function makeCover(item) {
   const el = document.createElement("figure");
   el.className = "cover";
   el.dataset.key = item.key;
-  const art = t.cover ? `<img src="${esc(t.cover)}" alt="" draggable="false" />` : letterTile(t);
+  // crossorigin: the colour picker loads the same URL with CORS, so both share one cached copy
   el.innerHTML =
-    `<div class="art">${art}</div>` +
+    `<div class="art">${artHtml(t.cover, t.name, 'crossorigin="anonymous"')}</div>` +
     `<figcaption><span class="ct">${esc(t.name)}</span><span class="ca">${esc(t.artists)}</span></figcaption>`;
-  const img = el.querySelector("img");
-  if (img) img.addEventListener("error", () => img.replaceWith(Object.assign(document.createElement("span"), {
-    className: "letter",
-    textContent: letterOf(t.name),
-  })), { once: true });
   return el;
 }
 
@@ -361,7 +348,7 @@ function renderNow() {
   }
   let head = "Nothing playing";
   let line = "Pick a playlist from your library to start.";
-  if (state.other && state.device) {
+  if (state.mode === "other" && state.device) {
     head = `Playing on ${state.device.name}`;
     line = "An ad or a podcast is on. Songs show up here.";
   } else if (state.error && !state.loaded) {
@@ -380,23 +367,22 @@ function renderNow() {
 
 function renderChrome() {
   const stage = $("stage");
-  const idle = !state.now;
-  const other = idle && state.other; // an ad or a podcast: only play/pause makes sense
-  stage.classList.toggle("is-playing", state.isPlaying && (!idle || other));
-  stage.classList.toggle("is-idle", idle && !other);
-  stage.classList.toggle("is-other", other);
+  const mode = state.mode;
+  stage.dataset.mode = mode;
+  stage.classList.toggle("is-playing", state.isPlaying && mode !== "idle");
   $("playBtn").setAttribute("aria-label", state.isPlaying ? "Pause" : "Play");
-  for (const id of ["prevBtn", "nextBtn"]) $(id).disabled = idle;
-  $("playBtn").disabled = idle && !other;
-  $("scrub").tabIndex = idle ? -1 : 0;
+  $("playBtn").disabled = mode === "idle"; // an ad or a podcast can still be paused
+  for (const id of ["prevBtn", "nextBtn"]) $(id).disabled = mode !== "track";
+  $("scrub").tabIndex = mode === "track" ? 0 : -1;
 
-  const noDevice = state.devices && state.devices.length === 0 && idle;
-  $("libraryBtn").classList.toggle("is-primary", idle && !other && !noDevice && state.loaded);
+  const noDevice = state.devices && state.devices.length === 0 && mode === "idle";
+  $("libraryBtn").classList.toggle("is-primary", mode === "idle" && !noDevice && state.loaded);
 
   const dev = $("device");
   dev.hidden = !state.device;
   if (state.device) dev.querySelector(".device-name").textContent = state.device.name;
   renderProgress();
+  startFrames();
 }
 
 function progress() {
@@ -421,8 +407,21 @@ function renderProgress() {
   }
 }
 
+let framing = false;
+
+/** Animate the scrub bar while a song plays; the loop stops itself otherwise. */
 function frame() {
-  if (!$("stage").hidden && state.now) renderProgress();
+  if ($("stage").hidden || !state.now || !state.isPlaying) {
+    framing = false;
+    return;
+  }
+  renderProgress();
+  requestAnimationFrame(frame);
+}
+
+function startFrames() {
+  if (framing) return;
+  framing = true;
   requestAnimationFrame(frame);
 }
 
@@ -503,7 +502,7 @@ async function playUris(uris) {
 }
 
 async function togglePlay() {
-  if (!state.now && !state.other) return;
+  if (state.mode === "idle") return;
   const was = state.isPlaying;
   state.progressMs = progress();
   state.progressAt = performance.now();
@@ -579,14 +578,13 @@ function closeOverlay() {
 /** Overlay commands that hit a dead session send the user to login. */
 function overlayFailed(e) {
   if (!isCode(e, "AUTH_EXPIRED")) return false;
-  closeOverlay();
-  expire();
+  expire(); // showLogin closes the overlay
   return true;
 }
 
-const artHtml = (url, name) =>
+const artHtml = (url, name, attrs = 'loading="lazy"') =>
   url
-    ? `<img src="${esc(url)}" alt="" draggable="false" data-letter="${esc(letterOf(name))}" />`
+    ? `<img src="${esc(url)}" alt="" draggable="false" decoding="async" ${attrs} data-letter="${esc(letterOf(name))}" />`
     : letterTile({ name });
 
 /** Overlay covers that fail to load become the letter tile. */
@@ -863,7 +861,13 @@ async function boot() {
   document.addEventListener("keyup", onKey);
   addEventListener("resize", center);
   small.addEventListener("change", () => state.loaded && renderRun());
-  requestAnimationFrame(frame);
+  $("run").addEventListener("error", onImgError, true);
+  // a hidden window needs no 1s polling; come back with a fresh poll
+  document.addEventListener("visibilitychange", () => {
+    if ($("stage").hidden) return;
+    if (document.hidden) stopPolling();
+    else startPolling();
+  });
 
   let status = "login";
   try {
@@ -871,7 +875,6 @@ async function boot() {
   } catch {
     /* treat as logged out */
   }
-  state.auth = status;
   if (status === "ok") startStage();
   else showLogin(status);
 }

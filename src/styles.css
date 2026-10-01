@@ -232,33 +232,7 @@ svg {
 }
 
 .cover .art {
-  position: relative;
-  aspect-ratio: 1;
-  border-radius: 4px;
-  overflow: hidden;
-  background: var(--hair);
-  container-type: inline-size;
   transition: opacity 600ms var(--ease), filter 600ms var(--ease);
-}
-
-.cover img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  -webkit-user-drag: none;
-}
-
-.cover .letter {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--fg-3);
-  font-size: 42cqw;
-  font-weight: 700;
-  font-stretch: 80%;
-  line-height: 1;
 }
 
 .cover[data-role="now"] .art {
@@ -517,8 +491,8 @@ svg {
   opacity: 0.3;
 }
 
-.is-idle .transport,
-.is-other .scrub-row {
+[data-mode="idle"] .transport,
+[data-mode="other"] .scrub-row {
   visibility: hidden;
 }
 
@@ -711,7 +685,7 @@ svg {
   line-height: 20px;
 }
 
-/* covers inside overlays */
+/* cover art: the run and the overlays */
 .art {
   position: relative;
   display: block; /* a <span>: inline would ignore width and aspect-ratio */
@@ -776,10 +750,6 @@ svg {
   grid-template-columns: minmax(0, 1fr) auto;
   padding-top: 6px;
   padding-bottom: 6px;
-}
-
-.row-track.has-art {
-  grid-template-columns: 40px minmax(0, 1fr) auto;
 }
 
 .row-track.has-num {
@@ -1066,12 +1036,7 @@ svg {
     font-size: 40px;
   }
 
-  .now {
-    margin-top: calc(48px - var(--cap));
-  }
-
   .now-artist {
-    margin-top: 10px;
     font-size: 17px;
     line-height: 22px;
   }

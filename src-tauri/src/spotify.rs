@@ -4,7 +4,8 @@
 //! Errors starting with `AUTH_EXPIRED` or `NO_ACTIVE_DEVICE` are codes the
 //! frontend matches with `startsWith`.
 
-use crate::auth::{http, valid_access_token};
+use crate::auth::{http, urlencode, valid_access_token};
+use reqwest::Method;
 use serde_json::{json, Value};
 
 const API: &str = "https://api.spotify.com/v1";
@@ -24,74 +25,57 @@ fn api_path(url: &str) -> &str {
     url.strip_prefix(API).unwrap_or(url)
 }
 
-/// GET returning the parsed body, or None on 204 No Content.
-async fn get_opt(path: &str) -> Result<Option<Value>, String> {
+/// One Spotify request: the response body as text, or a mapped error.
+async fn request(method: Method, path: &str, body: Option<Value>) -> Result<String, String> {
     let token = valid_access_token().await?;
-    let resp = http()
-        .get(format!("{API}{path}"))
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let req = http().request(method, format!("{API}{path}")).bearer_auth(token);
+    let req = match body {
+        Some(b) => req.json(&b),
+        None => req.header("Content-Length", "0"),
+    };
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
-    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
-        return Err(api_error(status.as_u16(), path, &body));
+        return Err(api_error(status.as_u16(), path, &text));
     }
-    if status.as_u16() == 204 || body.trim().is_empty() {
+    Ok(text)
+}
+
+/// GET returning the parsed body, or None on an empty body (204 No Content).
+async fn get_opt(path: &str) -> Result<Option<Value>, String> {
+    let text = request(Method::GET, path, None).await?;
+    if text.trim().is_empty() {
         return Ok(None);
     }
-    serde_json::from_str(&body).map(Some).map_err(|e| e.to_string())
+    serde_json::from_str(&text).map(Some).map_err(|e| e.to_string())
 }
 
 async fn get(path: &str) -> Result<Value, String> {
     Ok(get_opt(path).await?.unwrap_or(Value::Null))
 }
 
-/// PUT with a JSON body to a player endpoint. Spotify replies 204 on success.
-async fn put(path: &str, body: Value) -> Result<(), String> {
-    let token = valid_access_token().await?;
-    let resp = http()
-        .put(format!("{API}{path}"))
-        .bearer_auth(token)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = resp.status();
-    if status.is_success() {
-        return Ok(());
-    }
-    let text = resp.text().await.unwrap_or_default();
-    Err(api_error(status.as_u16(), path, &text))
+/// A player command: whatever body comes back is ignored.
+async fn command(method: Method, path: &str, body: Option<Value>) -> Result<(), String> {
+    request(method, path, body).await.map(|_| ())
 }
 
-/// PUT or POST with no body to a player endpoint (pause, next, previous, seek…).
-/// `method` is "PUT" or "POST". 204/202/200 all count as success.
-async fn send_empty(method: &str, path: &str) -> Result<(), String> {
-    let token = valid_access_token().await?;
-    let client = http();
-    let req = match method {
-        "POST" => client.post(format!("{API}{path}")),
-        _ => client.put(format!("{API}{path}")),
-    };
-    let resp = req
-        .bearer_auth(token)
-        .header("Content-Length", "0")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = resp.status();
-    if status.is_success() {
-        return Ok(());
+/// Every item of a paged list, following `next` from the first page.
+async fn all_items(mut page: Value) -> Result<Vec<Value>, String> {
+    let mut all = Vec::new();
+    loop {
+        all.extend(page["items"].as_array().into_iter().flatten().cloned());
+        match page["next"].as_str() {
+            Some(next_url) => page = get(api_path(next_url)).await?,
+            None => return Ok(all),
+        }
     }
-    let text = resp.text().await.unwrap_or_default();
-    Err(api_error(status.as_u16(), path, &text))
 }
 
 // ---- Spotify Connect: control a real device -------------------------------
 
 /// List the user's available Spotify Connect devices.
+#[tauri::command]
 pub async fn list_devices() -> Result<Value, String> {
     let raw = get("/me/player/devices").await?;
     Ok(raw["devices"].clone())
@@ -99,6 +83,7 @@ pub async fn list_devices() -> Result<Value, String> {
 
 /// Current playback state on the active device, simplified for the UI.
 /// `{active:false}` when nothing is playing (204).
+#[tauri::command]
 pub async fn playback_state() -> Result<Value, String> {
     let Some(s) = get_opt("/me/player").await? else {
         return Ok(json!({ "active": false }));
@@ -115,37 +100,41 @@ pub async fn playback_state() -> Result<Value, String> {
 }
 
 /// Start playback of the given URIs on a specific device.
+#[tauri::command]
 pub async fn play_on_device(device_id: String, uris: Vec<String>) -> Result<(), String> {
-    put(
-        &format!("/me/player/play?device_id={device_id}"),
-        json!({ "uris": uris }),
-    )
-    .await
+    command(Method::PUT, &format!("/me/player/play?device_id={device_id}"), Some(json!({ "uris": uris }))).await
 }
 
+#[tauri::command]
 pub async fn resume(device_id: String) -> Result<(), String> {
-    send_empty("PUT", &format!("/me/player/play?device_id={device_id}")).await
+    command(Method::PUT, &format!("/me/player/play?device_id={device_id}"), None).await
 }
+#[tauri::command]
 pub async fn pause() -> Result<(), String> {
-    send_empty("PUT", "/me/player/pause").await
+    command(Method::PUT, "/me/player/pause", None).await
 }
+#[tauri::command]
 pub async fn next_track() -> Result<(), String> {
-    send_empty("POST", "/me/player/next").await
+    command(Method::POST, "/me/player/next", None).await
 }
+#[tauri::command]
 pub async fn previous_track() -> Result<(), String> {
-    send_empty("POST", "/me/player/previous").await
+    command(Method::POST, "/me/player/previous", None).await
 }
+#[tauri::command]
 pub async fn seek(position_ms: u64) -> Result<(), String> {
-    send_empty("PUT", &format!("/me/player/seek?position_ms={position_ms}")).await
+    command(Method::PUT, &format!("/me/player/seek?position_ms={position_ms}"), None).await
 }
 
 /// The user's real up-next queue (excludes the current track).
+#[tauri::command]
 pub async fn get_queue() -> Result<Value, String> {
     let raw = get("/me/player/queue").await?;
     Ok(Value::Array(parse_queue(&raw)))
 }
 
 /// Last 30 played tracks, newest first: `[{track, played_at}]`.
+#[tauri::command]
 pub async fn get_recently_played() -> Result<Value, String> {
     let raw = get("/me/player/recently-played?limit=30").await?;
     Ok(Value::Array(parse_recent(&raw)))
@@ -153,6 +142,7 @@ pub async fn get_recently_played() -> Result<Value, String> {
 
 /// Search tracks and albums. Returns { tracks: [...], albums: [...] } with
 /// only the fields the UI needs. Spotify rejects limit > 10 here (400).
+#[tauri::command]
 pub async fn search(query: String) -> Result<Value, String> {
     if query.trim().is_empty() {
         return Ok(json!({ "tracks": [], "albums": [] }));
@@ -174,12 +164,9 @@ pub async fn search(query: String) -> Result<Value, String> {
                 .map(|a| {
                     json!({
                         "id": a["id"],
-                        "uri": a["uri"],
                         "name": a["name"],
                         "artists": join_artists(&a["artists"]),
                         "cover": first_image(&a["images"]),
-                        "year": a["release_date"].as_str().map(|d| d.get(0..4).unwrap_or("")),
-                        "total_tracks": a["total_tracks"],
                     })
                 })
                 .collect()
@@ -191,28 +178,23 @@ pub async fn search(query: String) -> Result<Value, String> {
 
 /// All of an album's tracks (follows `tracks.next`). Album tracks lack album
 /// art, so the album name and cover are stamped onto each track.
+#[tauri::command]
 pub async fn get_album_tracks(album_id: String) -> Result<Value, String> {
     let album = get(&format!("/albums/{album_id}")).await?;
     let cover = first_image(&album["images"]);
     let album_name = album["name"].clone();
 
-    let mut all: Vec<Value> = Vec::new();
-    let mut page = album["tracks"].clone();
-    loop {
-        for t in page["items"].as_array().into_iter().flatten() {
-            if t.is_null() {
-                continue;
-            }
+    let all: Vec<Value> = all_items(album["tracks"].clone())
+        .await?
+        .iter()
+        .filter(|t| !t.is_null())
+        .map(|t| {
             let mut track = simplify_track(t);
             track["album"] = album_name.clone();
             track["cover"] = json!(cover);
-            all.push(track);
-        }
-        match page["next"].as_str() {
-            Some(next_url) => page = get(api_path(next_url)).await?,
-            None => break,
-        }
-    }
+            track
+        })
+        .collect();
     Ok(Value::Array(all))
 }
 
@@ -286,76 +268,44 @@ fn parse_recent(v: &Value) -> Vec<Value> {
 
 /// GET /me/playlists, following `next` until all pages are collected.
 /// Returns a flat JSON array of playlist objects.
+#[tauri::command]
 pub async fn get_playlists() -> Result<Value, String> {
-    let mut all: Vec<Value> = Vec::new();
-    let mut path = "/me/playlists?limit=50".to_string();
-
-    loop {
-        let page = get(&path).await?;
-        if let Some(items) = page.get("items").and_then(|v| v.as_array()) {
-            for pl in items {
-                let mut pl = pl.clone();
-                // This account's API serves the track count under `items.total`,
-                // not the documented `tracks.total`. Normalize so the frontend
-                // always reads `tracks.total`.
-                let total = pl
-                    .get("tracks")
-                    .and_then(|t| t.get("total"))
-                    .or_else(|| pl.get("items").and_then(|t| t.get("total")))
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                pl["tracks"] = json!({ "total": total });
-                all.push(pl);
-            }
-        }
-        match page.get("next").and_then(|v| v.as_str()) {
-            Some(next_url) => path = api_path(next_url).to_string(),
-            None => break,
-        }
-    }
+    let first = get("/me/playlists?limit=50").await?;
+    let all = all_items(first)
+        .await?
+        .into_iter()
+        .map(|mut pl| {
+            // This account's API serves the track count under `items.total`,
+            // not the documented `tracks.total`. Normalize so the frontend
+            // always reads `tracks.total`.
+            let total = pl["tracks"]["total"]
+                .as_u64()
+                .or_else(|| pl["items"]["total"].as_u64())
+                .unwrap_or(0);
+            pl["tracks"] = json!({ "total": total });
+            pl
+        })
+        .collect();
     Ok(Value::Array(all))
 }
 
 /// Paginated playlist tracks. This account's API uses `/items` (the `/tracks`
 /// endpoint 403s) and may nest each track under `item` instead of `track`.
 /// We request both field spellings and read whichever the response provides.
+#[tauri::command]
 pub async fn get_playlist_tracks(playlist_id: String) -> Result<Value, String> {
-    let mut all: Vec<Value> = Vec::new();
     let fields = "next,items(added_at,item(id,uri,name,duration_ms,artists(name),album(name,images)),track(id,uri,name,duration_ms,artists(name),album(name,images)))";
-    let mut path = format!(
-        "/playlists/{}/items?limit=50&fields={}",
-        playlist_id,
-        urlencode(fields)
-    );
-
-    loop {
-        let page = get(&path).await?;
-        for row in page["items"].as_array().into_iter().flatten() {
-            let track = track_of_row(row);
-            if !track.is_null() {
-                all.push(simplify_track(track)); // null = removed/unavailable
-            }
-        }
-        match page.get("next").and_then(|v| v.as_str()) {
-            Some(next_url) => path = api_path(next_url).to_string(),
-            None => break,
-        }
-    }
+    let first = get(&format!("/playlists/{playlist_id}/items?limit=50&fields={}", urlencode(fields))).await?;
+    let all = all_items(first)
+        .await?
+        .iter()
+        .map(track_of_row)
+        .filter(|t| !t.is_null()) // null = removed/unavailable
+        .map(simplify_track)
+        .collect();
     Ok(Value::Array(all))
 }
 
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
 
 #[cfg(test)]
 mod tests {

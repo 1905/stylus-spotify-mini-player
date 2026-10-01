@@ -73,7 +73,7 @@
 | `get_playlists` | — | `[{id, name, images, tracks:{total}}]` | `AUTH_EXPIRED`, free text |
 | `get_playlist_tracks` | `{playlistId}` | `[Track]` | same |
 | `get_album_tracks` | `{albumId}` | `[Track]` (all pages) | same |
-| `search` | `{query}` | `{tracks:[Track]≤10, albums:[{id,uri,name,artists,cover,year,total_tracks}]≤10}` | same |
+| `search` | `{query}` | `{tracks:[Track]≤10, albums:[{id,name,artists,cover}]≤10}` | same |
 | `get_queue` | — | `[Track]` | same |
 | `get_recently_played` | — | `[{track: Track, played_at}]` (≤30, newest first) | same |
 | `playback_state` | — | `{active:false}` or `{active:true, is_playing, progress_ms, device_id, device_name, track: Track}` | same |

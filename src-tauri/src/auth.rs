@@ -64,6 +64,7 @@ fn status_for(tokens: Option<&Tokens>) -> &'static str {
 }
 
 /// "login" (no usable tokens), "reconnect" (scopes missing) or "ok".
+#[tauri::command]
 pub fn auth_status() -> &'static str {
     status_for(load_tokens().as_ref())
 }
@@ -127,14 +128,15 @@ fn gen_state() -> String {
 
 /// Runs the full interactive login: opens the browser, waits for the callback,
 /// exchanges the code for tokens, and persists them. Blocking.
+#[tauri::command]
 pub async fn login() -> Result<(), String> {
     let verifier = gen_verifier();
     let state = gen_state();
     let auth_url = format!(
         "https://accounts.spotify.com/authorize?response_type=code&client_id={}&scope={}&redirect_uri={}&state={}&code_challenge_method=S256&code_challenge={}",
         CLIENT_ID,
-        urlencoding(&REQUIRED_SCOPES.join(" ")),
-        urlencoding(REDIRECT_URI),
+        urlencode(&REQUIRED_SCOPES.join(" ")),
+        urlencode(REDIRECT_URI),
         state,
         challenge(&verifier),
     );
@@ -144,9 +146,8 @@ pub async fn login() -> Result<(), String> {
         .map_err(|e| format!("cannot bind {CALLBACK_ADDR}: {e}. Is another instance running?"))?;
 
     // Open the browser (does not block).
-    if let Err(e) = open_browser(&auth_url) {
-        return Err(format!("could not open browser: {e}"));
-    }
+    tauri_plugin_opener::open_url(&auth_url, None::<&str>)
+        .map_err(|e| format!("could not open browser: {e}"))?;
 
     // Block on the one incoming request. Spawn to a blocking thread so we
     // don't stall the async runtime.
@@ -157,6 +158,7 @@ pub async fn login() -> Result<(), String> {
 
     let tokens = exchange_code(&code, &verifier).await?;
     save_tokens(&tokens);
+    *TOKENS.lock().await = Some(tokens);
     Ok(())
 }
 
@@ -236,38 +238,45 @@ fn wait_for_code(listener: TcpListener, expected_state: &str, timeout: std::time
     }
 }
 
+/// POST to Spotify's token endpoint. Err carries (HTTP status, body); 0 = no response.
+async fn token_request(params: &[(&str, &str)]) -> Result<TokenResponse, (u16, String)> {
+    let resp = http()
+        .post("https://accounts.spotify.com/api/token")
+        .form(params)
+        .send()
+        .await
+        .map_err(|e| (0, e.to_string()))?;
+    let status = resp.status().as_u16();
+    if !resp.status().is_success() {
+        return Err((status, resp.text().await.unwrap_or_default()));
+    }
+    resp.json().await.map_err(|e| (status, e.to_string()))
+}
+
+fn expires_at(tr: &TokenResponse) -> u64 {
+    now() + tr.expires_in.saturating_sub(60)
+}
+
 async fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, String> {
-    let client = http();
-    let params = [
+    let tr = token_request(&[
         ("grant_type", "authorization_code"),
         ("code", code),
         ("redirect_uri", REDIRECT_URI),
         ("client_id", CLIENT_ID),
         ("code_verifier", verifier),
-    ];
-    let resp = client
-        .post("https://accounts.spotify.com/api/token")
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("token exchange failed: {body}"));
-    }
-    let tr: TokenResponse = resp.json().await.map_err(|e| e.to_string())?;
+    ])
+    .await
+    .map_err(|(_, body)| format!("token exchange failed: {body}"))?;
     Ok(Tokens {
+        expires_at: expires_at(&tr),
         access_token: tr.access_token,
         refresh_token: tr.refresh_token.unwrap_or_default(),
-        expires_at: now() + tr.expires_in.saturating_sub(60),
         scope: tr.scope.unwrap_or_default(),
     })
 }
 
-/// Returns a valid access token, refreshing if expired. Errors if not logged in.
 /// One HTTP client for every Spotify call. Finite deadlines: a stalled request
-/// must fail, or it would hold REFRESH_LOCK and freeze every command behind it.
+/// must fail, or it would hold the TOKENS lock and freeze every command behind it.
 pub fn http() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT
@@ -281,44 +290,42 @@ pub fn http() -> reqwest::Client {
         .clone()
 }
 
-/// Serializes refreshes: Spotify rotates the refresh token, so two concurrent
+/// The tokens in memory, loaded from disk on first use. The mutex also
+/// serializes refreshes: Spotify rotates the refresh token, so two concurrent
 /// refreshes with the same old token can get `invalid_grant` and log the user out.
-static REFRESH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static TOKENS: tokio::sync::Mutex<Option<Tokens>> = tokio::sync::Mutex::const_new(None);
 
+/// Returns a valid access token, refreshing if expired. Errors if not logged in.
 pub async fn valid_access_token() -> Result<String, String> {
-    let _guard = REFRESH_LOCK.lock().await;
-    let mut tokens = load_tokens().ok_or("AUTH_EXPIRED: not logged in")?;
+    let mut cached = TOKENS.lock().await;
+    if cached.is_none() {
+        *cached = load_tokens();
+    }
+    let tokens = cached.as_mut().ok_or("AUTH_EXPIRED: not logged in")?;
     if now() < tokens.expires_at && !tokens.access_token.is_empty() {
-        return Ok(tokens.access_token);
+        return Ok(tokens.access_token.clone());
     }
     if tokens.refresh_token.is_empty() {
         return Err("AUTH_EXPIRED: no refresh token, log in again".into());
     }
-    // Refresh.
-    let client = http();
-    let params = [
+    let refresh_token = tokens.refresh_token.clone();
+    let tr = match token_request(&[
         ("grant_type", "refresh_token"),
-        ("refresh_token", &tokens.refresh_token),
+        ("refresh_token", &refresh_token),
         ("client_id", CLIENT_ID),
-    ];
-    let resp = client
-        .post("https://accounts.spotify.com/api/token")
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        if is_terminal_refresh_failure(status.as_u16(), &body) {
+    ])
+    .await
+    {
+        Ok(tr) => tr,
+        Err((status, body)) if is_terminal_refresh_failure(status, &body) => {
             invalidate_tokens();
+            *cached = None;
             return Err(format!("AUTH_EXPIRED: token refresh rejected: {body}"));
         }
-        return Err(format!("token refresh failed ({}): {body}", status.as_u16()));
-    }
-    let tr: TokenResponse = resp.json().await.map_err(|e| e.to_string())?;
+        Err((status, body)) => return Err(format!("token refresh failed ({status}): {body}")),
+    };
+    tokens.expires_at = expires_at(&tr);
     tokens.access_token = tr.access_token;
-    tokens.expires_at = now() + tr.expires_in.saturating_sub(60);
     // Keep the stored scope when the refresh response omits it.
     if let Some(scope) = tr.scope {
         tokens.scope = scope;
@@ -327,8 +334,8 @@ pub async fn valid_access_token() -> Result<String, String> {
     if let Some(rt) = tr.refresh_token {
         tokens.refresh_token = rt;
     }
-    save_tokens(&tokens);
-    Ok(tokens.access_token)
+    save_tokens(tokens);
+    Ok(tokens.access_token.clone())
 }
 
 // ---- small utilities -------------------------------------------------------
@@ -348,7 +355,7 @@ fn http_page(msg: &str) -> String {
     )
 }
 
-fn urlencoding(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
@@ -389,21 +396,6 @@ fn url_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn open_browser(url: &str) -> std::io::Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open").arg(url).spawn()?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open").arg(url).spawn()?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn()?;
-    }
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
