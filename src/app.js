@@ -35,6 +35,7 @@ const state = {
   progressMs: 0,
   progressAt: 0,
   holdUntil: 0,
+  seekHoldUntil: 0,
   listenedMs: 0, // real playing time of "now" (seeks and pauses don't count)
   listenAt: 0,
   queue: [],
@@ -89,6 +90,7 @@ function showLogin(kind) {
   playlistsLoading = false; // a load from the old session will never finish
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
   clearTimeout(searchTimer); // a debounced search must not start in the next session
+  clearTimeout(seekTimer); // nor a debounced seek
   state.gen.search++;
   state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
@@ -218,8 +220,12 @@ async function refresh(epoch) {
   } else {
     state.isPlaying = false;
   }
-  state.progressMs = track ? s.progress_ms || 0 : 0;
-  state.progressAt = performance.now();
+  // right after a local seek, Spotify may still report the old position: keep ours
+  const seeking = track && state.now && track.uri === state.now.uri && performance.now() < state.seekHoldUntil;
+  if (!seeking) {
+    state.progressMs = track ? s.progress_ms || 0 : 0;
+    state.progressAt = performance.now();
+  }
 
   const changed = (state.now && state.now.uri) !== (track && track.uri);
   if (changed && state.now) observe(state.now, state.listenedMs);
@@ -595,14 +601,25 @@ function seekKey(ev) {
   const to = { ArrowLeft: p - SEEK_STEP_MS, ArrowRight: p + SEEK_STEP_MS, Home: 0, End: state.now.duration_ms - 1000 }[ev.key];
   if (to === undefined) return;
   ev.preventDefault();
-  seekTo(Math.min(state.now.duration_ms, Math.max(0, to)));
+  // a held key repeats ~30 times a second: move the bar now, send one seek when the keys go quiet
+  showSeek(Math.min(state.now.duration_ms, Math.max(0, to)));
+  clearTimeout(seekTimer);
+  seekTimer = setTimeout(() => seekTo(progress()), SEEK_QUIET_MS);
+}
+
+const SEEK_QUIET_MS = 250;
+let seekTimer = null;
+
+function showSeek(ms) {
+  state.progressMs = Math.round(ms);
+  state.progressAt = performance.now();
+  state.seekHoldUntil = performance.now() + SEEK_QUIET_MS + HOLD_MS;
+  renderProgress();
 }
 
 async function seekTo(ms) {
-  const positionMs = Math.round(ms);
-  state.progressMs = positionMs;
-  state.progressAt = performance.now();
-  renderProgress();
+  showSeek(ms);
+  const positionMs = state.progressMs;
   await withDevice(() => invoke("seek", { positionMs }));
   kick();
 }
@@ -611,8 +628,11 @@ async function seekTo(ms) {
 
 let returnFocus = null;
 
+let overlayRev = 0; // bumped on every overlay view change: a slow Play closes only the view it came from
+
 function openOverlay(name) {
   if (state.overlay === name) return;
+  overlayRev++;
   if (state.overlay) $(state.overlay).hidden = true;
   else returnFocus = document.activeElement;
   state.overlay = name;
@@ -622,6 +642,7 @@ function openOverlay(name) {
 
 function closeOverlay() {
   if (!state.overlay) return;
+  overlayRev++;
   $(state.overlay).hidden = true;
   state.overlay = null;
   $("stage").inert = false;
@@ -683,6 +704,7 @@ function openLibrary() {
 }
 
 function showList() {
+  overlayRev++;
   state.gen.detail++; // drop any detail response still in flight
   detailTracks = [];
   $("libDetail").hidden = true;
@@ -726,6 +748,7 @@ async function openDetail(src) {
     $("sheet").focus();
   }
   if (!$("libLevel1").hidden) listScroll = $("sheetBody").scrollTop;
+  overlayRev++;
   const gen = ++state.gen.detail;
   detailTracks = [];
   $("libLevel1").hidden = true;
@@ -763,7 +786,8 @@ async function openDetail(src) {
 
 async function playDetailFrom(i) {
   const uris = detailTracks.slice(i).map((t) => t.uri);
-  if (await playUris(uris)) closeOverlay();
+  const rev = overlayRev;
+  if ((await playUris(uris)) && rev === overlayRev) closeOverlay();
 }
 
 // ---------- search: songs + albums, debounced, last request wins ----------
@@ -842,7 +866,8 @@ async function onSearchClick(e) {
   const song = e.target.closest(".row-track");
   if (song) {
     const t = searchHits.tracks[Number(song.dataset.i)];
-    if (t && (await playUris([t.uri]))) closeOverlay();
+    const rev = overlayRev;
+    if (t && (await playUris([t.uri])) && rev === overlayRev) closeOverlay();
     return;
   }
   const al = e.target.closest("[data-album]");
