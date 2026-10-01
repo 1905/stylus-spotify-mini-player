@@ -9,7 +9,7 @@
 
 > For agentic workers: use superpowers:subagent-driven-development to implement task-by-task. Checkbox syntax for tracking.
 
-**Repo note:** `~/dev/rust-spotify` is not a git repo, and commits were never agreed. Checkpoints = backups in the scratchpad (`baseline2/` taken before T1). No worktree, no commits.
+**Repo note (updated 2026-10-01, user: "commit and push to private gh. commit often"):** private repo `1905/rust-spotify`. Branch `feat/the-run-redesign` off `main`. The orchestrator commits after each verified task and pushes; implementers do no git. Merge to `main` when the exit gate is green. No CI workflows yet.
 
 **Hard requirement (user, mid-plan):** "history and up next should work too". Both must show real data: up next = `/me/player/queue`, history = `/me/player/recently-played` + session-observed tracks. QA checks both.
 
