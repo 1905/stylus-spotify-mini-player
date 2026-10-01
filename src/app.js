@@ -91,6 +91,8 @@ function showLogin(kind) {
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
   clearTimeout(searchTimer); // a debounced search must not start in the next session
   clearTimeout(seekTimer); // nor a debounced seek
+  changesPending = 0;
+  settleAfter = 0;
   state.gen.search++;
   state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
@@ -204,6 +206,7 @@ async function poll() {
 }
 
 async function refresh(epoch) {
+  const startedAt = performance.now();
   const s = await invoke("playback_state");
   if (epoch !== pollEpoch) return; // a newer session took over while this one waited
   tick++;
@@ -229,6 +232,7 @@ async function refresh(epoch) {
 
   const changed = (state.now && state.now.uri) !== (track && track.uri);
   if (changed) trackGen++;
+  if (changesPending === 0 && settleAfter && startedAt >= settleAfter) settleAfter = 0;
   if (changed && state.now) observe(state.now, state.listenedMs);
   if (changed) state.listenedMs = 0;
   state.now = track;
@@ -561,11 +565,21 @@ let trackGen = 0;
 function changeTrack(fn) {
   clearTimeout(seekTimer);
   trackGen++;
+  changesPending++;
   return withDevice(async (id) => {
     await fn(id);
     trackGen++;
+  }).finally(() => {
+    if (--changesPending === 0) settleAfter = performance.now();
   });
 }
+
+// After a track change the screen shows the old track until a poll that started after
+// the change has returned. Until then a seek would carry the old track's position.
+let changesPending = 0;
+let settleAfter = 0; // 0 = settled; else a poll must start after this time to settle
+
+const canSeek = () => changesPending === 0 && settleAfter === 0;
 
 async function playUris(uris) {
   if (!uris.length) return false;
@@ -602,7 +616,7 @@ async function skip(cmd) {
 }
 
 function seekClick(ev) {
-  if (!state.now || !state.now.duration_ms) return;
+  if (!state.now || !state.now.duration_ms || !canSeek()) return;
   const r = $("scrub").getBoundingClientRect();
   seekTo(Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * state.now.duration_ms);
 }
@@ -611,7 +625,7 @@ const SEEK_STEP_MS = 5000;
 
 /** Arrow keys on the focused scrub bar: ±5s, Home/End jump to the ends. */
 function seekKey(ev) {
-  if (!state.now || !state.now.duration_ms) return;
+  if (!state.now || !state.now.duration_ms || !canSeek()) return;
   const p = progress();
   const to = { ArrowLeft: p - SEEK_STEP_MS, ArrowRight: p + SEEK_STEP_MS, Home: 0, End: state.now.duration_ms - 1000 }[ev.key];
   if (to === undefined) return;
