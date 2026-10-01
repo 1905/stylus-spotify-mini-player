@@ -566,11 +566,12 @@ function changeTrack(fn) {
   clearTimeout(seekTimer);
   trackGen++;
   changesPending++;
+  const sess = authSession; // a logout resets the count: an old change must not touch the new one
   return withDevice(async (id) => {
     await fn(id);
     trackGen++;
   }).finally(() => {
-    if (--changesPending === 0) settleAfter = performance.now();
+    if (sess === authSession && --changesPending === 0) settleAfter = performance.now();
   });
 }
 
