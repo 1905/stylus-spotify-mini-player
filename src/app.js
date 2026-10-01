@@ -228,6 +228,7 @@ async function refresh(epoch) {
   }
 
   const changed = (state.now && state.now.uri) !== (track && track.uri);
+  if (changed) trackGen++;
   if (changed && state.now) observe(state.now, state.listenedMs);
   if (changed) state.listenedMs = 0;
   state.now = track;
@@ -552,10 +553,23 @@ async function needDevice(id) {
 }
 
 /** Start playback of these uris; returns true on success. */
+// Bumped when a track change is asked for, when it lands, and when a poll sees one.
+// A seek runs only if it hasn't moved since the seek was made: its position is for that track.
+let trackGen = 0;
+
+/** A track-changing player command: invalidates seeks made before it, and again once it lands. */
+function changeTrack(fn) {
+  clearTimeout(seekTimer);
+  trackGen++;
+  return withDevice(async (id) => {
+    await fn(id);
+    trackGen++;
+  });
+}
+
 async function playUris(uris) {
   if (!uris.length) return false;
-  clearTimeout(seekTimer); // a pending keyboard seek belongs to the old track
-  const ok = await withDevice(async (id) => invoke("play_on_device", { deviceId: await needDevice(id), uris }));
+  const ok = await changeTrack(async (id) => invoke("play_on_device", { deviceId: await needDevice(id), uris }));
   kick();
   return ok;
 }
@@ -583,8 +597,7 @@ async function togglePlay() {
 
 async function skip(cmd) {
   if (!state.now) return;
-  clearTimeout(seekTimer); // a pending keyboard seek belongs to the old track
-  await withDevice(() => invoke(cmd));
+  await changeTrack(() => invoke(cmd));
   kick();
 }
 
@@ -622,9 +635,8 @@ function showSeek(ms) {
 async function seekTo(ms) {
   showSeek(ms);
   const positionMs = state.progressMs;
-  const uri = state.now && state.now.uri;
-  // queued behind slower commands: by its turn the track may have changed, and the position is for this one
-  await withDevice(() => (state.now && state.now.uri === uri ? invoke("seek", { positionMs }) : null));
+  const gen = trackGen;
+  await withDevice(() => (gen === trackGen ? invoke("seek", { positionMs }) : null));
   kick();
 }
 
