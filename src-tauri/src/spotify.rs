@@ -109,7 +109,8 @@ pub async fn playback_state() -> Result<Value, String> {
         "progress_ms": s["progress_ms"],
         "device_id": s["device"]["id"],
         "device_name": s["device"]["name"],
-        "track": simplify_track(&s["item"]),
+        // null during ads and podcast episodes: Spotify sends no item for them here
+        "track": if s["item"].is_null() { Value::Null } else { simplify_track(&s["item"]) },
     }))
 }
 

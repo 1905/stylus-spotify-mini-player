@@ -8,19 +8,19 @@
 export function buildRun({ history = [], now = null, queue = [] } = {}, { maxPast = 4, maxNext = 8 } = {}) {
   const tracks = (history || []).map((h) => h && h.track).filter(Boolean);
 
-  // 1. drop head rows that equal now
-  let i = 0;
-  if (now) while (i < tracks.length && tracks[i].uri === now.uri) i++;
+  const next = (queue || []).filter(Boolean).slice(0, maxNext);
 
-  // 2. collapse consecutive duplicates, 3. take maxPast, reverse
+  // 1. skip rows already on screen as now or next (after Prev, the track you left is
+  //    both "played" and up next), 2. collapse consecutive duplicates, 3. take maxPast, reverse
+  const shown = new Set([now, ...next].filter(Boolean).map((t) => t.uri));
   const past = [];
-  for (; i < tracks.length && past.length < maxPast; i++) {
-    if (past.length && past[past.length - 1].uri === tracks[i].uri) continue;
-    past.push(tracks[i]);
+  for (const t of tracks) {
+    if (past.length >= maxPast) break;
+    if (shown.has(t.uri)) continue;
+    if (past.length && past[past.length - 1].uri === t.uri) continue;
+    past.push(t);
   }
   past.reverse();
-
-  const next = (queue || []).filter(Boolean).slice(0, maxNext);
 
   const rows = [
     ...past.map((track, j) => ({ role: "past", offset: j - past.length, track })),

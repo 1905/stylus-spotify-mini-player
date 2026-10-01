@@ -32,6 +32,13 @@ describe("buildRun", () => {
     expect(past.map((x) => x.track.uri)).toEqual([T(2).uri]);
   });
 
+  it("after Prev: past never repeats now or a visible next track", () => {
+    // was on 2, pressed Prev: 2 observed as played, now is 1 again, 2 is back in the queue
+    const run = buildRun({ history: hist(2, 1, 3), now: T(1), queue: [T(2), T(4)] });
+    expect(run.map((x) => `${x.role}:${x.track.id}`)).toEqual(["past:t3", "now:t1", "next:t2", "next:t4"]);
+    expect(run.every((x) => x.key.endsWith("~0"))).toBe(true);
+  });
+
   it("consecutive duplicate uris collapse", () => {
     const run = buildRun({ history: hist(3, 3, 2, 2, 2, 1), now: T(9), queue: [] });
     const past = run.filter((x) => x.role === "past");
@@ -80,7 +87,7 @@ describe("buildRun", () => {
   });
 
   it("repeated uri in the display list gets ~k suffix", () => {
-    const run = buildRun({ history: hist(1), now: T(2), queue: [T(1)] });
-    expect(run.map((x) => x.key)).toEqual([`${T(1).uri}~0`, `${T(2).uri}~0`, `${T(1).uri}~1`]);
+    const run = buildRun({ history: [], now: T(2), queue: [T(1), T(3), T(1)] });
+    expect(run.map((x) => x.key)).toEqual([`${T(2).uri}~0`, `${T(1).uri}~0`, `${T(3).uri}~0`, `${T(1).uri}~1`]);
   });
 });

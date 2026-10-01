@@ -249,7 +249,12 @@ async fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, String> {
 }
 
 /// Returns a valid access token, refreshing if expired. Errors if not logged in.
+/// Serializes refreshes: Spotify rotates the refresh token, so two concurrent
+/// refreshes with the same old token can get `invalid_grant` and log the user out.
+static REFRESH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 pub async fn valid_access_token() -> Result<String, String> {
+    let _guard = REFRESH_LOCK.lock().await;
     let mut tokens = load_tokens().ok_or("AUTH_EXPIRED: not logged in")?;
     if now() < tokens.expires_at && !tokens.access_token.is_empty() {
         return Ok(tokens.access_token);

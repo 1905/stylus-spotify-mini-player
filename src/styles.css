@@ -517,7 +517,8 @@ svg {
   opacity: 0.3;
 }
 
-.is-idle .transport {
+.is-idle .transport,
+.is-other .scrub-row {
   visibility: hidden;
 }
 
@@ -713,6 +714,7 @@ svg {
 /* covers inside overlays */
 .art {
   position: relative;
+  display: block; /* a <span>: inline would ignore width and aspect-ratio */
   flex: none;
   aspect-ratio: 1;
   border-radius: 4px;
@@ -1065,7 +1067,7 @@ svg {
   }
 
   .now {
-    margin-top: calc(36px - var(--cap));
+    margin-top: calc(48px - var(--cap));
   }
 
   .now-artist {

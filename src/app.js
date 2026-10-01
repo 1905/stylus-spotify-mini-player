@@ -29,6 +29,7 @@ const state = {
   loaded: false,
   error: null,
   overlay: null,
+  other: false, // a device is active but plays something that isn't a song
   gen: { detail: 0, search: 0 },
 };
 
@@ -164,11 +165,18 @@ async function refresh() {
   const s = await invoke("playback_state");
   tick++;
 
-  if (!s || !s.active) {
+  // active but no track = an ad or a podcast episode: keep the device, show no cover
+  state.other = Boolean(s && s.active && !(s.track && s.track.uri));
+  if (state.other) {
+    state.device = { id: s.device_id, name: s.device_name };
+    if (performance.now() > state.holdUntil) state.isPlaying = Boolean(s.is_playing);
+  }
+
+  if (!s || !s.active || state.other) {
     const hadNow = Boolean(state.now);
     if (hadNow) observe(state.now);
     state.now = null;
-    state.isPlaying = false;
+    if (!state.other) state.isPlaying = false;
     state.progressMs = 0;
     if (hadNow || !state.loaded || tick % QUEUE_EVERY === 0) {
       await Promise.all([discover(), loadHistory()]);
@@ -338,7 +346,10 @@ function renderNow() {
   }
   let head = "Nothing playing";
   let line = "Pick a playlist from your library to start.";
-  if (state.error && !state.loaded) {
+  if (state.other && state.device) {
+    head = `Playing on ${state.device.name}`;
+    line = "An ad or a podcast is on. Songs show up here.";
+  } else if (state.error && !state.loaded) {
     head = "Can't reach Spotify";
     line = "Check your connection. Retrying every few seconds.";
   } else if (state.devices && state.devices.length === 0) {
@@ -355,13 +366,17 @@ function renderNow() {
 function renderChrome() {
   const stage = $("stage");
   const idle = !state.now;
-  stage.classList.toggle("is-playing", state.isPlaying && !idle);
-  stage.classList.toggle("is-idle", idle);
+  const other = idle && state.other; // an ad or a podcast: only play/pause makes sense
+  stage.classList.toggle("is-playing", state.isPlaying && (!idle || other));
+  stage.classList.toggle("is-idle", idle && !other);
+  stage.classList.toggle("is-other", other);
   $("playBtn").setAttribute("aria-label", state.isPlaying ? "Pause" : "Play");
-  for (const id of ["prevBtn", "playBtn", "nextBtn"]) $(id).disabled = idle;
+  for (const id of ["prevBtn", "nextBtn"]) $(id).disabled = idle;
+  $("playBtn").disabled = idle && !other;
+  $("scrub").tabIndex = idle ? -1 : 0;
 
   const noDevice = state.devices && state.devices.length === 0 && idle;
-  $("libraryBtn").classList.toggle("is-primary", idle && !noDevice && state.loaded);
+  $("libraryBtn").classList.toggle("is-primary", idle && !other && !noDevice && state.loaded);
 
   const dev = $("device");
   dev.hidden = !state.device;
@@ -387,6 +402,7 @@ function renderProgress() {
     $("curTime").textContent = fmtTime(p);
     $("durTime").textContent = fmtTime(dur);
     $("scrub").setAttribute("aria-valuenow", String(Math.round(pct)));
+    $("scrub").setAttribute("aria-valuetext", `${fmtTime(p)} of ${fmtTime(dur)}`);
   }
 }
 
@@ -472,7 +488,7 @@ async function playUris(uris) {
 }
 
 async function togglePlay() {
-  if (!state.now) return;
+  if (!state.now && !state.other) return;
   const was = state.isPlaying;
   state.progressMs = progress();
   state.progressAt = performance.now();
@@ -496,11 +512,26 @@ async function skip(cmd) {
   kick();
 }
 
-async function seekTo(ev) {
+function seekClick(ev) {
   if (!state.now || !state.now.duration_ms) return;
   const r = $("scrub").getBoundingClientRect();
-  const ratio = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
-  const positionMs = Math.round(ratio * state.now.duration_ms);
+  seekTo(Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * state.now.duration_ms);
+}
+
+const SEEK_STEP_MS = 5000;
+
+/** Arrow keys on the focused scrub bar: ±5s, Home/End jump to the ends. */
+function seekKey(ev) {
+  if (!state.now || !state.now.duration_ms) return;
+  const p = progress();
+  const to = { ArrowLeft: p - SEEK_STEP_MS, ArrowRight: p + SEEK_STEP_MS, Home: 0, End: state.now.duration_ms - 1000 }[ev.key];
+  if (to === undefined) return;
+  ev.preventDefault();
+  seekTo(Math.min(state.now.duration_ms, Math.max(0, to)));
+}
+
+async function seekTo(ms) {
+  const positionMs = Math.round(ms);
   state.progressMs = positionMs;
   state.progressAt = performance.now();
   renderProgress();
@@ -767,7 +798,8 @@ function onKey(e) {
     return;
   }
   if (e.code !== "Space" || $("stage").hidden || typing(e.target)) return;
-  e.preventDefault(); // also stops a focused button from activating
+  if (e.target.closest && e.target.closest("button, a, [role='slider']")) return; // Space presses what has focus
+  e.preventDefault(); // stops the page from scrolling
   if (e.type === "keydown" && !e.repeat) togglePlay();
 }
 
@@ -790,7 +822,8 @@ async function boot() {
   $("playBtn").addEventListener("click", togglePlay);
   $("prevBtn").addEventListener("click", () => skip("previous_track"));
   $("nextBtn").addEventListener("click", () => skip("next_track"));
-  $("scrub").addEventListener("click", seekTo);
+  $("scrub").addEventListener("click", seekClick);
+  $("scrub").addEventListener("keydown", seekKey);
 
   $("libraryBtn").addEventListener("click", openLibrary);
   $("searchBtn").addEventListener("click", openSearch);

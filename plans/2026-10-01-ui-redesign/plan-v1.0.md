@@ -120,7 +120,7 @@ Removed: `is_authenticated`, `get_profile`, `get_access_token`, `set_volume`.
 
 **Dev scenarios** (`dev/index.html?s=`):
 - `playing` (default), `paused`, `nothing`, `nodevice`, `login`, `reconnect`, `error`
-- `library`, `library-detail`, `search`, `search-empty`
+- `library`, `library-detail`, `search`, `search-empty`, `ad` (active device, no track)
 - `long-titles`
 
 Viewport is set by QA; the page has no viewport param.

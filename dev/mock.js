@@ -8,7 +8,7 @@
 
   const SCENARIOS = [
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
-    "library", "library-detail", "search", "search-empty", "long-titles",
+    "library", "library-detail", "search", "search-empty", "long-titles", "ad",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -108,6 +108,7 @@
     get_recently_played: () => clone(state.history.slice(0, 30)),
 
     playback_state: () => {
+      if (scenario === "ad") return { active: true, is_playing: state.isPlaying, progress_ms: 0, device_id: DEVICE.id, device_name: DEVICE.name, track: null };
       if (!state.active || !state.now) return { active: false };
       if (state.now.duration_ms && progress() >= state.now.duration_ms) advance();
       if (!state.now) return { active: false };
