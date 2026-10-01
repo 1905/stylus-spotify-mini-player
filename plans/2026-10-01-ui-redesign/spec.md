@@ -281,13 +281,13 @@ What shipped differs from the text above in these places:
 
 - **Now cover under 900px** is `min(260px, 36vh)`. At 800×600 it renders 216px, so the stage fits a 600px-tall window.
 - **Past covers cut by the window edge** are hidden (`is-off`), so 1440 can show 3 instead of 4.
-- **History rule.** A track left after less than 30s (or half its length, if shorter) is not recorded as played. This matches Spotify's own play count. Past never repeats the current track. Queued repeats keep their earlier plays.
+- **History rule.** A track that played for less than 30s of real listening time (or half its length, if shorter) is not recorded as played. Seeks and pauses don't count as listening. This matches Spotify's own play count. Past never repeats the current track. Queued repeats keep their earlier plays.
 - **Ads and podcasts.** `playback_state` returns `track: null` for them. The stage shows "Playing on {device}" and "An ad or a podcast is on. Songs show up here." Play/pause still works; prev, next and scrub are off.
 - **Keyboard.** Space presses the focused button. With nothing focused it toggles play. The scrub bar is focusable when a song plays: arrows seek ±5s, Home/End jump to the ends.
 - **Polling.** It stops while the window is hidden and restarts with a fresh poll when it is visible again. With nothing playing, every 10th tick fetches the device list only.
 - **Auth.** Tokens are cached in memory under one async mutex, which also serializes refreshes. Spotify rotates refresh tokens. Every HTTP call has a 5s connect and 15s total deadline. The login callback listener gives up after 3 minutes.
 - **Stale responses.** Every `invoke` belongs to a login session. A response from before a logout never settles, so it can't log out the new session. Within a session, a poll epoch ignores polls from before a stop or restart. A restart always re-renders in full.
-- **History merge** (`mergeHistory` in `lib/timeline.js`). Session plays match recently-played rows one-to-one, closest time first, within 15 min. A replay stays until the API reports it.
+- **History merge** (`mergeHistory` in `lib/timeline.js`). Session plays match recently-played rows one-to-one, closest time first, within 2 min. `played_at` is the end of a play, which was measured on 11 real plays. Our observation is taken at the same moment. A replay stays until the API reports it.
 - **Logout** clears all account data: playlists cache, history, session plays, queue and the rendered run. The next login may be another account.
 - **After a polling gap** (hidden window), the first poll never records the old track as played. A failed history fetch is retried every 10th tick until it succeeds.
 - **Search albums** return `{id, name, artists, cover}` only.

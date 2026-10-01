@@ -98,7 +98,7 @@ describe("buildRun", () => {
 describe("mergeHistory", () => {
   const at = (min) => `2026-10-01T10:${String(min).padStart(2, "0")}:00.000Z`;
   const row = (n, min) => ({ track: T(n), played_at: at(min) });
-  const W = 15 * 60 * 1000;
+  const W = 2 * 60 * 1000; // app.js SESSION_MATCH_MS
 
   it("a session play the API already has is dropped; the rest is newest first", () => {
     const out = mergeHistory([row(1, 5)], [row(2, 8), row(1, 5)], W);
@@ -109,6 +109,12 @@ describe("mergeHistory", () => {
     // B played at 10:03 (API and session), B again at 10:09 (session only, API lagging)
     const out = mergeHistory([row(2, 3), row(3, 6)], [row(2, 9), row(2, 3)], W);
     expect(out.map((r) => r.track.id + "@" + r.played_at.slice(14, 16))).toEqual(["t2@09", "t3@06", "t2@03"]);
+  });
+
+  it("an earlier API play doesn't eat a new replay (played_at is the end of a play)", () => {
+    // API: A ended 10:00, B 10:04. The app saw A end again at 10:08; the API lags.
+    const out = mergeHistory([row(2, 4), row(1, 0)], [row(1, 8)], 2 * 60 * 1000);
+    expect(out.map((r) => r.track.id + "@" + r.played_at.slice(14, 16))).toEqual(["t1@08", "t2@04", "t1@00"]);
   });
 
   it("a session play far from any API play is kept", () => {

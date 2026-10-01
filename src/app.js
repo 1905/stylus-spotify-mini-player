@@ -20,7 +20,8 @@ const POLL_MS = 1000;
 const ERROR_POLL_MS = 4000;
 const QUEUE_EVERY = 10; // ticks
 const HOLD_MS = 1500; // ignore polled is_playing right after a play/pause click
-const SESSION_MATCH_MS = 15 * 60 * 1000; // a session row this close to an API row is the same play
+// played_at is when a play ended, the same moment we see a track leave: closer than this = same play
+const SESSION_MATCH_MS = 2 * 60 * 1000;
 const PLAYED_MS = 30 * 1000; // Spotify counts a play after 30s; a track skipped sooner isn't history
 const small = matchMedia("(max-width: 899px)");
 
@@ -34,6 +35,8 @@ const state = {
   progressMs: 0,
   progressAt: 0,
   holdUntil: 0,
+  listenedMs: 0, // real playing time of "now" (seeks and pauses don't count)
+  listenAt: 0,
   queue: [],
   recent: [], // get_recently_played, newest first
   historyOk: false, // false after a failed history fetch: periodic ticks retry it
@@ -142,6 +145,7 @@ function startPolling() {
   tick = 0;
   state.loaded = false; // full fetch and render: a stopped poll may have skipped one
   state.now = null; // unknown what played during the gap: don't record the old track as played
+  state.listenedMs = 0;
   schedule(0);
 }
 
@@ -196,7 +200,7 @@ async function refresh(epoch) {
   const s = await invoke("playback_state");
   if (epoch !== pollEpoch) return; // a newer session took over while this one waited
   tick++;
-  const leftAt = progress(); // how far the old "now" got, before this poll overwrites it
+  listen(); // close the old "now"'s listening time before this poll overwrites it
   const active = Boolean(s && s.active);
   const track = active && s.track && s.track.uri ? s.track : null;
   const mode = track ? "track" : active ? "other" : "idle";
@@ -213,7 +217,8 @@ async function refresh(epoch) {
   state.progressAt = performance.now();
 
   const changed = (state.now && state.now.uri) !== (track && track.uri);
-  if (changed && state.now) observe(state.now, leftAt);
+  if (changed && state.now) observe(state.now, state.listenedMs);
+  if (changed) state.listenedMs = 0;
   state.now = track;
 
   if (changed || modeChanged || !state.loaded) {
@@ -253,6 +258,15 @@ async function refresh(epoch) {
     }
   }
   renderChrome();
+}
+
+const LISTEN_STEP_CAP_MS = ERROR_POLL_MS + 1000; // a longer step is a stall, not listening
+
+/** Add the time since the last call to listenedMs, if a song was playing. */
+function listen() {
+  const t = performance.now();
+  if (state.now && state.isPlaying) state.listenedMs += Math.min(t - state.listenAt, LISTEN_STEP_CAP_MS);
+  state.listenAt = t;
 }
 
 /** Remember a track that just left "now", in case recently-played lags behind. */
@@ -526,6 +540,7 @@ async function playUris(uris) {
 async function togglePlay() {
   if (state.mode === "idle") return;
   const was = state.isPlaying;
+  listen();
   state.progressMs = progress();
   state.progressAt = performance.now();
   state.isPlaying = !was;
