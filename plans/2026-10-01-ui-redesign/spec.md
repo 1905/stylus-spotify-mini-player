@@ -288,9 +288,9 @@ What shipped differs from the text above in these places:
 - **Auth.** Tokens are cached in memory under one async mutex, which also serializes refreshes. Spotify rotates refresh tokens. Every HTTP call has a 5s connect and 15s total deadline. The login callback listener gives up after 3 minutes.
 - **Stale responses.** Every `invoke` belongs to a login session. A response from before a logout never settles, so it can't log out the new session. Within a session, a poll epoch ignores polls from before a stop or restart. A restart always re-renders in full.
 - **History merge** (`mergeHistory` in `lib/timeline.js`). Session plays match recently-played rows one-to-one, closest time first, within 2 min. `played_at` is the end of a play, which was measured on 11 real plays. Our observation is taken at the same moment. A replay stays until the API reports it.
-- **Logout** clears all account data: playlists cache, history, session plays, queue and the rendered run. The next login may be another account.
+- **Logout** cancels a pending search and pending loads, and a session-end signal arriving on the login screen is ignored. Logout also clears all account data: playlists cache, history, session plays, queue and the rendered run. The next login may be another account.
 - **After a polling gap** (hidden window), the first poll never records the old track as played. A failed history fetch is retried every 10th tick until it succeeds.
-- **Play/pause** flips the UI at once and sends one command at a time. A click during a pending command queues the latest wish, so the last click always wins. Login saves new tokens under the token lock.
+- **Player commands** (play, pause, next, previous, seek, play from Library/Search) run in one ordered chain. Spotify doesn't promise order across player endpoints. Play/pause flips the UI at once and sends one command at a time. A click during a pending command queues the latest wish, so the last click always wins. Login saves new tokens under the token lock.
 - **Search albums** return `{id, name, artists, cover}` only.
 - **Dev harness** has an extra `ad` scenario. `window.__mock.handlers` lets QA inject failures. `src/markup.test.js` fails if `dev/index.html` drifts from `src/index.html`.
 - **Not checked** in the real Tauri WKWebView window. Web harness only, per the user.

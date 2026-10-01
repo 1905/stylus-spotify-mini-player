@@ -88,6 +88,10 @@ function showLogin(kind) {
   authSession++;
   playlistsLoading = false; // a load from the old session will never finish
   playBusy = false; // likewise a play/pause command
+  playerChain = Promise.resolve(); // and the player commands queued behind it
+  clearTimeout(searchTimer); // a debounced search must not start in the next session
+  state.gen.search++;
+  state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
   playlists = null;
   listScroll = 0;
@@ -125,6 +129,7 @@ async function onLogin() {
 }
 
 function expire() {
+  if ($("stage").hidden) return; // already on the login screen: a straggler, nothing to end
   showLogin("ended");
   $("loginBtn").focus(); // the stage the user was in is gone: land on the way back
 }
@@ -495,8 +500,18 @@ async function paint(url) {
 
 // ---------- transport ----------
 
-/** Run a player command; on NO_ACTIVE_DEVICE rediscover the device once and retry once. */
-async function withDevice(fn) {
+// Spotify doesn't promise order across player endpoints: every player command waits
+// for the one before it, so a slow pause can't land after a later play.
+let playerChain = Promise.resolve();
+
+/** Run a player command after the ones before it; on NO_ACTIVE_DEVICE rediscover the device once and retry once. */
+function withDevice(fn) {
+  const run = playerChain.then(() => withDeviceNow(fn));
+  playerChain = run.catch(() => {});
+  return run;
+}
+
+async function withDeviceNow(fn) {
   try {
     await fn(state.device && state.device.id);
     return true;
