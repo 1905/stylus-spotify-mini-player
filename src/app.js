@@ -238,6 +238,17 @@ async function refresh(epoch) {
   state.now = track;
 
   if (changed || modeChanged || !state.loaded) {
+    // show the new track now: what's on screen is what a seek or a skip acts on.
+    // (Idle copy waits for the device list on first load, or it would flicker.)
+    if (track || state.loaded) {
+      // until the fresh queue lands: the old one usually starts with the track that just began
+      if (track && state.queue.length && state.queue[0].uri === track.uri) state.queue = state.queue.slice(1);
+      if (!track) state.queue = [];
+      renderNow();
+      if (state.loaded) renderRun();
+      renderChrome();
+      if (track) paint(track.cover);
+    }
     // a song needs its queue; with no song, the device list says who could play
     const [queue, recent, devices] = await Promise.all([
       track ? fetchOr("get_queue") : [],
@@ -252,7 +263,6 @@ async function refresh(epoch) {
     state.loaded = true;
     renderNow();
     renderRun();
-    if (track) paint(track.cover);
   } else if (tick % QUEUE_EVERY === 0 && mode !== "other") {
     // between changes only the queue (song) or the device list (idle) can move
     const [fresh, recent] = await Promise.all([
