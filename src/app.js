@@ -313,6 +313,8 @@ function center() {
   const cur = parseFloat(run.style.getPropertyValue("--shift")) || 0;
   const delta = run.clientWidth / 2 - (anchor.offsetLeft + anchor.offsetWidth / 2);
   run.style.setProperty("--shift", `${cur + delta}px`);
+  // a past cover cut by the window edge reads as a sliver: hide it instead
+  for (const el of run.querySelectorAll('[data-role="past"]')) el.classList.toggle("is-off", el.offsetLeft < 0);
 }
 
 // ---------- now block, chrome, progress ----------
@@ -454,6 +456,21 @@ async function withDevice(fn) {
   return false;
 }
 
+/** The known device id, or a freshly discovered one; throws NO_ACTIVE_DEVICE when there is none. */
+async function needDevice(id) {
+  const deviceId = id || (await discover())?.id;
+  if (!deviceId) throw "NO_ACTIVE_DEVICE: no device";
+  return deviceId;
+}
+
+/** Start playback of these uris; returns true on success. */
+async function playUris(uris) {
+  if (!uris.length) return false;
+  const ok = await withDevice(async (id) => invoke("play_on_device", { deviceId: await needDevice(id), uris }));
+  kick();
+  return ok;
+}
+
 async function togglePlay() {
   if (!state.now) return;
   const was = state.isPlaying;
@@ -462,12 +479,9 @@ async function togglePlay() {
   state.isPlaying = !was;
   state.holdUntil = performance.now() + HOLD_MS;
   renderChrome();
-  const ok = await withDevice(async (id) => {
-    if (was) return invoke("pause");
-    const deviceId = id || (await discover())?.id;
-    if (!deviceId) throw "NO_ACTIVE_DEVICE: no device";
-    return invoke("resume", { deviceId });
-  });
+  const ok = await withDevice(async (id) =>
+    was ? invoke("pause") : invoke("resume", { deviceId: await needDevice(id) }),
+  );
   if (!ok) {
     state.isPlaying = was;
     state.holdUntil = 0;
@@ -494,11 +508,264 @@ async function seekTo(ev) {
   kick();
 }
 
-// ---------- keyboard: Space = play/pause ----------
+// ---------- overlays: one open at a time ----------
+
+let returnFocus = null;
+
+function openOverlay(name) {
+  if (state.overlay === name) return;
+  if (state.overlay) $(state.overlay).hidden = true;
+  else returnFocus = document.activeElement;
+  state.overlay = name;
+  $(name).hidden = false;
+  $("stage").inert = true;
+}
+
+function closeOverlay() {
+  if (!state.overlay) return;
+  $(state.overlay).hidden = true;
+  state.overlay = null;
+  $("stage").inert = false;
+  returnFocus?.focus?.();
+  returnFocus = null;
+}
+
+/** Overlay commands that hit a dead session send the user to login. */
+function overlayFailed(e) {
+  if (!isCode(e, "AUTH_EXPIRED")) return false;
+  closeOverlay();
+  expire();
+  return true;
+}
+
+const artHtml = (url, name) =>
+  url
+    ? `<img src="${esc(url)}" alt="" draggable="false" data-letter="${esc(letterOf(name))}" />`
+    : letterTile({ name });
+
+/** Overlay covers that fail to load become the letter tile. */
+function onImgError(e) {
+  const img = e.target;
+  if (img.tagName !== "IMG" || !img.dataset.letter) return;
+  img.replaceWith(Object.assign(document.createElement("span"), { className: "letter", textContent: img.dataset.letter }));
+}
+
+/** A playable track row. num: show the position; art: show the cover (album rows skip it, it's the same every row). */
+function trackRow(t, i, { num, art }) {
+  const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}`;
+  return (
+    `<button class="row row-track${kind}" type="button" data-i="${i}" title="${esc(t.name)}">` +
+    (num ? `<span class="row-num">${i + 1}</span>` : "") +
+    (art ? `<span class="art row-art">${artHtml(t.cover, t.name)}</span>` : "") +
+    `<span class="row-text"><span class="row-title">${esc(t.name)}</span><span class="row-sub">${esc(t.artists)}</span></span>` +
+    `<span class="row-time">${fmtTime(t.duration_ms)}</span></button>`
+  );
+}
+
+// ---------- library: level 1 playlists, level 2 tracks ----------
+
+let playlists = null; // loaded once, then cached
+let playlistsLoading = false;
+let detailTracks = [];
+let listScroll = 0;
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** Smallest image that still looks sharp at 56px on a 2x screen. */
+function pickImage(images) {
+  const list = images || [];
+  return (list.filter((im) => !im.width || im.width >= 112).pop() || list[0] || {}).url || null;
+}
+
+function openLibrary() {
+  openOverlay("library");
+  showList();
+  $("sheet").focus();
+  if (!playlists) loadPlaylists();
+}
+
+function showList() {
+  state.gen.detail++; // drop any detail response still in flight
+  detailTracks = [];
+  $("libDetail").hidden = true;
+  $("libBack").hidden = true;
+  $("libLevel1").hidden = false;
+  $("libTitle").hidden = false;
+  $("sheetBody").scrollTop = listScroll;
+}
+
+async function loadPlaylists() {
+  if (playlistsLoading) return;
+  playlistsLoading = true;
+  setText("listStatus", "Loading your playlists…");
+  try {
+    playlists = (await invoke("get_playlists")) || [];
+    renderPlaylists();
+  } catch (e) {
+    if (!overlayFailed(e)) setText("listStatus", `Couldn't load your playlists — ${reason(e)}`);
+  } finally {
+    playlistsLoading = false;
+  }
+}
+
+function renderPlaylists() {
+  setText("listStatus", playlists.length ? "" : "No playlists yet.");
+  $("libList").innerHTML = playlists
+    .map(
+      (p, i) =>
+        `<button class="row row-playlist" type="button" data-id="${esc(p.id)}" data-i="${i}" title="${esc(p.name)}">` +
+        `<span class="art row-art">${artHtml(pickImage(p.images), p.name)}</span>` +
+        `<span class="row-text"><span class="row-title">${esc(p.name)}</span>` +
+        `<span class="row-sub">${plural((p.tracks && p.tracks.total) || 0, "track", "tracks")}</span></span></button>`,
+    )
+    .join("");
+}
+
+/** Level 2 for a playlist or an album: {kind, id, name, cover, sub}. */
+async function openDetail(src) {
+  if (state.overlay !== "library") {
+    openOverlay("library");
+    $("sheet").focus();
+  }
+  if (!$("libLevel1").hidden) listScroll = $("sheetBody").scrollTop;
+  const gen = ++state.gen.detail;
+  detailTracks = [];
+  $("libLevel1").hidden = true;
+  $("libTitle").hidden = true;
+  $("libBack").hidden = false;
+  $("libDetail").hidden = false;
+  $("detailCover").innerHTML = artHtml(src.cover, src.name);
+  $("detailName").textContent = src.name;
+  $("detailName").title = src.name;
+  setText("detailSub", src.sub);
+  $("detailPlay").disabled = true;
+  $("detailRows").innerHTML = "";
+  setText("detailStatus", "Loading tracks…");
+  $("sheetBody").scrollTop = 0;
+
+  const album = src.kind === "album";
+  let tracks;
+  try {
+    tracks = album
+      ? await invoke("get_album_tracks", { albumId: src.id })
+      : await invoke("get_playlist_tracks", { playlistId: src.id });
+  } catch (e) {
+    if (gen !== state.gen.detail) return;
+    if (!overlayFailed(e)) setText("detailStatus", `Couldn't load tracks — ${reason(e)}`);
+    return;
+  }
+  if (gen !== state.gen.detail) return; // a newer detail (or the list) took over
+
+  detailTracks = (tracks || []).filter((t) => t && t.uri);
+  if (!album) setText("detailSub", plural(detailTracks.length, "track", "tracks"));
+  setText("detailStatus", detailTracks.length ? "" : album ? "This album is empty." : "This playlist is empty.");
+  $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: !album })).join("");
+  $("detailPlay").disabled = !detailTracks.length;
+}
+
+async function playDetailFrom(i) {
+  const uris = detailTracks.slice(i).map((t) => t.uri);
+  if (await playUris(uris)) closeOverlay();
+}
+
+// ---------- search: songs + albums, debounced, last request wins ----------
+
+const SEARCH_DEBOUNCE_MS = 250;
+let searchTimer = null;
+let searchHits = { tracks: [], albums: [] };
+
+function openSearch() {
+  openOverlay("search");
+  const input = $("searchInput");
+  input.focus();
+  input.select();
+}
+
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  const gen = ++state.gen.search;
+  const q = $("searchInput").value.trim();
+  if (!q) {
+    searchHits = { tracks: [], albums: [] };
+    $("searchResults").innerHTML = "";
+    $("searchResults").hidden = true;
+    return;
+  }
+  searchTimer = setTimeout(() => runSearch(q, gen), SEARCH_DEBOUNCE_MS);
+}
+
+function searchMessage(text) {
+  searchHits = { tracks: [], albums: [] };
+  const box = $("searchResults");
+  box.innerHTML = `<p class="status">${esc(text)}</p>`;
+  box.hidden = false;
+}
+
+async function runSearch(q, gen) {
+  let res;
+  try {
+    res = await invoke("search", { query: q });
+  } catch (e) {
+    if (gen !== state.gen.search) return;
+    if (!overlayFailed(e)) searchMessage(`Search failed — ${reason(e)}`);
+    return;
+  }
+  if (gen !== state.gen.search) return;
+  const tracks = ((res && res.tracks) || []).filter((t) => t && t.uri).slice(0, 10);
+  const albums = ((res && res.albums) || []).filter((a) => a && a.id).slice(0, 10);
+  if (!tracks.length && !albums.length) return searchMessage(`No songs or albums for "${q}".`);
+  searchHits = { tracks, albums };
+
+  let html = "";
+  if (tracks.length) {
+    html += `<section class="group"><h3 class="group-title">Songs</h3><div class="rows">`;
+    html += tracks.map((t, i) => trackRow(t, i, { num: false, art: true })).join("");
+    html += `</div></section>`;
+  }
+  if (albums.length) {
+    html += `<section class="group"><h3 class="group-title">Albums</h3><div class="albums">`;
+    html += albums
+      .map(
+        (a, i) =>
+          `<button class="album" type="button" data-album="${i}" title="${esc(a.name)}">` +
+          `<span class="art">${artHtml(a.cover, a.name)}</span>` +
+          `<span class="album-name">${esc(a.name)}</span><span class="album-sub">${esc(a.artists)}</span></button>`,
+      )
+      .join("");
+    html += `</div></section>`;
+  }
+  const box = $("searchResults");
+  box.innerHTML = html;
+  box.hidden = false;
+  box.scrollTop = 0;
+}
+
+async function onSearchClick(e) {
+  const song = e.target.closest(".row-track");
+  if (song) {
+    const t = searchHits.tracks[Number(song.dataset.i)];
+    if (t && (await playUris([t.uri]))) closeOverlay();
+    return;
+  }
+  const al = e.target.closest("[data-album]");
+  if (al) {
+    const a = searchHits.albums[Number(al.dataset.album)];
+    if (!a) return;
+    if (!playlists) loadPlaylists(); // so Back has something to show
+    openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: a.artists });
+  }
+}
+
+// ---------- keyboard: Space = play/pause, Esc = close the overlay ----------
 
 const typing = (t) => t && t.closest && t.closest("input, textarea, select, [contenteditable]");
 
 function onKey(e) {
+  if (e.key === "Escape" && e.type === "keydown" && state.overlay) {
+    e.preventDefault();
+    closeOverlay();
+    return;
+  }
   if (e.code !== "Space" || $("stage").hidden || typing(e.target)) return;
   e.preventDefault(); // also stops a focused button from activating
   if (e.type === "keydown" && !e.repeat) togglePlay();
@@ -524,6 +791,26 @@ async function boot() {
   $("prevBtn").addEventListener("click", () => skip("previous_track"));
   $("nextBtn").addEventListener("click", () => skip("next_track"));
   $("scrub").addEventListener("click", seekTo);
+
+  $("libraryBtn").addEventListener("click", openLibrary);
+  $("searchBtn").addEventListener("click", openSearch);
+  for (const id of ["library", "search"]) {
+    $(id).addEventListener("click", (e) => e.target.closest("[data-close]") && closeOverlay());
+    $(id).addEventListener("error", onImgError, true);
+  }
+  $("libBack").addEventListener("click", showList);
+  $("libList").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-id]");
+    const p = row && playlists && playlists[Number(row.dataset.i)];
+    if (p) openDetail({ kind: "playlist", id: p.id, name: p.name, cover: pickImage(p.images), sub: plural((p.tracks && p.tracks.total) || 0, "track", "tracks") });
+  });
+  $("detailRows").addEventListener("click", (e) => {
+    const row = e.target.closest("[data-i]");
+    if (row) playDetailFrom(Number(row.dataset.i));
+  });
+  $("detailPlay").addEventListener("click", () => playDetailFrom(0));
+  $("searchInput").addEventListener("input", onSearchInput);
+  $("searchResults").addEventListener("click", onSearchClick);
   document.addEventListener("keydown", onKey);
   document.addEventListener("keyup", onKey);
   addEventListener("resize", center);

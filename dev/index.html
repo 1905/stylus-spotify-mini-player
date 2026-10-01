@@ -81,14 +81,49 @@
       </footer>
     </main>
 
-    <aside id="library" class="library" hidden>
-      <div id="libList"></div>
-      <div id="libDetail"></div>
-    </aside>
+    <div id="library" class="overlay overlay-library" hidden>
+      <div class="backdrop" data-close></div>
+      <aside id="sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Library" tabindex="-1">
+        <header class="sheet-bar">
+          <h2 id="libTitle" class="sheet-title">Library</h2>
+          <button id="libBack" class="btn btn-ghost btn-back" type="button" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            Library
+          </button>
+          <button class="icon-btn" type="button" data-close aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+          </button>
+        </header>
+        <div id="sheetBody" class="sheet-body">
+          <div id="libLevel1">
+            <p id="listStatus" class="status" role="status" hidden></p>
+            <div id="libList" class="rows"></div>
+          </div>
+          <div id="libDetail" hidden>
+            <div class="detail-head">
+              <div id="detailCover" class="art detail-cover"></div>
+              <div class="detail-meta">
+                <h2 id="detailName" class="sheet-title detail-name"></h2>
+                <p id="detailSub" class="detail-sub"></p>
+                <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
+              </div>
+            </div>
+            <p id="detailStatus" class="status" role="status" hidden></p>
+            <div id="detailRows" class="rows"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
 
-    <div id="search" class="search" hidden>
-      <input id="searchInput" type="search" placeholder="Songs or albums" autocomplete="off" spellcheck="false" />
-      <div id="searchResults"></div>
+    <div id="search" class="overlay overlay-search" hidden>
+      <div class="backdrop" data-close></div>
+      <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
+        <label class="palette-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
+          <input id="searchInput" type="text" placeholder="Songs or albums" aria-label="Search songs or albums" autocomplete="off" spellcheck="false" />
+        </label>
+        <div id="searchResults" class="palette-results" hidden></div>
+      </div>
     </div>
 
     <div id="toast" class="toast" role="status" hidden></div>

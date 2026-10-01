@@ -320,6 +320,10 @@ svg {
   color: var(--fg-2);
 }
 
+.cover.is-off {
+  visibility: hidden;
+}
+
 /* the empty "now" slot when nothing plays */
 .slot {
   flex: none;
@@ -385,15 +389,20 @@ svg {
 
 /* ---------- transport ---------- */
 
+/* one left-aligned column with the now cover: scrub runs from its left edge to the right margin */
 .transport {
-  padding: 30px var(--gutter) 28px;
+  padding: 30px var(--gutter) 28px var(--axis);
 }
 
 .scrub-row {
   display: grid;
-  grid-template-columns: 44px 1fr 44px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
+}
+
+#curTime {
+  min-width: 30px;
 }
 
 .time {
@@ -455,7 +464,7 @@ svg {
   align-items: center;
   gap: 10px;
   margin-top: 12px;
-  padding-left: calc(50% - var(--now) / 2 - 10px);
+  margin-left: -10px; /* the prev icon, not its hit area, lines up with the column */
 }
 
 .ctl {
@@ -589,6 +598,435 @@ svg {
   font-size: 13px;
 }
 
+/* ---------- overlays: library sheet + search palette ---------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  animation: fade-in 200ms ease both;
+}
+
+.sheet,
+.palette {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.07), transparent 320px),
+    rgb(var(--i));
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
+}
+
+.sheet:focus,
+.palette-field input:focus-visible {
+  outline: none;
+}
+
+.sheet {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 440px;
+  border-right: 1px solid var(--hair);
+  animation: slide-in 320ms var(--ease) both;
+}
+
+.sheet-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 72px;
+  padding: 0 14px 0 24px;
+}
+
+.sheet-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  font-stretch: 85%;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+}
+
+.btn-back {
+  margin-left: -12px;
+  padding-left: 6px;
+}
+
+.btn-back svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  border-radius: 50%;
+  color: var(--fg-2);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn:hover {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+}
+
+.sheet-body,
+.palette-results {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair) transparent;
+}
+
+.sheet-body {
+  padding: 0 12px 24px;
+}
+
+.status {
+  padding: 10px 12px;
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* covers inside overlays */
+.art {
+  position: relative;
+  flex: none;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--hair);
+  container-type: inline-size;
+}
+
+.art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  -webkit-user-drag: none;
+}
+
+.art .letter {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--fg-3);
+  font-size: 42cqw;
+  font-weight: 700;
+  font-stretch: 80%;
+  line-height: 1;
+}
+
+/* rows: playlists, tracks, songs */
+.row {
+  display: grid;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background-color 120ms ease;
+}
+
+.row:hover {
+  background: rgba(246, 244, 248, 0.07);
+}
+
+.row:focus-visible,
+.album:focus-visible {
+  outline-offset: -2px;
+}
+
+.row-playlist {
+  grid-template-columns: 56px minmax(0, 1fr);
+}
+
+.row-playlist .art {
+  width: 56px;
+}
+
+.row-track {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.row-track.has-art {
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+}
+
+.row-track.has-num {
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+}
+
+.row-track.has-num.has-art {
+  grid-template-columns: 22px 40px minmax(0, 1fr) auto;
+}
+
+/* album rows have no cover: keep the row height of a covered row */
+.row-track:not(.has-art) {
+  min-height: 52px;
+}
+
+.row-track .art {
+  width: 40px;
+}
+
+.row-text {
+  min-width: 0;
+}
+
+.row-title,
+.row-sub {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.row-title {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.row-sub {
+  margin-top: 1px;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.row-num,
+.row-time {
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-num {
+  text-align: right;
+}
+
+/* level 2 header */
+.detail-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 20px;
+  padding: 4px 12px 22px;
+}
+
+.detail-cover {
+  width: 132px;
+  border-radius: 6px;
+  box-shadow: 0 24px 50px -24px rgb(0 0 0 / 0.7);
+}
+
+.detail-meta {
+  min-width: 0;
+}
+
+.detail-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding-bottom: 0.06em;
+}
+
+.detail-sub {
+  margin-top: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-2);
+  font-size: 14px;
+}
+
+.btn-play {
+  height: 40px;
+  margin-top: 14px;
+  padding: 0 22px;
+  font-size: 14px;
+}
+
+.btn-play:disabled {
+  opacity: 0.35;
+}
+
+.btn-play:disabled:hover {
+  background: var(--fg);
+}
+
+/* search palette */
+.palette {
+  top: 14vh;
+  left: 50%;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(86vh - 24px);
+  border: 1px solid var(--hair);
+  border-radius: 14px;
+  overflow: hidden;
+  transform: translateX(-50%);
+  animation: drop-in 180ms var(--ease) both;
+}
+
+.palette-field {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 64px;
+  padding: 0 22px;
+  color: var(--fg-3);
+}
+
+.palette-field svg {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.palette-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.palette-field input::placeholder {
+  color: var(--fg-3);
+}
+
+.palette-results {
+  border-top: 1px solid var(--hair);
+  padding: 4px 8px 10px;
+}
+
+/* compact song rows so 10 songs and the albums fit at 900px tall */
+.palette .row-track {
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.palette .row-track .art {
+  width: 36px;
+}
+
+.palette .row-title {
+  line-height: 19px;
+}
+
+.palette .row-sub {
+  line-height: 17px;
+}
+
+.group-title {
+  margin: 0;
+  padding: 10px 12px 4px;
+  color: var(--fg-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.albums {
+  display: flex;
+  gap: 14px;
+  padding: 4px 12px 6px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair) transparent;
+}
+
+.album {
+  flex: none;
+  width: 96px;
+  padding: 0;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.album .art {
+  width: 96px;
+  margin-bottom: 8px;
+  transition: opacity 120ms ease;
+}
+
+.album:hover .art {
+  opacity: 0.8;
+}
+
+.album-name,
+.album-sub {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.album-name {
+  font-size: 13.5px;
+  line-height: 18px;
+  font-weight: 500;
+}
+
+.album-sub {
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 16px;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes slide-in {
+  from { transform: translateX(-100%); }
+}
+
+@keyframes drop-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+}
+
+@media (max-width: 699px) {
+  .sheet {
+    width: 100%;
+    border-right: 0;
+  }
+}
+
 /* ---------- toast ---------- */
 
 .toast {
@@ -641,7 +1079,7 @@ svg {
   }
 
   .transport {
-    padding: 20px var(--gutter) 18px;
+    padding: 20px var(--gutter) 18px var(--axis);
   }
 
   .ctl-play {
