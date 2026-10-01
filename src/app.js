@@ -87,8 +87,7 @@ function showLogin(kind) {
   stopPolling();
   authSession++;
   playlistsLoading = false; // a load from the old session will never finish
-  playBusy = false; // likewise a play/pause command
-  playerChain = Promise.resolve(); // and the player commands queued behind it
+  playerChain = Promise.resolve(); // a player command from the old session will never finish either
   clearTimeout(searchTimer); // a debounced search must not start in the next session
   state.gen.search++;
   state.gen.detail++;
@@ -506,7 +505,8 @@ let playerChain = Promise.resolve();
 
 /** Run a player command after the ones before it; on NO_ACTIVE_DEVICE rediscover the device once and retry once. */
 function withDevice(fn) {
-  const run = playerChain.then(() => withDeviceNow(fn));
+  const sess = authSession; // a command queued before a logout must not run after it
+  const run = playerChain.then(() => (sess === authSession ? withDeviceNow(fn) : false));
   playerChain = run.catch(() => {});
   return run;
 }
@@ -553,30 +553,21 @@ async function playUris(uris) {
   return ok;
 }
 
-let playWanted = null; // the latest play/pause the user asked for
-let playBusy = false; // a play/pause command is running
+let playSeq = 0; // counts play/pause clicks: only the latest one may undo the UI
 
-/** Flip play/pause at once in the UI; send one command at a time until the device has the latest wish. */
+/** Flip play/pause at once in the UI; the command joins the player chain in click order. */
 async function togglePlay() {
   if (state.mode === "idle") return;
   listen();
   state.progressMs = progress();
   state.progressAt = performance.now();
-  state.isPlaying = !state.isPlaying;
+  const want = (state.isPlaying = !state.isPlaying);
   state.holdUntil = performance.now() + HOLD_MS;
   renderChrome();
-  playWanted = state.isPlaying;
-  if (playBusy) return; // the running loop sends it next, in order
-  playBusy = true;
-  let sent = null;
-  let ok = true;
-  while (ok && playWanted !== sent) {
-    const want = (sent = playWanted);
-    ok = await withDevice(async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")));
-  }
-  playBusy = false;
-  if (!ok) {
-    state.isPlaying = !sent; // the device still has the state before the failed command
+  const seq = ++playSeq;
+  const ok = await withDevice(async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")));
+  if (!ok && seq === playSeq) {
+    state.isPlaying = !want; // the device still has the state before this click
     state.holdUntil = 0;
     renderChrome();
   }
