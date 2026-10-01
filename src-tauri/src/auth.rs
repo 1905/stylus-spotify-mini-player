@@ -220,7 +220,7 @@ fn wait_for_code(listener: TcpListener, expected_state: &str) -> Result<String, 
 }
 
 async fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, String> {
-    let client = reqwest::Client::new();
+    let client = http();
     let params = [
         ("grant_type", "authorization_code"),
         ("code", code),
@@ -249,6 +249,21 @@ async fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, String> {
 }
 
 /// Returns a valid access token, refreshing if expired. Errors if not logged in.
+/// One HTTP client for every Spotify call. Finite deadlines: a stalled request
+/// must fail, or it would hold REFRESH_LOCK and freeze every command behind it.
+pub fn http() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .expect("reqwest client")
+        })
+        .clone()
+}
+
 /// Serializes refreshes: Spotify rotates the refresh token, so two concurrent
 /// refreshes with the same old token can get `invalid_grant` and log the user out.
 static REFRESH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -263,7 +278,7 @@ pub async fn valid_access_token() -> Result<String, String> {
         return Err("AUTH_EXPIRED: no refresh token, log in again".into());
     }
     // Refresh.
-    let client = reqwest::Client::new();
+    let client = http();
     let params = [
         ("grant_type", "refresh_token"),
         ("refresh_token", &tokens.refresh_token),

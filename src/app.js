@@ -71,6 +71,8 @@ const LOGIN_COPY = {
 
 function showLogin(kind) {
   stopPolling();
+  returnFocus = null; // the stage is about to hide: nothing to give focus back to
+  closeOverlay();
   state.loginKind = LOGIN_COPY[kind] ? kind : "login";
   const copy = LOGIN_COPY[state.loginKind];
   $("loginTitle").textContent = copy.title;
@@ -322,7 +324,8 @@ function center() {
   const delta = run.clientWidth / 2 - (anchor.offsetLeft + anchor.offsetWidth / 2);
   run.style.setProperty("--shift", `${cur + delta}px`);
   // a past cover cut by the window edge reads as a sliver: hide it instead
-  for (const el of run.querySelectorAll('[data-role="past"]')) el.classList.toggle("is-off", el.offsetLeft < 0);
+  // every cover: a reused element keeps the class when its role changes
+  for (const el of run.querySelectorAll(".cover")) el.classList.toggle("is-off", el.dataset.role === "past" && el.offsetLeft < 0);
 }
 
 // ---------- now block, chrome, progress ----------

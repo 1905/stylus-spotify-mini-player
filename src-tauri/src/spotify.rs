@@ -4,7 +4,7 @@
 //! Errors starting with `AUTH_EXPIRED` or `NO_ACTIVE_DEVICE` are codes the
 //! frontend matches with `startsWith`.
 
-use crate::auth::valid_access_token;
+use crate::auth::{http, valid_access_token};
 use serde_json::{json, Value};
 
 const API: &str = "https://api.spotify.com/v1";
@@ -27,7 +27,7 @@ fn api_path(url: &str) -> &str {
 /// GET returning the parsed body, or None on 204 No Content.
 async fn get_opt(path: &str) -> Result<Option<Value>, String> {
     let token = valid_access_token().await?;
-    let resp = reqwest::Client::new()
+    let resp = http()
         .get(format!("{API}{path}"))
         .bearer_auth(token)
         .send()
@@ -51,7 +51,7 @@ async fn get(path: &str) -> Result<Value, String> {
 /// PUT with a JSON body to a player endpoint. Spotify replies 204 on success.
 async fn put(path: &str, body: Value) -> Result<(), String> {
     let token = valid_access_token().await?;
-    let resp = reqwest::Client::new()
+    let resp = http()
         .put(format!("{API}{path}"))
         .bearer_auth(token)
         .json(&body)
@@ -70,7 +70,7 @@ async fn put(path: &str, body: Value) -> Result<(), String> {
 /// `method` is "PUT" or "POST". 204/202/200 all count as success.
 async fn send_empty(method: &str, path: &str) -> Result<(), String> {
     let token = valid_access_token().await?;
-    let client = reqwest::Client::new();
+    let client = http();
     let req = match method {
         "POST" => client.post(format!("{API}{path}")),
         _ => client.put(format!("{API}{path}")),
@@ -323,7 +323,7 @@ pub async fn get_playlist_tracks(playlist_id: String) -> Result<Value, String> {
     let mut all: Vec<Value> = Vec::new();
     let fields = "next,items(added_at,item(id,uri,name,duration_ms,artists(name),album(name,images)),track(id,uri,name,duration_ms,artists(name),album(name,images)))";
     let mut path = format!(
-        "/playlists/{}/items?limit=100&fields={}",
+        "/playlists/{}/items?limit=50&fields={}",
         playlist_id,
         urlencode(fields)
     );

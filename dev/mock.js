@@ -1,8 +1,8 @@
 // Browser-only stub of window.__TAURI__ for the dev harness. Never shipped.
 // Backed by dev/fixture.json (real Spotify data from dev/capture.py).
 // Scenario from ?s= : playing (default), paused, nothing, nodevice, login, reconnect,
-// error, library, library-detail, search, search-empty, long-titles.
-// QA hook: window.__mock = { scenario, state, invoke }.
+// error, library, library-detail, search, search-empty, long-titles, ad.
+// QA hook: window.__mock = { scenario, state, invoke, advance, handlers }.
 (function () {
   "use strict";
 
@@ -163,7 +163,7 @@
   }
 
   window.__TAURI__ = { core: { invoke } };
-  window.__mock = { scenario, state, invoke, advance };
+  window.__mock = { scenario, state, invoke, advance, handlers }; // handlers: QA swaps one to inject a failure
 
   // Overlay scenarios: drive the real UI once it exists (T5/T6 markup).
   const waitFor = (sel, ms = 5000) =>
