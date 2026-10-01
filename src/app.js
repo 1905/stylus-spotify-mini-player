@@ -148,6 +148,8 @@ let pollEpoch = 0; // bumped on every start/stop: a poll from an older epoch mus
 
 function startPolling() {
   pollEpoch++;
+  clearTimeout(seekTimer); // state.now is reset below: no seek may outlive it
+  trackGen++;
   polling = true;
   inFlight = false;
   pollAgain = false;
@@ -160,6 +162,8 @@ function startPolling() {
 
 function stopPolling() {
   pollEpoch++;
+  clearTimeout(seekTimer); // a seek made before the gap is for a track we may no longer have
+  trackGen++;
   polling = false;
   clearTimeout(pollTimer);
   pollTimer = null;
@@ -659,7 +663,7 @@ function showSeek(ms) {
 }
 
 async function seekTo(ms, gen = trackGen) {
-  if (gen !== trackGen) return; // the track changed since this seek was made
+  if (gen !== trackGen || !state.now) return; // the track changed (or is unknown) since this seek was made
   showSeek(ms);
   const positionMs = state.progressMs;
   await withDevice(() => (gen === trackGen ? invoke("seek", { positionMs }) : null));
