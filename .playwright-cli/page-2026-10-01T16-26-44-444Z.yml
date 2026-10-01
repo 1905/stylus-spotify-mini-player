@@ -1,8 +1,0 @@
-- main [ref=e4]:
-  - generic [ref=e6]:
-    - button "Library" [ref=e7] [cursor=pointer]
-    - button "Search" [ref=e10] [cursor=pointer]
-  - generic "Played, now playing, and up next" [ref=e13]
-  - generic [ref=e14]:
-    - heading "Nothing playing" [level=1] [ref=e15]
-    - paragraph [ref=e16]: Pick a playlist from your library to start.

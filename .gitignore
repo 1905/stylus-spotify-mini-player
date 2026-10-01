@@ -8,3 +8,4 @@ src-tauri/gen/
 .env*
 tokens.json*
 *.invalid
+.playwright-cli/
