@@ -619,7 +619,8 @@ function seekKey(ev) {
   // a held key repeats ~30 times a second: move the bar now, send one seek when the keys go quiet
   showSeek(Math.min(state.now.duration_ms, Math.max(0, to)));
   clearTimeout(seekTimer);
-  seekTimer = setTimeout(() => seekTo(progress()), SEEK_QUIET_MS);
+  const gen = trackGen; // the position is for the track on screen now, not whatever plays in 250ms
+  seekTimer = setTimeout(() => seekTo(progress(), gen), SEEK_QUIET_MS);
 }
 
 const SEEK_QUIET_MS = 250;
@@ -632,10 +633,10 @@ function showSeek(ms) {
   renderProgress();
 }
 
-async function seekTo(ms) {
+async function seekTo(ms, gen = trackGen) {
+  if (gen !== trackGen) return; // the track changed since this seek was made
   showSeek(ms);
   const positionMs = state.progressMs;
-  const gen = trackGen;
   await withDevice(() => (gen === trackGen ? invoke("seek", { positionMs }) : null));
   kick();
 }
