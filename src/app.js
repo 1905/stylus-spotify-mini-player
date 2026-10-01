@@ -554,6 +554,7 @@ async function needDevice(id) {
 /** Start playback of these uris; returns true on success. */
 async function playUris(uris) {
   if (!uris.length) return false;
+  clearTimeout(seekTimer); // a pending keyboard seek belongs to the old track
   const ok = await withDevice(async (id) => invoke("play_on_device", { deviceId: await needDevice(id), uris }));
   kick();
   return ok;
@@ -582,6 +583,7 @@ async function togglePlay() {
 
 async function skip(cmd) {
   if (!state.now) return;
+  clearTimeout(seekTimer); // a pending keyboard seek belongs to the old track
   await withDevice(() => invoke(cmd));
   kick();
 }
@@ -805,6 +807,7 @@ function openSearch() {
 
 function onSearchInput() {
   clearTimeout(searchTimer);
+  overlayRev++; // new results are a new view: a slow Play from the old ones must not close it
   const gen = ++state.gen.search;
   const q = $("searchInput").value.trim();
   if (!q) {
