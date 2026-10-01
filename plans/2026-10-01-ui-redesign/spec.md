@@ -290,6 +290,7 @@ What shipped differs from the text above in these places:
 - **History merge** (`mergeHistory` in `lib/timeline.js`). Session plays match recently-played rows one-to-one, closest time first, within 2 min. `played_at` is the end of a play, which was measured on 11 real plays. Our observation is taken at the same moment. A replay stays until the API reports it.
 - **Logout** clears all account data: playlists cache, history, session plays, queue and the rendered run. The next login may be another account.
 - **After a polling gap** (hidden window), the first poll never records the old track as played. A failed history fetch is retried every 10th tick until it succeeds.
+- **Play/pause** flips the UI at once and sends one command at a time. A click during a pending command queues the latest wish, so the last click always wins. Login saves new tokens under the token lock.
 - **Search albums** return `{id, name, artists, cover}` only.
 - **Dev harness** has an extra `ad` scenario. `window.__mock.handlers` lets QA inject failures. `src/markup.test.js` fails if `dev/index.html` drifts from `src/index.html`.
 - **Not checked** in the real Tauri WKWebView window. Web harness only, per the user.

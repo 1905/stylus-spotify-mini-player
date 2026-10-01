@@ -87,6 +87,7 @@ function showLogin(kind) {
   stopPolling();
   authSession++;
   playlistsLoading = false; // a load from the old session will never finish
+  playBusy = false; // likewise a play/pause command
   // the next login may be another account: drop everything that belonged to this one
   playlists = null;
   listScroll = 0;
@@ -537,20 +538,30 @@ async function playUris(uris) {
   return ok;
 }
 
+let playWanted = null; // the latest play/pause the user asked for
+let playBusy = false; // a play/pause command is running
+
+/** Flip play/pause at once in the UI; send one command at a time until the device has the latest wish. */
 async function togglePlay() {
   if (state.mode === "idle") return;
-  const was = state.isPlaying;
   listen();
   state.progressMs = progress();
   state.progressAt = performance.now();
-  state.isPlaying = !was;
+  state.isPlaying = !state.isPlaying;
   state.holdUntil = performance.now() + HOLD_MS;
   renderChrome();
-  const ok = await withDevice(async (id) =>
-    was ? invoke("pause") : invoke("resume", { deviceId: await needDevice(id) }),
-  );
+  playWanted = state.isPlaying;
+  if (playBusy) return; // the running loop sends it next, in order
+  playBusy = true;
+  let sent = null;
+  let ok = true;
+  while (ok && playWanted !== sent) {
+    const want = (sent = playWanted);
+    ok = await withDevice(async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")));
+  }
+  playBusy = false;
   if (!ok) {
-    state.isPlaying = was;
+    state.isPlaying = !sent; // the device still has the state before the failed command
     state.holdUntil = 0;
     renderChrome();
   }

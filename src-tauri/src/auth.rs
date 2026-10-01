@@ -157,8 +157,10 @@ pub async fn login() -> Result<(), String> {
         .map_err(|e| e.to_string())??;
 
     let tokens = exchange_code(&code, &verifier).await?;
+    // under the lock: a refresh still in flight must not overwrite or invalidate these
+    let mut cached = TOKENS.lock().await;
     save_tokens(&tokens);
-    *TOKENS.lock().await = Some(tokens);
+    *cached = Some(tokens);
     Ok(())
 }
 
