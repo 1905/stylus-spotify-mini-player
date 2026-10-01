@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Player</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ===== Login ===== -->
+    <section id="login" class="login">
+      <div class="login-card">
+        <div class="logo-dot"></div>
+        <h1 class="login-title">Player</h1>
+        <p class="login-sub">Your playlists, a search, and something playing.</p>
+        <button id="loginBtn" class="btn-primary">Connect Spotify</button>
+        <div id="loginError" class="error hidden"></div>
+      </div>
+    </section>
+
+    <!-- ===== App shell ===== -->
+    <div id="playbackBanner" class="pb-banner hidden">
+      <span id="pbMsg"></span>
+    </div>
+
+    <div id="app" class="app hidden">
+      <!-- Left rail -->
+      <nav class="rail">
+        <div class="rail-top">
+          <div class="brand"><span class="logo-dot sm"></span>Player</div>
+          <button class="nav-item active" data-view="search" id="navSearch">
+            <svg viewBox="0 0 24 24" class="ico"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Search
+          </button>
+          <button class="nav-item" data-view="library" id="navLibrary">
+            <svg viewBox="0 0 24 24" class="ico"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            Library
+          </button>
+        </div>
+        <div class="rail-foot">
+          <span id="deviceState" class="device-state">connecting…</span>
+        </div>
+      </nav>
+
+      <!-- Main -->
+      <main class="main" id="main">
+        <!-- Search view -->
+        <div id="view-search" class="view">
+          <div class="search-bar">
+            <svg viewBox="0 0 24 24" class="ico search-ico"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="searchInput" type="text" placeholder="Search songs and albums" autocomplete="off" spellcheck="false" />
+          </div>
+          <div id="searchResults" class="results">
+            <div class="empty">Type to search.</div>
+          </div>
+        </div>
+
+        <!-- Library view -->
+        <div id="view-library" class="view hidden">
+          <h2 class="view-title">Library</h2>
+          <div id="playlistGrid" class="grid"></div>
+        </div>
+
+        <!-- Detail view (playlist or album track list) -->
+        <div id="view-detail" class="view hidden">
+          <button id="backBtn" class="back">← Back</button>
+          <header class="detail-head">
+            <img id="dCover" class="detail-cover" alt="" />
+            <div class="detail-meta">
+              <span class="detail-kind" id="dKind">Playlist</span>
+              <h2 id="dName" class="detail-name"></h2>
+              <span id="dSub" class="detail-sub"></span>
+              <button id="playAllBtn" class="btn-primary btn-play-all">▶ Play</button>
+            </div>
+          </header>
+          <div id="trackList" class="tracklist"></div>
+        </div>
+      </main>
+
+      <!-- Right panel: history + queue -->
+      <aside class="side" id="side">
+        <div class="side-section">
+          <h3 class="side-title">Up next</h3>
+          <div id="queueList" class="side-list">
+            <div class="side-empty">Nothing queued.</div>
+          </div>
+        </div>
+        <div class="side-section">
+          <h3 class="side-title dim">Recently played</h3>
+          <div id="historyList" class="side-list">
+            <div class="side-empty">No history yet.</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Bottom now-playing bar -->
+      <footer class="nowbar" id="nowbar">
+        <div class="now-left">
+          <img id="npCover" class="np-cover" alt="" />
+          <div class="np-text">
+            <span id="npTitle" class="np-title">—</span>
+            <span id="npArtist" class="np-artist"></span>
+          </div>
+        </div>
+        <div class="now-center">
+          <div class="controls">
+            <button id="prevBtn" class="ctrl" title="Previous">
+              <svg viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+            </button>
+            <button id="playBtn" class="ctrl play" title="Play/Pause">
+              <svg id="playIco" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+              <svg id="pauseIco" class="hidden" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            </button>
+            <button id="nextBtn" class="ctrl" title="Next">
+              <svg viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+            </button>
+          </div>
+          <div class="scrub">
+            <span id="curTime" class="t">0:00</span>
+            <div id="scrubTrack" class="scrub-track"><div id="scrubFill" class="scrub-fill"></div></div>
+            <span id="durTime" class="t">0:00</span>
+          </div>
+        </div>
+        <div class="now-right">
+          <svg viewBox="0 0 24 24" class="ico vol-ico"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          <input id="volume" type="range" min="0" max="100" value="60" class="vol" />
+        </div>
+      </footer>
+    </div>
+
+    <script src="mock.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>
