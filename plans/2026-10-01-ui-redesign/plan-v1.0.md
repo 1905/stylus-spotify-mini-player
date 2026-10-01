@@ -1,7 +1,33 @@
 # The Run — Redesign Implementation Plan v1.0
 
 **Date:** 2026-10-01
-**Status:** in-progress (T1–T4 dispatched 2026-10-01)
+**Status:** in-progress, paused 2026-10-02 after T6 (user: "dont run anything"). Next: T7.
+
+## Progress (as of 2026-10-02)
+
+| task | state | evidence |
+|---|---|---|
+| T0 baseline | ✓ done | `cargo build` green, `node --check` clean |
+| T1+T2 Rust backend | ✓ done | 16/16 `cargo test`, 0 build warnings. Search `limit=10`, album paging, `auth_status`, `get_queue`, `get_recently_played`, `AUTH_EXPIRED` / `NO_ACTIVE_DEVICE` codes |
+| T3+T4 harness + lib | ✓ done | 21/21 vitest. `dev/fixture.json` holds real data: 5 playlists, 20 queue, 30 real recent plays. Font self-hosted (WOFF2) |
+| T5 stage UI | ✓ done | commit `151c7d1`. History left, up next right, FLIP on track change verified, colour from cover |
+| T6 library + search | ✓ done | commit `c458cbe`. Library sheet, search overlay, Esc, scrub aligned to cover, left-edge sliver removed |
+| T7 Sonnet QA | ✗ not done | the agent was dispatched but stopped when the session exited, so there are no results. Re-dispatch from scratch |
+| T8 fix loop | pending | known bug (orchestrator saw it): search album captions are clipped by the panel bottom (`p2/search-1440.png`) |
+| T9 exit gate | pending | Astra loop until 0 crit/high, `/simplify`, reconcile spec, merge to `main`, notify |
+
+**Repo:** branch `feat/the-run-redesign` is pushed to `github.com/1905/rust-spotify` (private). Last commit is `c458cbe`, and the tree was clean after it. `main` still holds only the bootstrap commit.
+
+**To resume:**
+1. Serve the repo root: `cd ~/dev/rust-spotify && python3 -m http.server 8799 --bind 127.0.0.1`.
+2. Re-dispatch T7: Sonnet + `/playwright-cli`, read-only, all 12 scenarios at 1440×900 and 800×600.
+3. Run T8 with the QA findings plus the album-caption bug.
+4. Run T9.
+
+**Side effects to know about:**
+- The user's token was refreshed by a one-off reconnect script, so it now has the `user-read-recently-played` scope. The old token is backed up at `scratchpad/tokens.backup.json`.
+- The Tauri dev watcher is stopped.
+- Nothing has been checked in the real Tauri (WKWebView) window yet. Web only, per user.
 **Spec:** ./spec.md
 **Goal:** Replace the generic three-column UI with a minimal one-screen player built around a played → now → next run of covers, backed by the real Spotify queue and history, and fix the 7 review bugs.
 **Architecture:** The Rust Tauri backend stays a thin Web API proxy, with new `auth_status`, `get_queue` and `get_recently_played` commands plus fixes. The frontend is plain ES modules: `app.js` (state, poll loop, DOM) and pure `lib/*.js` tested with vitest. A browser-only `dev/` harness stubs `window.__TAURI__` with real-art fixtures for Playwright QA.
