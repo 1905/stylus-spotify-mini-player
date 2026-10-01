@@ -1,9 +1,19 @@
 // The Run — stage UI: boot, sequential poll loop, the run of covers, transport.
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
-import { buildRun, measure, flip } from "./lib/timeline.js";
+import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
 
-const { invoke } = window.__TAURI__.core;
+// Every call belongs to a login session. A result or error from an older session
+// (still in flight across a logout) never settles, so it can't touch the new one.
+let authSession = 0;
+const STALE = new Promise(() => {});
+function invoke(cmd, args) {
+  const sess = authSession;
+  return window.__TAURI__.core.invoke(cmd, args).then(
+    (v) => (sess === authSession ? v : STALE),
+    (e) => (sess === authSession ? Promise.reject(e) : STALE),
+  );
+}
 const $ = (id) => document.getElementById(id);
 
 const POLL_MS = 1000;
@@ -71,6 +81,8 @@ const LOGIN_COPY = {
 
 function showLogin(kind) {
   stopPolling();
+  authSession++;
+  playlistsLoading = false; // a load from the old session will never finish
   closeOverlay();
   state.loginKind = LOGIN_COPY[kind] ? kind : "login";
   const copy = LOGIN_COPY[state.loginKind];
@@ -121,6 +133,7 @@ function startPolling() {
   inFlight = false;
   pollAgain = false;
   tick = 0;
+  state.loaded = false; // full fetch and render: a stopped poll may have skipped one
   schedule(0);
 }
 
@@ -243,16 +256,7 @@ async function fetchOr(cmd) {
 
 const sameUris = (a, b) => a.length === b.length && a.every((t, i) => t.uri === b[i].uri);
 
-/** recently-played + session-observed plays the API doesn't have yet, newest first. */
-function history() {
-  const api = state.recent.filter((r) => r && r.track);
-  const near = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) < SESSION_MATCH_MS;
-  const extra = state.session.filter(
-    (s) => !api.some((r) => r.track.uri === s.track.uri && near(r.played_at, s.played_at)),
-  );
-  return [...api, ...extra]
-    .sort((a, b) => Date.parse(b.played_at) - Date.parse(a.played_at));
-}
+const history = () => mergeHistory(state.recent, state.session, SESSION_MATCH_MS);
 
 /** Store a device list; with nothing playing, show its active (or first) device. Returns true if it changed. */
 function setDevices(list) {

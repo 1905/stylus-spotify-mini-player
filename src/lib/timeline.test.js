@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRun } from "./timeline.js";
+import { buildRun, mergeHistory } from "./timeline.js";
 
 const T = (n) => ({ id: "t" + n, uri: "spotify:track:" + n, name: "Song " + n, artists: "A", album: "B", cover: null, duration_ms: 1000 });
 const H = (t, i = 0) => ({ track: t, played_at: `2026-10-01T10:${String(59 - i).padStart(2, "0")}:00Z` });
@@ -92,5 +92,27 @@ describe("buildRun", () => {
   it("repeated uri in the display list gets ~k suffix", () => {
     const run = buildRun({ history: [], now: T(2), queue: [T(1), T(3), T(1)] });
     expect(run.map((x) => x.key)).toEqual([`${T(2).uri}~0`, `${T(1).uri}~0`, `${T(3).uri}~0`, `${T(1).uri}~1`]);
+  });
+});
+
+describe("mergeHistory", () => {
+  const at = (min) => `2026-10-01T10:${String(min).padStart(2, "0")}:00.000Z`;
+  const row = (n, min) => ({ track: T(n), played_at: at(min) });
+  const W = 15 * 60 * 1000;
+
+  it("a session play the API already has is dropped; the rest is newest first", () => {
+    const out = mergeHistory([row(1, 5)], [row(2, 8), row(1, 5)], W);
+    expect(out.map((r) => r.track.id + "@" + r.played_at.slice(14, 16))).toEqual(["t2@08", "t1@05"]);
+  });
+
+  it("matching is one-to-one by closest time: a replay is kept until the API has it", () => {
+    // B played at 10:03 (API and session), B again at 10:09 (session only, API lagging)
+    const out = mergeHistory([row(2, 3), row(3, 6)], [row(2, 9), row(2, 3)], W);
+    expect(out.map((r) => r.track.id + "@" + r.played_at.slice(14, 16))).toEqual(["t2@09", "t3@06", "t2@03"]);
+  });
+
+  it("a session play far from any API play is kept", () => {
+    const out = mergeHistory([row(1, 0)], [row(1, 40)], W);
+    expect(out).toHaveLength(2);
   });
 });

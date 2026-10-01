@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-01
 **Scope:** ~/dev/rust-spotify
-**Status:** approved (self-review, full auto — user: "all up to you")
+**Status:** shipped 2026-10-02 (as-built notes at the end)
 
 ## TL;DR
 
@@ -274,3 +274,20 @@ Terminal refresh failure (`400 invalid_grant` or `401`) → move `tokens.json` t
 - **P3** — stage UI (run, now block, transport, colour, FLIP); screenshot check of `playing` / `nothing`.
 - **P4** — library sheet, search palette, keyboard, login/reconnect screens.
 - **P5** — all failure states, Sonnet QA sweep, fix loop until clean; then Codex review → fixes → `/simplify` → notify.
+
+## As-built notes (2026-10-02)
+
+What shipped differs from the text above in these places:
+
+- **Now cover under 900px** is `min(260px, 36vh)`. At 800×600 it renders 216px, so the stage fits a 600px-tall window.
+- **Past covers cut by the window edge** are hidden (`is-off`), so 1440 can show 3 instead of 4.
+- **History rule.** A track left after less than 30s (or half its length, if shorter) is not recorded as played. This matches Spotify's own play count. Past never repeats the current track. Queued repeats keep their earlier plays.
+- **Ads and podcasts.** `playback_state` returns `track: null` for them. The stage shows "Playing on {device}" and "An ad or a podcast is on. Songs show up here." Play/pause still works; prev, next and scrub are off.
+- **Keyboard.** Space presses the focused button. With nothing focused it toggles play. The scrub bar is focusable when a song plays: arrows seek ±5s, Home/End jump to the ends.
+- **Polling.** It stops while the window is hidden and restarts with a fresh poll when it is visible again. With nothing playing, every 10th tick fetches the device list only.
+- **Auth.** Tokens are cached in memory under one async mutex, which also serializes refreshes. Spotify rotates refresh tokens. Every HTTP call has a 5s connect and 15s total deadline. The login callback listener gives up after 3 minutes.
+- **Stale responses.** Every `invoke` belongs to a login session. A response from before a logout never settles, so it can't log out the new session. Within a session, a poll epoch ignores polls from before a stop or restart. A restart always re-renders in full.
+- **History merge** (`mergeHistory` in `lib/timeline.js`). Session plays match recently-played rows one-to-one, closest time first, within 15 min. A replay stays until the API reports it.
+- **Search albums** return `{id, name, artists, cover}` only.
+- **Dev harness** has an extra `ad` scenario. `window.__mock.handlers` lets QA inject failures. `src/markup.test.js` fails if `dev/index.html` drifts from `src/index.html`.
+- **Not checked** in the real Tauri WKWebView window. Web harness only, per the user.

@@ -35,6 +35,32 @@ export function buildRun({ history = [], now = null, queue = [] } = {}, { maxPas
   });
 }
 
+/**
+ * recently-played (api) + plays the app saw itself (session), newest first.
+ * A session play is the same play as an api row with the same uri within windowMs.
+ * Matching is one-to-one, closest times first, so a replay stays until the API reports it.
+ */
+export function mergeHistory(api, session, windowMs) {
+  const rows = (api || []).filter((r) => r && r.track);
+  const time = (r) => Date.parse(r.played_at);
+  const pairs = [];
+  (session || []).forEach((s, i) =>
+    rows.forEach((r, j) => {
+      const d = Math.abs(time(r) - time(s));
+      if (r.track.uri === s.track.uri && d < windowMs) pairs.push({ i, j, d });
+    }),
+  );
+  const usedS = new Set();
+  const usedA = new Set();
+  for (const { i, j } of pairs.sort((a, b) => a.d - b.d)) {
+    if (usedS.has(i) || usedA.has(j)) continue;
+    usedS.add(i);
+    usedA.add(j);
+  }
+  const extra = (session || []).filter((_, i) => !usedS.has(i));
+  return [...rows, ...extra].sort((a, b) => time(b) - time(a));
+}
+
 const DURATION = 600;
 const EASE = "cubic-bezier(.2,.7,.2,1)";
 
