@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { thisMacRow, isTheRun, THE_RUN } from "./engine.js";
+import { thisMacRow, isTheRun, THE_RUN, THE_RUN_MISSING_MS } from "./engine.js";
 
 const RUN = { id: "r", name: THE_RUN, type: "Computer" };
 const MARANTZ = { id: "m", name: "Marantz", type: "AVR" };
@@ -17,9 +17,19 @@ describe("thisMacRow", () => {
     expect(thisMacRow({ state: "needs_login" }, [RUN], "login")).toBeNull();
   });
 
-  it("has no row when the engine is ready or unknown", () => {
-    expect(thisMacRow({ state: "ready" }, [MARANTZ])).toBeNull();
-    expect(thisMacRow(null, [MARANTZ])).toBeNull();
+  it("ready but not listed yet: connecting, then a retry after 20s", () => {
+    expect(thisMacRow({ state: "ready" }, [MARANTZ]).type).toBe("Connecting…");
+    expect(thisMacRow({ state: "ready" }, [MARANTZ], "", THE_RUN_MISSING_MS - 1).type).toBe("Connecting…");
+    expect(thisMacRow({ state: "ready" }, [MARANTZ], "", THE_RUN_MISSING_MS).type).toBe("Not showing up — retry");
+  });
+
+  it("the retry label is only for a ready engine", () => {
+    expect(thisMacRow({ state: "needs_login" }, [], "", THE_RUN_MISSING_MS).type).toBe("Log in to play here");
+    expect(thisMacRow({ state: "ready" }, [], "connecting", THE_RUN_MISSING_MS).type).toBe("Connecting…");
+  });
+
+  it("unknown engine state: connecting", () => {
+    expect(thisMacRow(null, [MARANTZ]).type).toBe("Connecting…");
   });
 
   it("another computer (the Spotify app) doesn't hide the row", () => {

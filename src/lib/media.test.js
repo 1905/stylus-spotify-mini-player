@@ -40,9 +40,16 @@ describe("mediaChanged", () => {
     expect(mediaChanged(p(), p({ playing: false }), 1000)).toBe(true);
   });
 
-  it("on a seek (position jump)", () => {
+  it("on a position jump of more than 3s (remote seek, repeat restart)", () => {
+    expect(MEDIA_DRIFT_MS).toBe(3000);
     expect(mediaChanged(p(), p({ positionMs: 11000 + MEDIA_DRIFT_MS + 1 }), 1000)).toBe(true);
+    expect(mediaChanged(p(), p({ positionMs: 11000 - MEDIA_DRIFT_MS - 1 }), 1000)).toBe(true);
     expect(mediaChanged(p(), p({ positionMs: 0 }), 1000)).toBe(true);
+  });
+
+  it("not on a jump of 3s or less", () => {
+    expect(mediaChanged(p(), p({ positionMs: 11000 + MEDIA_DRIFT_MS }), 1000)).toBe(false);
+    expect(mediaChanged(p({ playing: false }), p({ playing: false, positionMs: 12500 }), 1000)).toBe(false);
   });
 });
 
@@ -52,7 +59,7 @@ describe("mediaAction", () => {
     expect(mediaAction({ action: "toggle" }, false)).toBe("toggle");
   });
 
-  it("play/pause act only when they change something", () => {
+  it("play/pause act only when they change something (a repeat is a no-op, never an inversion)", () => {
     expect(mediaAction({ action: "play" }, false)).toBe("toggle");
     expect(mediaAction({ action: "play" }, true)).toBeNull();
     expect(mediaAction({ action: "pause" }, true)).toBe("toggle");

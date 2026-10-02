@@ -7,7 +7,7 @@
 // no-volume (the active device has no remote volume),
 // engine-login (the in-app player needs its login; "The Run" shows up after engine_login, picker open),
 // engine-down (the in-app player failed, picker open).
-// The in-app player ("The Run") is ready by default but not listed: it is listed only after engine_login.
+// The in-app player ("The Run") needs its login by default and isn't listed: engine_login lists it.
 // QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, emit, setEngine }.
 //   media: recorded media_update / media_clear calls ({cmd, args, at}).
 //   emit(event, payload): fires listeners from __TAURI__.event.listen (media-command, engine-status).
@@ -76,7 +76,7 @@
     engine:
       scenario === "engine-login" ? { state: "needs_login", name: "The Run" }
       : scenario === "engine-down" ? { state: "failed", name: "The Run", reason: "Spotify changed its protocol (mock)" }
-      : { state: "ready", name: "The Run" },
+      : { state: "needs_login", name: "The Run" }, // first run: the player isn't logged in yet
   };
   const likedBase = state.saved.size;
   if (state.queue.length && state.now && state.queue[0].uri === state.now.uri) state.queue.shift();

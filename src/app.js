@@ -964,6 +964,9 @@ async function toggleSaved() {
 let devicesOpen = false;
 let devicesGen = 0; // the latest list_devices request: an older answer is dropped
 let devicesNote = ""; // loading or error line while there is no list to show
+let devicesTimer = null; // refreshes the open menu while "The Run" isn't listed
+const DEVICES_REFRESH_MS = 3000;
+let runMissingSince = 0; // menu open, engine ready, The Run not listed: since when (0 = not missing)
 
 function toggleDevices() {
   if (devicesOpen) closeDevices(true);
@@ -978,11 +981,18 @@ function openDevices() {
   renderDeviceList();
   focusDevice(0);
   refreshDevices();
+  clearInterval(devicesTimer);
+  devicesTimer = setInterval(() => {
+    if (!(state.devices || []).some(isTheRun)) refreshDevices(); // The Run may be listed any second now
+  }, DEVICES_REFRESH_MS);
 }
 
 function closeDevices(refocus = false) {
   if (!devicesOpen) return;
   devicesOpen = false;
+  clearInterval(devicesTimer);
+  devicesTimer = null;
+  runMissingSince = 0;
   devicesGen++; // a list still in flight would re-render a closed popover
   $("devicePop").hidden = true;
   $("deviceBtn").setAttribute("aria-expanded", "false");
@@ -1037,7 +1047,11 @@ function renderDeviceList() {
 
 /** The in-app player ("The Run") isn't listed yet: offer this Mac with the engine's state. */
 function renderThisMacRow(list) {
-  const row = thisMacRow(engine, state.devices && list, thisMacBusy);
+  const missing = devicesOpen && engine && engine.state === "ready" && state.devices && !list.some(isTheRun);
+  if (!missing) runMissingSince = 0;
+  else if (!runMissingSince) runMissingSince = performance.now();
+  const missingMs = runMissingSince ? performance.now() - runMissingSince : 0;
+  const row = thisMacRow(engine, state.devices && list, thisMacBusy, missingMs);
   if (!row) return "";
   return (
     `<button class="device-row" type="button" role="option" data-this-mac="1" tabindex="-1" title="${esc(row.title)}">` +
@@ -1138,6 +1152,7 @@ function setBusy(busy) {
 async function playOnThisMac() {
   if (thisMacBusy) return;
   const sess = authSession;
+  runMissingSince = 0; // a retry gets a fresh 20s before it says "not showing up" again
   setBusy("connecting");
   try {
     const st = await waitEngine(ENGINE_WAIT_MS);
@@ -1171,11 +1186,14 @@ async function playOnThisMac() {
 let lastMedia = null; // the payload Now Playing has, null = cleared
 let lastMediaAt = 0;
 
-/** Tell Now Playing about a track or play-state change (or a seek); clear it when idle. */
-function syncMedia() {
+/**
+ * Tell Now Playing about a track or play-state change, or a position jump; clear it when idle.
+ * force: a local seek, sent even when it moved less than the jump threshold. Never from frames.
+ */
+function syncMedia(force = false) {
   const next = mediaPayload({ mode: state.mode, now: state.now, isPlaying: state.isPlaying, positionMs: progress() });
   const t = performance.now();
-  if (!mediaChanged(lastMedia, next, t - lastMediaAt)) return;
+  if (!(force && next) && !mediaChanged(lastMedia, next, t - lastMediaAt)) return;
   lastMedia = next;
   lastMediaAt = t;
   invoke(next ? "media_update" : "media_clear", next || undefined).catch(() => {});
@@ -1314,6 +1332,7 @@ function showSeek(ms) {
 async function seekTo(ms, gen = trackGen) {
   if (gen !== trackGen || !state.now) return; // the track changed (or is unknown) since this seek was made
   showSeek(ms);
+  syncMedia(true); // Now Playing moves with the seek
   const positionMs = state.progressMs;
   await withDevice(() => (gen === trackGen ? invoke("seek", { positionMs }) : null));
   kick();

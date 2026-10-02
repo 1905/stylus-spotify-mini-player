@@ -1,7 +1,7 @@
 // OS media controls (Now Playing + media keys): what to send, when, and what a key press means.
 
-/** A position this far off the expected one is a seek: Now Playing needs it. */
-export const MEDIA_DRIFT_MS = 2000;
+/** A position this far off the expected one is a jump (a remote seek, a repeat restart): Now Playing needs it. */
+export const MEDIA_DRIFT_MS = 3000;
 
 /**
  * The media_update payload, or null when nothing plays (idle: media_clear).
