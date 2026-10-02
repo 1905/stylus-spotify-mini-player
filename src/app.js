@@ -232,9 +232,8 @@ async function poll() {
   }
   inFlight = false;
   if (!polling) return;
-  // hidden: 3s while something plays (Now Playing, media keys), stop when idle; visible again restarts
+  // hidden: 3s while something plays (Now Playing, media keys), 10s when idle; visible again restarts
   let delay = pollDelay({ hidden: document.hidden, mode: state.mode, error: Boolean(state.error) });
-  if (delay === null) return stopPolling();
   if (pollAgain) {
     pollAgain = false;
     delay = 0;
@@ -2129,8 +2128,8 @@ async function boot() {
   // hidden: stop polling only when nothing plays (else poll() slows to 3s); come back with a fresh poll
   document.addEventListener("visibilitychange", () => {
     if ($("stage").hidden) return;
+    // hidden keeps polling, slower (pollDelay); visible again restarts with a fresh poll
     if (!document.hidden) startPolling();
-    else if (state.mode === "idle") stopPolling();
   });
   listenEvent("engine-status", setEngine);
   listenEvent("media-command", onMediaCommand);

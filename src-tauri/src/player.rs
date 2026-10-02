@@ -355,18 +355,31 @@ fn connect_config() -> ConnectConfig {
     }
 }
 
-/// The Web API account id (`/me`), with the app's token. None when the app isn't
-/// logged in or the call fails: the account check is then skipped.
-async fn app_user_id() -> Option<String> {
+/// The Web API account (`/me`), with the app's token. None when the app isn't
+/// logged in or the call fails: the account and Premium checks are then skipped.
+async fn app_account() -> Option<serde_json::Value> {
     let token = crate::auth::valid_access_token().await.ok()?;
     let res = crate::auth::http().get("https://api.spotify.com/v1/me").bearer_auth(token).send().await.ok()?;
-    let me: serde_json::Value = res.error_for_status().ok()?.json().await.ok()?;
-    me["id"].as_str().map(str::to_string)
+    res.error_for_status().ok()?.json().await.ok()
+}
+
+async fn app_user_id() -> Option<String> {
+    app_account().await?["id"].as_str().map(str::to_string)
+}
+
+/// A known non-Premium account. librespot refuses those (upstream even exits the process;
+/// our vendored copy only logs), so the engine must not start for them.
+fn premium_missing(me: &serde_json::Value) -> bool {
+    matches!(me["product"].as_str(), Some(p) if p != "premium")
 }
 
 /// The connect loop of one engine generation: Session → Spirc → wait for it to end →
 /// reconnect with backoff. Player and mixer live for the whole loop.
 async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
+    if app_account().await.is_some_and(|me| premium_missing(&me)) {
+        engine.apply(generation, Event::Fatal("Spotify Premium is required to play on this Mac".into()));
+        return;
+    }
     // one device id for this loop, so a reconnect keeps the same Connect device
     let session_config = SessionConfig::default();
     let mixer: Arc<dyn Mixer> = match SoftMixer::open(MixerConfig::default()) {
@@ -535,6 +548,14 @@ mod tests {
             assert_eq!(next_state(&s, Event::Start { has_credentials: true }), Starting);
             assert_eq!(next_state(&s, Event::Start { has_credentials: false }), NeedsLogin);
         }
+    }
+
+    #[test]
+    fn premium_check() {
+        assert!(premium_missing(&serde_json::json!({"product": "free"})));
+        assert!(!premium_missing(&serde_json::json!({"product": "premium"})));
+        // the field can be missing (Feb 2026 docs say it was removed): don't block on unknown
+        assert!(!premium_missing(&serde_json::json!({"id": "x"})));
     }
 
     #[test]
