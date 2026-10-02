@@ -73,12 +73,28 @@ pub fn run() {
             spotify::get_followed_artists,
             spotify::add_to_queue
         ])
+        // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
-    app.run(move |_, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(move |app, event| match event {
+        tauri::RunEvent::Exit => {
             // pause and leave Spotify Connect cleanly, so "The Run" doesn't linger as a device
             engine.shutdown();
         }
+        // Dock icon clicked while the window is hidden: bring it back
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+        _ => {}
     });
 }
