@@ -836,16 +836,19 @@ pub fn local_pause(engine: Managed<'_, Engine>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn local_next(engine: Managed<'_, Engine>) -> Result<(), String> {
+    crate::audio_out::flush();
     logged("next", engine.with_spirc(Spirc::next))
 }
 
 #[tauri::command]
 pub fn local_prev(engine: Managed<'_, Engine>) -> Result<(), String> {
+    crate::audio_out::flush();
     logged("prev", engine.with_spirc(Spirc::prev))
 }
 
 #[tauri::command]
 pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), String> {
+    crate::audio_out::flush();
     logged(&format!("seek {position_ms}"), engine.with_spirc(|s| s.set_position_ms(position_ms)))
 }
 
@@ -877,6 +880,7 @@ pub fn local_load(
     };
     log::info!(target: "needle::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
     let request = load_request(source, track_uri.clone(), position_ms, play, m);
+    crate::audio_out::flush();
     engine.with_spirc(|s| {
         s.activate()?;
         s.load(request)

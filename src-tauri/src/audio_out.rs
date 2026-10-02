@@ -42,12 +42,29 @@ pub fn next_gain(current: f32, target: f32, step: f32) -> f32 {
     }
 }
 
+/// The open output, for the commands that cut what's queued (see flush).
+static CURRENT: std::sync::Mutex<Option<std::sync::Weak<rodio::Sink>>> = std::sync::Mutex::new(None);
+
+/// Drop the audio already queued for output (up to MAX_QUEUED packets, ~0.5 s): next, previous,
+/// seek and a new load are heard at once instead of after the old song's tail. A paused output
+/// stays paused.
+pub fn flush() {
+    let sink = CURRENT.lock().ok().and_then(|g| g.as_ref().and_then(std::sync::Weak::upgrade));
+    if let Some(sink) = sink {
+        let paused = sink.is_paused();
+        sink.clear(); // clears and pauses
+        if !paused {
+            sink.play();
+        }
+    }
+}
+
 /// The output stage. Built inside librespot's player thread and used only there.
 pub struct RampSink {
     mixer: Arc<dyn Mixer>,
     /// The gain of the last frame played (f32 bits), carried from one packet to the next.
     gain: Arc<AtomicU32>,
-    out: Option<(rodio::Sink, rodio::OutputStream)>,
+    out: Option<(Arc<rodio::Sink>, rodio::OutputStream)>,
 }
 
 impl RampSink {
@@ -63,7 +80,11 @@ impl RampSink {
                 log::error!("audio output: could not open the device: {e}");
                 SinkError::ConnectionRefused(e)
             })?;
-            self.out = Some(out);
+            let sink = Arc::new(out.0);
+            if let Ok(mut g) = CURRENT.lock() {
+                *g = Some(Arc::downgrade(&sink));
+            }
+            self.out = Some((sink, out.1));
         }
         Ok(&self.out.as_ref().expect("opened above").0)
     }
@@ -75,9 +96,9 @@ impl Sink for RampSink {
         Ok(())
     }
 
+    // a pause is heard at once: the queued audio waits, and start() plays it on resume
     fn stop(&mut self) -> SinkResult<()> {
         if let Some((sink, _)) = &self.out {
-            sink.sleep_until_end();
             sink.pause();
         }
         Ok(())
