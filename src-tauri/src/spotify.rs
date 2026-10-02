@@ -107,8 +107,10 @@ pub async fn transfer_playback(device_id: String, play: bool) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub async fn set_volume(percent: u8) -> Result<(), String> {
-    command(Method::PUT, &format!("/me/player/volume?volume_percent={}", percent.min(100)), None).await
+pub async fn set_volume(percent: u8, device_id: Option<String>) -> Result<(), String> {
+    // with a device id, a transfer queued in between can't redirect it to the new device
+    let device = device_id.map(|d| format!("&device_id={}", urlencode(&d))).unwrap_or_default();
+    command(Method::PUT, &format!("/me/player/volume?volume_percent={}{device}", percent.min(100)), None).await
 }
 
 #[tauri::command]
@@ -268,21 +270,28 @@ pub async fn get_saved_albums() -> Result<Value, String> {
     Ok(Value::Array(parse_saved_albums(&json!({ "items": rows }))))
 }
 
+// Liked Songs. Since Feb 2026 the per-type /me/tracks writes and /contains are 403 for
+// development-mode apps; /me/library takes Spotify URIs, and only in the query string
+// (a JSON body gives 400 "Missing required field: uris"). Checked live 2026-10-02.
+fn library_path(path: &str, track_id: &str) -> String {
+    format!("{path}?uris={}", urlencode(&format!("spotify:track:{track_id}")))
+}
+
 /// Whether a track is in Liked Songs.
 #[tauri::command]
 pub async fn is_saved(track_id: String) -> Result<bool, String> {
-    let v = get(&format!("/me/tracks/contains?ids={}", urlencode(&track_id))).await?;
+    let v = get(&library_path("/me/library/contains", &track_id)).await?;
     Ok(v[0].as_bool().unwrap_or(false))
 }
 
 #[tauri::command]
 pub async fn save_track(track_id: String) -> Result<(), String> {
-    command(Method::PUT, &format!("/me/tracks?ids={}", urlencode(&track_id)), None).await
+    command(Method::PUT, &library_path("/me/library", &track_id), None).await
 }
 
 #[tauri::command]
 pub async fn unsave_track(track_id: String) -> Result<(), String> {
-    command(Method::DELETE, &format!("/me/tracks?ids={}", urlencode(&track_id)), None).await
+    command(Method::DELETE, &library_path("/me/library", &track_id), None).await
 }
 
 /// Top tracks (`[Track]`) or artists (`[{id,name,image}]`), at most 20.
@@ -544,7 +553,7 @@ pub async fn get_playlists() -> Result<Value, String> {
 /// We request both field spellings and read whichever the response provides.
 #[tauri::command]
 pub async fn get_playlist_tracks(playlist_id: String) -> Result<Value, String> {
-    let fields = "next,items(added_at,item(id,uri,name,duration_ms,artists(name),album(name,images)),track(id,uri,name,duration_ms,artists(name),album(name,images)))";
+    let fields = "next,items(added_at,item(id,uri,name,duration_ms,artists(id,name),album(name,images)),track(id,uri,name,duration_ms,artists(id,name),album(name,images)))";
     let first = get(&format!("/playlists/{playlist_id}/items?limit=50&fields={}", urlencode(fields))).await?;
     let all = all_items(first)
         .await?
@@ -569,6 +578,11 @@ mod tests {
             "artists": [{"id": "a1", "name": "A"}, {"id": "b2", "name": "B"}],
             "album": {"name": "Alb", "images": [{"url": "https://i.scdn.co/x"}, {"url": "small"}]}
         })
+    }
+
+    #[test]
+    fn library_path_uses_track_uri_in_query() {
+        assert_eq!(library_path("/me/library", "abc"), "/me/library?uris=spotify%3Atrack%3Aabc");
     }
 
     #[test]

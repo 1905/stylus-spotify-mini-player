@@ -772,6 +772,7 @@ const VOLUME_QUIET_MS = 200;
 let volTimer = null;
 let volSeq = 0; // the intent of the current burst of moves
 let volBefore = null; // the volume before that burst: what a failure puts back
+let volDevice = null; // the device the burst started on: a transfer meanwhile must not get its volume
 let unmuteTo = 50;
 let volumeOpen = false; // the narrow-screen slider popover
 
@@ -783,6 +784,7 @@ function setVolume(pct) {
     // the first move of a burst: polls keep their hands off from now until its command lands
     volSeq = intents.start("volume");
     volBefore = state.volume;
+    volDevice = state.device && state.device.id;
   }
   state.volume = v;
   renderVolume();
@@ -794,7 +796,8 @@ function sendVolume() {
   volTimer = null;
   const percent = state.volume;
   const before = volBefore;
-  sendIntent("volume", () => invoke("set_volume", { percent }), () => (state.volume = before), volSeq);
+  const deviceId = volDevice;
+  sendIntent("volume", () => invoke("set_volume", { percent, deviceId }), () => (state.volume = before), volSeq);
 }
 
 function toggleMute() {
@@ -886,6 +889,9 @@ async function toggleSaved() {
   savedChain = run.catch(() => {});
   try {
     await run;
+    // Liked Songs changed: drop the cached list, refresh the count if the Library has shown it
+    lib.delete("liked");
+    if (sess === authSession && libOpened) fillLiked();
   } catch (e) {
     if (isCode(e, "AUTH_EXPIRED")) return expire();
     if (isScopeError(e)) libraryDenied = true;
