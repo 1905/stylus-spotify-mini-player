@@ -309,10 +309,13 @@ pub async fn get_artist(artist_id: String) -> Result<Value, String> {
 }
 
 /// An artist's albums and singles (first 50): `[{id, name, cover, year, kind}]`.
+/// Spotify caps this endpoint at 10 per page (11+ → 400 "Invalid limit",
+/// checked live 2026-10-02), so it follows `next`.
 #[tauri::command]
 pub async fn get_artist_albums(artist_id: String) -> Result<Value, String> {
-    let path = format!("/artists/{}/albums?include_groups=album,single&limit=50", urlencode(&artist_id));
-    Ok(Value::Array(parse_artist_albums(&get(&path).await?)))
+    let path = format!("/artists/{}/albums?include_groups=album,single&limit=10", urlencode(&artist_id));
+    let items = items_up_to(get(&path).await?, 50).await?;
+    Ok(Value::Array(parse_artist_albums(&json!({ "items": items }))))
 }
 
 /// Followed artists, capped at 200. This endpoint pages by cursor
