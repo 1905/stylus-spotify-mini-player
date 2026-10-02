@@ -31,6 +31,8 @@ librespot-connect = "0.8.0"
 librespot-protocol = "0.8.0"
 # default `v1` feature = the macOS Keychain store
 keyring = "4"
+# OS media keys + Now Playing (MPRemoteCommandCenter / MPNowPlayingInfoCenter on macOS)
+souvlaki = "0.8.3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

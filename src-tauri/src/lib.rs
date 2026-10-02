@@ -1,4 +1,5 @@
 mod auth;
+mod media;
 mod player;
 mod spotify;
 
@@ -12,6 +13,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(engine.clone())
         .setup(|app| {
+            // setup runs on the main thread: the media controls live there (see media.rs)
+            media::init(app.handle());
             // the speaker "The Run" starts with the app (or waits in needs_login)
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
@@ -24,6 +27,8 @@ pub fn run() {
             player::engine_status,
             player::engine_login,
             player::engine_restart,
+            media::media_update,
+            media::media_clear,
             spotify::get_playlists,
             spotify::get_playlist_tracks,
             spotify::search,
