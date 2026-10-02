@@ -1,7 +1,7 @@
 # The Run v2 Implementation Plan v1.0
 
 **Date:** 2026-10-02
-**Status:** approved (self-review, full auto)
+**Status:** done 2026-10-02. T0-T11 complete; Astra v2 rounds 1-5 + final + verification (0 crit/high), /simplify, spec as-built notes, merged to main.
 **Spec:** ./spec.md
 **Goal:** Ship the 7 TL;DR blocks of the spec: device picker, volume/shuffle/repeat/heart, fuller Library, Spotify mixes, Your top, artist pages + Following, add to queue.
 **Architecture:** The Rust backend gains 15 thin Web API commands and richer `playback_state` / `parse_recent` / `list_devices` / `simplify_track`. The frontend extends `app.js`. New UI goes through the v1 player chain (`withDevice` / `changeTrack`) and its guards (auth session, track generation, pending intent). One new pure module, `src/lib/mixes.js`. The dev harness mocks every new command.
