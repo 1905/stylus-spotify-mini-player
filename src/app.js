@@ -783,6 +783,12 @@ function setVolume(pct) {
   if (state.volume == null) return;
   const v = Math.round(Math.min(100, Math.max(0, pct)));
   if (v === state.volume) return;
+  const deviceId = state.device && state.device.id;
+  if (volTimer && volDevice !== deviceId) {
+    // playback moved to another device mid-burst: the old burst goes to its device now
+    clearTimeout(volTimer);
+    sendVolume();
+  }
   if (!volTimer) {
     // the first move of a burst: polls keep their hands off from now until its command lands
     volDevice = state.device && state.device.id;
@@ -906,7 +912,8 @@ async function toggleSaved() {
   } catch (e) {
     if (isCode(e, "AUTH_EXPIRED")) return expire();
     if (isScopeError(e)) libraryDenied = true;
-    if (gen === heartGen) state.saved = !want; // still this click on this track: undo it
+    // still this click on this track: ask Spotify what is true (!want may itself be unconfirmed)
+    if (gen === heartGen && state.now && state.now.id === t.id) checkSaved(t);
     renderChrome();
     toast(`Spotify didn't respond: ${reason(e)}`);
   }
