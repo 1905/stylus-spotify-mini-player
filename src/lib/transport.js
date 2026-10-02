@@ -5,7 +5,7 @@
  * A poll may overwrite a setting only when no command for it is queued or running, and the
  * poll started at least lagMs after the last one landed: Spotify can report the old value that long.
  */
-export function createIntents(lagMs) {
+export function createIntents(lagMs, lagFor = {}) {
   const all = new Map();
   const get = (key) => {
     if (!all.has(key)) all.set(key, { pending: 0, settleAfter: 0, seq: 0 });
@@ -23,7 +23,7 @@ export function createIntents(lagMs) {
       const it = get(key);
       if (--it.pending <= 0) {
         it.pending = 0;
-        it.settleAfter = now + lagMs;
+        it.settleAfter = now + (lagFor[key] ?? lagMs);
       }
     },
     /** True if seq is the newest command for key: only it may undo the UI. */

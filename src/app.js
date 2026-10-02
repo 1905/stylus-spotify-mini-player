@@ -712,7 +712,9 @@ async function playUris(uris) {
 
 // Play, shuffle, repeat, volume and a device pick flip the UI at once. A poll doesn't overwrite
 // one while its command is queued, or for PLAY_LAG_MS after it lands. Only the latest may undo the UI.
-const intents = createIntents(PLAY_LAG_MS);
+// volume reads back 1-3s late (measured live 2026-10-02): hold it longer
+const VOLUME_LAG_MS = 2500;
+const intents = createIntents(PLAY_LAG_MS, { volume: VOLUME_LAG_MS });
 
 /**
  * Send an optimistic setting through the player chain. The UI already shows it; if the latest
@@ -1635,9 +1637,12 @@ function onDetailPlay() {
 }
 
 /** Play tracks from row i on; the overlay closes only if the user is still on that view. */
+const PLAY_URIS_MAX = 200;
+
 async function playFrom(tracks, i) {
   // Spotify lists local files in playlists but rejects them in play requests
-  const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocal(u));
+  // capped: Liked Songs can hold 1000 rows, and Spotify's limit for one play request is unknown
+  const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocal(u)).slice(0, PLAY_URIS_MAX);
   const rev = overlayRev;
   if ((await playUris(uris)) && rev === overlayRev) closeOverlay();
 }
