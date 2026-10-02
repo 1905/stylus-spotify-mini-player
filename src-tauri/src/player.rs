@@ -1,6 +1,7 @@
 //! The app's own Spotify Connect speaker "The Run" (librespot): Session + Player +
-//! SoftMixer + Spirc, kept alive by a reconnect loop. The UI still controls playback
-//! through the Web API (spotify.rs); to it, "The Run" is one more device id.
+//! SoftMixer + Spirc, kept alive by a reconnect loop. The UI controls other devices
+//! through the Web API (spotify.rs). For "The Run" it can also call the `local_*`
+//! commands, which drive Spirc directly with no Web API round trip.
 //!
 //! The player needs its own login: Spotify's keymaster client id, not the app's
 //! (the app's token logs librespot in, but every audio fetch fails, P0 spike).
@@ -10,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use librespot_connect::{ConnectConfig, Spirc};
+use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
 use librespot_core::{authentication::Credentials, config::DeviceType, error::ErrorKind, Session, SessionConfig};
 use librespot_playback::{
     audio_backend,
@@ -119,10 +120,12 @@ pub struct Status {
     name: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+    /// The engine's Connect device id. Null until `ready`.
+    device_id: Option<String>,
 }
 
-impl From<&State> for Status {
-    fn from(s: &State) -> Self {
+impl Status {
+    fn new(s: &State, device_id: Option<&str>) -> Self {
         let (state, reason) = match s {
             State::NeedsLogin => ("needs_login", None),
             State::Starting => ("starting", None),
@@ -131,7 +134,8 @@ impl From<&State> for Status {
             State::Failed(r) => ("failed", Some(r.clone())),
             State::AccountMismatch(r) => ("account_mismatch", Some(r.clone())),
         };
-        Status { state, name: DEVICE_NAME, reason }
+        let device_id = if *s == State::Ready { device_id.map(str::to_string) } else { None };
+        Status { state, name: DEVICE_NAME, reason, device_id }
     }
 }
 
@@ -156,6 +160,39 @@ fn classify(kind: ErrorKind, message: &str) -> Event {
 /// Wait before reconnect attempt `attempt` (0-based): 1s, 2s, 4s… capped at 60s.
 fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(1u64.checked_shl(attempt).unwrap_or(u64::MAX).min(60))
+}
+
+// ---- device id ---------------------------------------------------------------
+
+/// `player-device-id` next to the credentials file. A stable id lets Spotify treat
+/// the app as the same Connect device across launches.
+fn device_id_path() -> std::path::PathBuf {
+    crate::auth::app_dir().join("player-device-id")
+}
+
+/// The stored device id, or a new UUID v4 written to `path` (0600). A write failure
+/// is logged: the new id still works for this launch.
+fn load_or_create_device_id(path: &std::path::Path) -> String {
+    if let Ok(stored) = std::fs::read_to_string(path) {
+        let stored = stored.trim();
+        if !stored.is_empty() {
+            return stored.to_string();
+        }
+    }
+    let id = new_device_id();
+    if let Err(e) = crate::auth::write_private(path, &id) {
+        eprintln!("engine: could not store the player device id: {e}");
+    }
+    id
+}
+
+/// A random UUID v4, hyphenated lowercase, the format librespot uses by default.
+fn new_device_id() -> String {
+    let mut b: [u8; 16] = rand::random();
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
 }
 
 // ---- credential storage ----------------------------------------------------
@@ -222,6 +259,8 @@ struct Inner {
     /// The connect loop. The async lock also serializes restarts.
     task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
     login_busy: AtomicBool,
+    /// The persisted Connect device id, read (or created) on the first run.
+    device_id: OnceLock<String>,
 }
 
 impl Engine {
@@ -234,6 +273,7 @@ impl Engine {
             spirc: Mutex::new(None),
             task: tokio::sync::Mutex::new(None),
             login_busy: AtomicBool::new(false),
+            device_id: OnceLock::new(),
         }))
     }
 
@@ -244,6 +284,28 @@ impl Engine {
 
     fn state(&self) -> State {
         self.0.state.borrow().clone()
+    }
+
+    fn status(&self, state: &State) -> Status {
+        Status::new(state, self.0.device_id.get().map(String::as_str))
+    }
+
+    /// The persisted device id; reads or creates the file on the first call.
+    fn device_id(&self) -> String {
+        self.0.device_id.get_or_init(|| load_or_create_device_id(&device_id_path())).clone()
+    }
+
+    /// Runs `f` on the current Spirc. Err `ENGINE_NOT_READY` when the engine isn't
+    /// ready or Spirc is gone (a send to a stopped Spirc fails too). Ok only means
+    /// the command is queued.
+    fn with_spirc(&self, f: impl FnOnce(&Spirc) -> Result<(), librespot_core::Error>) -> Result<(), String> {
+        let state = self.state();
+        if state != State::Ready {
+            return Err(format!("ENGINE_NOT_READY: the player is {}", Status::new(&state, None).state));
+        }
+        let slot = self.0.spirc.lock().unwrap();
+        let spirc = slot.as_ref().ok_or("ENGINE_NOT_READY: the player isn't connected")?;
+        f(spirc).map_err(|e| format!("ENGINE_NOT_READY: {e}"))
     }
 
     /// Applies `event` from the loop of generation `generation`; a stale loop changes
@@ -261,7 +323,7 @@ impl Engine {
         let now = self.state();
         if changed {
             if let Some(app) = self.0.app.get() {
-                let _ = app.emit("engine-status", Status::from(&now));
+                let _ = app.emit("engine-status", self.status(&now));
             }
         }
         now
@@ -376,8 +438,18 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
         engine.apply(generation, Event::Fatal("Spotify Premium is required to play on this Mac".into()));
         return;
     }
-    // one device id for this loop, so a reconnect keeps the same Connect device
-    let session_config = SessionConfig::default();
+    // the persisted device id: the same Connect device across reconnects and launches
+    let device_id = {
+        let engine = engine.clone();
+        tokio::task::spawn_blocking(move || engine.device_id()).await
+    };
+    let session_config = match device_id {
+        Ok(device_id) => SessionConfig { device_id, ..SessionConfig::default() },
+        Err(e) => {
+            engine.apply(generation, Event::Fatal(format!("no device id: {e}")));
+            return;
+        }
+    };
     let mixer: Arc<dyn Mixer> = match SoftMixer::open(MixerConfig::default()) {
         Ok(m) => Arc::new(m),
         Err(e) => {
@@ -507,10 +579,10 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
 
 // ---- commands --------------------------------------------------------------
 
-/// `{state, name: "The Run", reason?}`.
+/// `{state, name: "The Run", reason?, device_id}`; `device_id` is null until ready.
 #[tauri::command]
 pub fn engine_status(engine: Managed<'_, Engine>) -> Status {
-    Status::from(&engine.state())
+    engine.status(&engine.state())
 }
 
 /// The player's own Spotify login in the browser (keymaster client id). Stores the
@@ -536,6 +608,100 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
 pub async fn engine_restart(engine: Managed<'_, Engine>) -> Result<(), String> {
     engine.restart(None).await;
     Ok(())
+}
+
+// ---- local transport (Spirc, no Web API) -----------------------------------
+
+/// Most tracks one `local_load` takes.
+const MAX_LOAD_URIS: usize = 200;
+
+/// 0–100 % → Spirc's 0–65535, rounded. Above 100 counts as 100.
+fn volume_from_percent(percent: u8) -> u16 {
+    ((u32::from(percent.min(100)) * 65535 + 50) / 100) as u16
+}
+
+#[derive(Debug)]
+enum LoadSource {
+    Context(String),
+    Tracks(Vec<String>),
+}
+
+/// Exactly one of a context uri or a track list (1–200). Empty values count as missing.
+fn load_source(context_uri: Option<String>, uris: Option<Vec<String>>) -> Result<LoadSource, String> {
+    let context_uri = context_uri.filter(|c| !c.is_empty());
+    let uris = uris.filter(|u| !u.is_empty());
+    match (context_uri, uris) {
+        (Some(c), None) => Ok(LoadSource::Context(c)),
+        (None, Some(u)) if u.len() > MAX_LOAD_URIS => {
+            Err(format!("BAD_ARGS: {} uris, at most {MAX_LOAD_URIS}", u.len()))
+        }
+        (None, Some(u)) => Ok(LoadSource::Tracks(u)),
+        (Some(_), Some(_)) => Err("BAD_ARGS: give contextUri or uris, not both".into()),
+        (None, None) => Err("BAD_ARGS: give contextUri or uris".into()),
+    }
+}
+
+fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32, play: bool) -> LoadRequest {
+    let options = LoadRequestOptions {
+        start_playing: play,
+        seek_to: position_ms,
+        playing_track: track_uri.map(PlayingTrack::Uri),
+        ..LoadRequestOptions::default()
+    };
+    match source {
+        LoadSource::Context(uri) => LoadRequest::from_context_uri(uri, options),
+        LoadSource::Tracks(uris) => LoadRequest::from_tracks(uris, options),
+    }
+}
+
+#[tauri::command]
+pub fn local_play(engine: Managed<'_, Engine>) -> Result<(), String> {
+    engine.with_spirc(Spirc::play)
+}
+
+#[tauri::command]
+pub fn local_pause(engine: Managed<'_, Engine>) -> Result<(), String> {
+    engine.with_spirc(Spirc::pause)
+}
+
+#[tauri::command]
+pub fn local_next(engine: Managed<'_, Engine>) -> Result<(), String> {
+    engine.with_spirc(Spirc::next)
+}
+
+#[tauri::command]
+pub fn local_prev(engine: Managed<'_, Engine>) -> Result<(), String> {
+    engine.with_spirc(Spirc::prev)
+}
+
+#[tauri::command]
+pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), String> {
+    engine.with_spirc(|s| s.set_position_ms(position_ms))
+}
+
+/// `percent` 0–100.
+#[tauri::command]
+pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), String> {
+    engine.with_spirc(|s| s.set_volume(volume_from_percent(percent)))
+}
+
+/// Loads a context or a track list on The Run. Activates the device first: Spirc
+/// ignores every command, Load included, while inactive. Both go down the same
+/// ordered channel. Ok only means queued; the UI confirms the track from the poll.
+#[tauri::command]
+pub fn local_load(
+    engine: Managed<'_, Engine>,
+    context_uri: Option<String>,
+    uris: Option<Vec<String>>,
+    track_uri: Option<String>,
+    position_ms: u32,
+    play: bool,
+) -> Result<(), String> {
+    let request = load_request(load_source(context_uri, uris)?, track_uri, position_ms, play);
+    engine.with_spirc(|s| {
+        s.activate()?;
+        s.load(request)
+    })
 }
 
 #[cfg(test)]
@@ -681,14 +847,119 @@ mod tests {
 
     #[test]
     fn status_payload() {
-        let v = serde_json::to_value(Status::from(&Ready)).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "ready", "name": "The Run"}));
-        let v = serde_json::to_value(Status::from(&Failed("Premium required".into()))).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "failed", "name": "The Run", "reason": "Premium required"}));
+        let v = serde_json::to_value(Status::new(&Ready, Some("dev-1"))).unwrap();
+        assert_eq!(v, serde_json::json!({"state": "ready", "name": "The Run", "device_id": "dev-1"}));
+        let v = serde_json::to_value(Status::new(&Failed("Premium required".into()), Some("dev-1"))).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"state": "failed", "name": "The Run", "reason": "Premium required", "device_id": null})
+        );
         let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting, AccountMismatch("m".into())]
             .iter()
-            .map(|s| Status::from(s).state)
+            .map(|s| Status::new(s, Some("dev-1")).state)
             .collect();
         assert_eq!(names, ["needs_login", "starting", "reconnecting", "account_mismatch"]);
+    }
+
+    #[test]
+    fn status_device_id_only_when_ready() {
+        for s in [NeedsLogin, Starting, Reconnecting, Failed("x".into()), AccountMismatch("x".into())] {
+            assert_eq!(Status::new(&s, Some("dev-1")).device_id, None, "{s:?}");
+        }
+        assert_eq!(Status::new(&Ready, Some("dev-1")).device_id.as_deref(), Some("dev-1"));
+        // ready, but the id isn't known yet: null, not a made-up one
+        assert_eq!(Status::new(&Ready, None).device_id, None);
+    }
+
+    fn temp_path(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rust-spotify-test-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("player-device-id")
+    }
+
+    #[test]
+    fn device_id_created_once_then_reused() {
+        let path = temp_path("devid");
+        let _ = std::fs::remove_file(&path);
+        let first = load_or_create_device_id(&path);
+        assert!(is_uuid_v4(&first), "{first}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), first);
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(load_or_create_device_id(&path), first);
+        // a stored id survives surrounding whitespace
+        std::fs::write(&path, "  abc-123\n").unwrap();
+        assert_eq!(load_or_create_device_id(&path), "abc-123");
+        // an empty or garbage file gets a fresh id
+        std::fs::write(&path, " \n").unwrap();
+        let fresh = load_or_create_device_id(&path);
+        assert!(is_uuid_v4(&fresh) && fresh != first, "{fresh}");
+    }
+
+    #[test]
+    fn new_device_ids_differ() {
+        let (a, b) = (new_device_id(), new_device_id());
+        assert!(is_uuid_v4(&a) && is_uuid_v4(&b));
+        assert_ne!(a, b);
+    }
+
+    fn is_uuid_v4(s: &str) -> bool {
+        let parts: Vec<&str> = s.split('-').collect();
+        parts.iter().map(|p| p.len()).collect::<Vec<_>>() == [8, 4, 4, 4, 12]
+            && s.chars().all(|c| c == '-' || c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            && parts[2].starts_with('4')
+            && matches!(parts[3].chars().next(), Some('8' | '9' | 'a' | 'b'))
+    }
+
+    #[test]
+    fn volume_percent_to_u16() {
+        assert_eq!(volume_from_percent(0), 0);
+        assert_eq!(volume_from_percent(50), 32768);
+        assert_eq!(volume_from_percent(100), 65535);
+        assert_eq!(volume_from_percent(1), 655);
+        assert_eq!(volume_from_percent(255), 65535);
+    }
+
+    fn uris(n: usize) -> Vec<String> {
+        (0..n).map(|i| format!("spotify:track:{i}")).collect()
+    }
+
+    #[test]
+    fn load_source_needs_exactly_one() {
+        let ctx = Some("spotify:playlist:p".to_string());
+        assert!(matches!(load_source(ctx.clone(), None), Ok(LoadSource::Context(c)) if c == "spotify:playlist:p"));
+        assert!(matches!(load_source(None, Some(uris(2))), Ok(LoadSource::Tracks(t)) if t.len() == 2));
+        for bad in [load_source(ctx, Some(uris(1))), load_source(None, None)] {
+            assert!(bad.unwrap_err().starts_with("BAD_ARGS: "));
+        }
+        // empty values count as missing
+        assert!(load_source(Some(String::new()), None).unwrap_err().starts_with("BAD_ARGS: "));
+        assert!(load_source(None, Some(vec![])).unwrap_err().starts_with("BAD_ARGS: "));
+    }
+
+    #[test]
+    fn load_source_caps_uris_at_200() {
+        assert!(load_source(None, Some(uris(MAX_LOAD_URIS))).is_ok());
+        assert!(load_source(None, Some(uris(MAX_LOAD_URIS + 1))).unwrap_err().starts_with("BAD_ARGS: "));
+    }
+
+    #[test]
+    fn load_request_carries_options() {
+        let req = load_request(LoadSource::Tracks(uris(2)), Some("spotify:track:1".into()), 4200, false);
+        let dbg = format!("{req:?}");
+        assert!(dbg.contains("start_playing: false"), "{dbg}");
+        assert!(dbg.contains("seek_to: 4200"), "{dbg}");
+        assert!(dbg.contains("Uri(\"spotify:track:1\")"), "{dbg}");
+        let req = load_request(LoadSource::Context("spotify:album:a".into()), None, 0, true);
+        let dbg = format!("{req:?}");
+        assert!(dbg.contains("spotify:album:a") && dbg.contains("start_playing: true"), "{dbg}");
+        assert!(dbg.contains("playing_track: None"), "{dbg}");
+    }
+
+    #[test]
+    fn commands_without_spirc_are_not_ready() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        let err = engine.with_spirc(|s| s.play()).unwrap_err();
+        assert!(err.starts_with("ENGINE_NOT_READY: "), "{err}");
     }
 }

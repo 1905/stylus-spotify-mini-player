@@ -91,6 +91,83 @@ async fn items_up_to(mut page: Value, max: usize) -> Result<Vec<Value>, String> 
     }
 }
 
+/// How many page requests a list fetch keeps in flight.
+const PAGE_CONCURRENCY: usize = 4;
+
+/// The offsets still to fetch after the first page (offset 0) of an offset-paged
+/// list holding `total` items, up to `max_items`.
+fn page_offsets(total: usize, page_size: usize, max_items: usize) -> Vec<usize> {
+    (page_size..total.min(max_items)).step_by(page_size.max(1)).collect()
+}
+
+/// Up to `max_items` items of an offset-paged list. The remaining pages are fetched
+/// in parallel (`PAGE_CONCURRENCY` at a time) from `path_for_offset`, using the
+/// first page's `total`; without a `total` it falls back to the serial `next` walk.
+/// Any failed page fails the whole call.
+async fn pages_parallel(
+    first: Value,
+    path_for_offset: impl Fn(usize) -> String,
+    page_size: usize,
+    max_items: usize,
+) -> Result<Vec<Value>, String> {
+    if first["total"].as_u64().is_none() {
+        return items_up_to(first, max_items).await;
+    }
+    let fetch = |offset| {
+        let path = path_for_offset(offset);
+        async move { get(&path).await }
+    };
+    pages_with(first, page_size, max_items, PAGE_CONCURRENCY, fetch).await
+}
+
+/// `pages_parallel` with the page fetch injected: `fetch(offset)` returns that page.
+/// Items come back in offset order whatever order the pages complete in.
+async fn pages_with<F, Fut>(first: Value, page_size: usize, max_items: usize, concurrency: usize, fetch: F) -> Result<Vec<Value>, String>
+where
+    F: Fn(usize) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    use futures_util::stream::{self, StreamExt, TryStreamExt};
+    let total = first["total"].as_u64().unwrap_or(0) as usize;
+    let mut all: Vec<Value> = first["items"].as_array().cloned().unwrap_or_default();
+    let pages: Vec<Value> = stream::iter(page_offsets(total, page_size, max_items))
+        .map(fetch)
+        .buffered(concurrency.max(1))
+        .try_collect()
+        .await?;
+    for page in pages {
+        all.extend(page["items"].as_array().into_iter().flatten().cloned());
+    }
+    all.truncate(max_items);
+    Ok(all)
+}
+
+/// Stores a list under the account's `key` in the disk cache, off the async thread.
+/// No account, no cache: the key must be scoped to the verified account.
+fn cache_store(account: &Option<String>, key: String, value: &Value) {
+    let Some(account) = account.clone().filter(|a| !a.is_empty()) else { return };
+    let value = value.clone();
+    tokio::task::spawn_blocking(move || crate::cache::lists().put(&account, &key, &value));
+}
+
+/// The account's cached `key`, or None without an account.
+async fn cached(account: &Option<String>, key: &str) -> Option<Value> {
+    cache_get(account.clone()?, key.to_string()).await
+}
+
+/// The cached list under the account's `key`, or null. Never errors.
+#[tauri::command]
+pub async fn cache_get(account: String, key: String) -> Option<Value> {
+    tokio::task::spawn_blocking(move || crate::cache::lists().get(&account, &key)).await.ok().flatten()
+}
+
+/// The signed-in user's Spotify id (`/me` id): the account the cache is scoped to.
+#[tauri::command]
+pub async fn me_id() -> Result<String, String> {
+    let me = get("/me").await?;
+    me["id"].as_str().map(str::to_string).ok_or_else(|| "Spotify /me has no id".to_string())
+}
+
 // ---- Spotify Connect: control a real device -------------------------------
 
 /// List the user's available Spotify Connect devices, unchanged:
@@ -138,11 +215,19 @@ pub async fn set_repeat(mode: String) -> Result<(), String> {
     command(Method::PUT, &format!("/me/player/repeat?state={mode}"), None).await
 }
 
-/// Play a whole context (playlist, album, Spotify mix) on a device.
+/// Play a whole context (playlist, album, Spotify mix) on a device, from
+/// `track_uri` when given (it must be in the context, or Spotify starts it from the top).
 #[tauri::command]
-pub async fn play_context(device_id: String, context_uri: String) -> Result<(), String> {
+pub async fn play_context(device_id: String, context_uri: String, track_uri: Option<String>) -> Result<(), String> {
     let path = format!("/me/player/play?device_id={}", urlencode(&device_id));
-    command(Method::PUT, &path, Some(json!({ "context_uri": context_uri }))).await
+    command(Method::PUT, &path, Some(play_context_body(context_uri, track_uri))).await
+}
+
+fn play_context_body(context_uri: String, track_uri: Option<String>) -> Value {
+    match track_uri {
+        Some(uri) => json!({ "context_uri": context_uri, "offset": { "uri": uri } }),
+        None => json!({ "context_uri": context_uri }),
+    }
 }
 
 /// Append a track URI to the device's up-next queue.
@@ -248,9 +333,15 @@ pub async fn search(query: String) -> Result<Value, String> {
 }
 
 /// All of an album's tracks (follows `tracks.next`). Album tracks lack album
-/// art, so the album name and cover are stamped onto each track.
+/// art, so the album name and cover are stamped onto each track. With an
+/// `account`, cached forever under `album:<id>` (an album doesn't change): a hit
+/// makes no request.
 #[tauri::command]
-pub async fn get_album_tracks(album_id: String) -> Result<Value, String> {
+pub async fn get_album_tracks(album_id: String, account: Option<String>) -> Result<Value, String> {
+    let key = format!("album:{album_id}");
+    if let Some(hit) = cached(&account, &key).await {
+        return Ok(hit);
+    }
     let album = get(&format!("/albums/{album_id}")).await?;
     let cover = first_image(&album["images"]);
     let album_name = album["name"].clone();
@@ -266,7 +357,9 @@ pub async fn get_album_tracks(album_id: String) -> Result<Value, String> {
             track
         })
         .collect();
-    Ok(Value::Array(all))
+    let all = Value::Array(all);
+    cache_store(&account, key, &all);
+    Ok(all)
 }
 
 // ---- library, taste, artists, mixes ------------------------------------------
@@ -282,27 +375,31 @@ pub async fn liked_count() -> Result<u64, String> {
 }
 
 /// Liked Songs, newest first, capped at 1000: `{tracks, total}`. `total` is
-/// the full count, so the UI can say when the cap cut some off.
+/// the full count, so the UI can say when the cap cut some off. Cached as `liked`.
 #[tauri::command]
-pub async fn get_saved_tracks() -> Result<Value, String> {
+pub async fn get_saved_tracks(account: Option<String>) -> Result<Value, String> {
     let first = get("/me/tracks?limit=50").await?;
     let total = first["total"].clone();
-    let tracks: Vec<Value> = items_up_to(first, MAX_SAVED_TRACKS)
+    let tracks: Vec<Value> = pages_parallel(first, |o| format!("/me/tracks?limit=50&offset={o}"), 50, MAX_SAVED_TRACKS)
         .await?
         .iter()
         .map(track_of_row)
         .filter(|t| !t.is_null())
         .map(simplify_track)
         .collect();
-    Ok(json!({ "tracks": tracks, "total": total }))
+    let out = json!({ "tracks": tracks, "total": total });
+    cache_store(&account, "liked".into(), &out);
+    Ok(out)
 }
 
-/// Saved albums, newest first, capped at 200.
+/// Saved albums, newest first, capped at 200. Cached as `albums`.
 #[tauri::command]
-pub async fn get_saved_albums() -> Result<Value, String> {
+pub async fn get_saved_albums(account: Option<String>) -> Result<Value, String> {
     let first = get("/me/albums?limit=50").await?;
-    let rows = items_up_to(first, MAX_SAVED_ALBUMS).await?;
-    Ok(Value::Array(parse_saved_albums(&json!({ "items": rows }))))
+    let rows = pages_parallel(first, |o| format!("/me/albums?limit=50&offset={o}"), 50, MAX_SAVED_ALBUMS).await?;
+    let out = Value::Array(parse_saved_albums(&json!({ "items": rows })));
+    cache_store(&account, "albums".into(), &out);
+    Ok(out)
 }
 
 // Liked Songs. Since Feb 2026 the per-type /me/tracks writes and /contains are 403 for
@@ -331,8 +428,9 @@ pub async fn unsave_track(track_id: String) -> Result<(), String> {
 
 /// Top tracks (`[Track]`) or artists (`[{id,name,image}]`), at most 20.
 /// `kind`: "tracks"|"artists"; `range`: "short_term"|"medium_term"|"long_term".
+/// Cached as `top:<kind>:<range>:<limit>`, with the limit actually used (20 when none given).
 #[tauri::command]
-pub async fn get_top(kind: String, range: String, limit: Option<u8>) -> Result<Value, String> {
+pub async fn get_top(kind: String, range: String, limit: Option<u8>, account: Option<String>) -> Result<Value, String> {
     let simplify: fn(&Value) -> Value = match kind.as_str() {
         "tracks" => simplify_track,
         "artists" => simplify_artist,
@@ -344,8 +442,9 @@ pub async fn get_top(kind: String, range: String, limit: Option<u8>) -> Result<V
     // 20 for the Library group; the artist page asks for 50, Spotify's max (51 → 400)
     let limit = limit.unwrap_or(20).clamp(1, 50);
     let raw = get(&format!("/me/top/{kind}?time_range={range}&limit={limit}")).await?;
-    let items = raw["items"].as_array().into_iter().flatten().filter(|x| !x.is_null()).map(simplify).collect();
-    Ok(Value::Array(items))
+    let items = Value::Array(raw["items"].as_array().into_iter().flatten().filter(|x| !x.is_null()).map(simplify).collect());
+    cache_store(&account, format!("top:{kind}:{range}:{limit}"), &items);
+    Ok(items)
 }
 
 /// `{id, name, image}` for one artist.
@@ -365,9 +464,9 @@ pub async fn get_artist_albums(artist_id: String) -> Result<Value, String> {
 }
 
 /// Followed artists, capped at 200. This endpoint pages by cursor
-/// (`artists.cursors.after`), not offset.
+/// (`artists.cursors.after`), not offset, so it stays serial. Cached as `following`.
 #[tauri::command]
-pub async fn get_followed_artists() -> Result<Value, String> {
+pub async fn get_followed_artists(account: Option<String>) -> Result<Value, String> {
     const FIRST: &str = "/me/following?type=artist&limit=50";
     let mut page = get(FIRST).await?;
     let mut all = Vec::new();
@@ -383,7 +482,9 @@ pub async fn get_followed_artists() -> Result<Value, String> {
         }
     }
     all.truncate(MAX_FOLLOWED);
-    Ok(Value::Array(all))
+    let all = Value::Array(all);
+    cache_store(&account, "following".into(), &all);
+    Ok(all)
 }
 
 /// Best-effort name and cover of a Spotify-owned mix. Spotify hides these
@@ -563,9 +664,9 @@ fn mix_artist_id(image_url: &str) -> Option<String> {
 }
 
 /// GET /me/playlists, following `next` until all pages are collected.
-/// Returns a flat JSON array of playlist objects.
+/// Returns a flat JSON array of playlist objects. Cached as `playlists`.
 #[tauri::command]
-pub async fn get_playlists() -> Result<Value, String> {
+pub async fn get_playlists(account: Option<String>) -> Result<Value, String> {
     let first = get("/me/playlists?limit=50").await?;
     let all = all_items(first)
         .await?
@@ -582,24 +683,47 @@ pub async fn get_playlists() -> Result<Value, String> {
             pl
         })
         .collect();
-    Ok(Value::Array(all))
+    let all = Value::Array(all);
+    cache_store(&account, "playlists".into(), &all);
+    Ok(all)
+}
+
+/// Rows per playlist page: `limit=100` on `/items` is a 403 for this app.
+const PLAYLIST_PAGE: usize = 50;
+
+/// One page of a playlist's `/items`. `total` is in the projection: the parallel
+/// paging needs it to know the offsets.
+fn playlist_items_path(playlist_id: &str, offset: usize) -> String {
+    let fields = "total,next,items(added_at,item(id,uri,name,duration_ms,artists(id,name),album(name,images)),track(id,uri,name,duration_ms,artists(id,name),album(name,images)))";
+    format!("/playlists/{playlist_id}/items?limit={PLAYLIST_PAGE}&offset={offset}&fields={}", urlencode(fields))
 }
 
 /// Paginated playlist tracks. This account's API uses `/items` (the `/tracks`
 /// endpoint 403s) and may nest each track under `item` instead of `track`.
 /// We request both field spellings and read whichever the response provides.
+/// With `snapshot_id` and `account`, the list is cached under
+/// `playlist:<id>:<snapshot_id>`: a hit makes no request (a snapshot never changes).
 #[tauri::command]
-pub async fn get_playlist_tracks(playlist_id: String) -> Result<Value, String> {
-    let fields = "next,items(added_at,item(id,uri,name,duration_ms,artists(id,name),album(name,images)),track(id,uri,name,duration_ms,artists(id,name),album(name,images)))";
-    let first = get(&format!("/playlists/{playlist_id}/items?limit=50&fields={}", urlencode(fields))).await?;
-    let all = all_items(first)
+pub async fn get_playlist_tracks(playlist_id: String, snapshot_id: Option<String>, account: Option<String>) -> Result<Value, String> {
+    let key = snapshot_id.map(|s| format!("playlist:{playlist_id}:{s}"));
+    if let Some(key) = &key {
+        if let Some(hit) = cached(&account, key).await {
+            return Ok(hit);
+        }
+    }
+    let first = get(&playlist_items_path(&playlist_id, 0)).await?;
+    let all = pages_parallel(first, |o| playlist_items_path(&playlist_id, o), PLAYLIST_PAGE, usize::MAX)
         .await?
         .iter()
         .map(track_of_row)
         .filter(|t| !t.is_null()) // null = removed/unavailable
         .map(simplify_track)
         .collect();
-    Ok(Value::Array(all))
+    let all = Value::Array(all);
+    if let Some(key) = key {
+        cache_store(&account, key, &all);
+    }
+    Ok(all)
 }
 
 
@@ -813,6 +937,108 @@ mod tests {
         assert_eq!(api_error(404, "/me/player/play?device_id=1", gone), format!("Spotify API 404: {gone}"));
         assert_eq!(api_error(404, "/albums/x", "nope"), "Spotify API 404: nope");
         assert_eq!(api_error(500, "/me/player", "boom"), "Spotify API 500: boom");
+    }
+
+    #[test]
+    fn page_offsets_from_total() {
+        assert_eq!(page_offsets(759, 50, usize::MAX).len(), 15);
+        assert_eq!(page_offsets(759, 50, usize::MAX)[..3], [50, 100, 150]);
+        assert_eq!(*page_offsets(759, 50, usize::MAX).last().unwrap(), 750);
+        assert_eq!(page_offsets(100, 50, usize::MAX), vec![50]);
+        assert_eq!(page_offsets(50, 50, usize::MAX), Vec::<usize>::new());
+        assert_eq!(page_offsets(0, 50, usize::MAX), Vec::<usize>::new());
+        // capped: Liked Songs stops at 1000
+        assert_eq!(*page_offsets(5000, 50, 1000).last().unwrap(), 950);
+        assert_eq!(page_offsets(5000, 50, 1000).len(), 19);
+    }
+
+    /// A page of `n` numbered items starting at `offset`.
+    fn page_at(offset: usize, n: usize) -> Value {
+        json!({ "items": (offset..offset + n).collect::<Vec<_>>() })
+    }
+
+    #[tokio::test]
+    async fn pages_keep_offset_order_when_completing_out_of_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        let total = 230;
+        let first = json!({ "total": total, "items": (0..50).collect::<Vec<_>>() });
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let (in_flight, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let fetch = |offset: usize| {
+            let (asked, in_flight, peak) = (asked.clone(), in_flight.clone(), peak.clone());
+            async move {
+                asked.lock().unwrap().push(offset);
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                // later offsets finish first
+                tokio::time::sleep(std::time::Duration::from_millis(60 - offset as u64 / 5)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(page_at(offset, (total - offset).min(50)))
+            }
+        };
+        let items = pages_with(first, 50, usize::MAX, 4, fetch).await.unwrap();
+        assert_eq!(items, (0..total).map(|i| json!(i)).collect::<Vec<_>>());
+        let mut asked = asked.lock().unwrap().clone();
+        asked.sort();
+        assert_eq!(asked, vec![50, 100, 150, 200]);
+        assert!(peak.load(Ordering::SeqCst) <= 4);
+        assert!(peak.load(Ordering::SeqCst) > 1, "pages run in parallel");
+    }
+
+    #[tokio::test]
+    async fn pages_concurrency_is_capped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let (in_flight, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let fetch = |offset: usize| {
+            let (in_flight, peak) = (in_flight.clone(), peak.clone());
+            async move {
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(page_at(offset, 50))
+            }
+        };
+        let first = json!({ "total": 1000, "items": (0..50).collect::<Vec<_>>() });
+        let items = pages_with(first, 50, 1000, 4, fetch).await.unwrap();
+        assert_eq!(items.len(), 1000);
+        assert_eq!(peak.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn pages_cap_and_error() {
+        let first = json!({ "total": 500, "items": (0..50).collect::<Vec<_>>() });
+        let items = pages_with(first.clone(), 50, 120, 4, |o| async move { Ok(page_at(o, 50)) }).await.unwrap();
+        assert_eq!(items.len(), 120);
+        assert_eq!(items[119], 119);
+        let err = pages_with(first, 50, usize::MAX, 4, |o| async move {
+            if o == 200 { Err("Spotify API 500: boom".to_string()) } else { Ok(page_at(o, 50)) }
+        })
+        .await;
+        assert_eq!(err, Err("Spotify API 500: boom".to_string()));
+        // total ≤ one page: no requests
+        let one = json!({ "total": 3, "items": [0, 1, 2] });
+        let items = pages_with(one, 50, usize::MAX, 4, |_| async { Err::<Value, _>("no".to_string()) }).await.unwrap();
+        assert_eq!(items.len(), 3);
+    }
+
+    #[test]
+    fn playlist_items_path_has_total_and_offset() {
+        let p = playlist_items_path("pl1", 100);
+        assert!(p.starts_with("/playlists/pl1/items?limit=50&offset=100&fields="), "{p}");
+        let fields = p.split("fields=").nth(1).unwrap();
+        assert!(fields.starts_with("total%2Cnext%2Citems%28"), "{fields}");
+    }
+
+    #[test]
+    fn play_context_body_offset() {
+        assert_eq!(play_context_body("spotify:album:a".into(), None), json!({"context_uri": "spotify:album:a"}));
+        assert_eq!(
+            play_context_body("spotify:album:a".into(), Some("spotify:track:t".into())),
+            json!({"context_uri": "spotify:album:a", "offset": {"uri": "spotify:track:t"}})
+        );
     }
 
     #[test]

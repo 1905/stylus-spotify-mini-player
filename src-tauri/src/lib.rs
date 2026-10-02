@@ -1,4 +1,5 @@
 mod auth;
+mod cache;
 mod media;
 mod player;
 mod spotify;
@@ -55,6 +56,15 @@ pub fn run() {
             spotify::save_track,
             spotify::unsave_track,
             spotify::play_context,
+            spotify::cache_get,
+            spotify::me_id,
+            player::local_play,
+            player::local_pause,
+            player::local_next,
+            player::local_prev,
+            player::local_seek,
+            player::local_volume,
+            player::local_load,
             spotify::mix_info,
             spotify::get_top,
             spotify::get_artist,
