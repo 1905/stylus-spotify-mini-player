@@ -1352,6 +1352,7 @@ svg {
   grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
   gap: 16px 14px;
   padding: 4px 12px 6px;
+  align-items: start; /* a 2-line title must not push its cover above the row's other covers */
 }
 
 /* the Library's shelves: as many a row as fit, their first rows only (app.js fitShelf; "See all" has the rest) */
