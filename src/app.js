@@ -3,6 +3,7 @@ import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
 import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
+import { noteMixes } from "./lib/mixes.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -80,8 +81,8 @@ const LOGIN_COPY = {
     btn: "Connect Spotify",
   },
   reconnect: {
-    title: "Reconnect Spotify to load your listening history",
-    sub: "Spotify needs one more permission. It takes a few seconds.",
+    title: "Reconnect Spotify for your library",
+    sub: "Spotify needs a few new permissions. It takes a few seconds.",
     btn: "Reconnect Spotify",
   },
   ended: {
@@ -107,6 +108,8 @@ function showLogin(kind) {
   heartGen++;
   devicesGen++;
   libraryDenied = false; // the next login may grant the library scopes
+  queueDirty = false;
+  resetLibrary();
   state.gen.search++;
   state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
@@ -250,6 +253,11 @@ async function refresh(epoch) {
     if (settled("volume")) state.volume = s.volume_percent ?? null;
     state.supportsVolume = Boolean(s.supports_volume);
     state.contextUri = s.context_uri || null;
+    // a mix playing now is one Spotify won't list: remember it (once per context, not every poll)
+    if (state.contextUri !== notedContext) {
+      notedContext = state.contextUri;
+      noteContexts([state.contextUri]);
+    }
   } else {
     state.isPlaying = false;
     state.supportsVolume = false;
@@ -290,14 +298,17 @@ async function refresh(epoch) {
     ]);
     if (epoch !== pollEpoch) return;
     if (queue) state.queue = queue;
+    if (queue) queueDirty = false;
     if (recent) state.recent = recent;
+    if (recent) noteContexts([state.contextUri, ...recent.map((r) => r.context_uri)]);
     state.historyOk = Boolean(recent);
     if (devices) setDevices(devices, startedAt);
     state.loaded = true;
     renderNow();
     renderRun();
-  } else if (tick % QUEUE_EVERY === 0 && mode !== "other") {
+  } else if ((tick % QUEUE_EVERY === 0 || queueDirty) && mode !== "other") {
     // between changes only the queue (song) or the device list (idle) can move
+    queueDirty = false;
     const [fresh, recent] = await Promise.all([
       fetchOr(track ? "get_queue" : "list_devices"),
       state.historyOk ? null : fetchOr("get_recently_played"),
@@ -306,6 +317,7 @@ async function refresh(epoch) {
     if (recent) {
       state.recent = recent;
       state.historyOk = true;
+      noteContexts([state.contextUri, ...recent.map((r) => r.context_uri)]);
       renderRun();
     }
     if (!fresh) return renderChrome();
@@ -344,6 +356,8 @@ async function fetchOr(cmd) {
     return null;
   }
 }
+
+let queueDirty = false; // a song was just added to the queue: the next poll fetches it
 
 const sameUris = (a, b) => a.length === b.length && a.every((t, i) => t.uri === b[i].uri);
 
@@ -429,9 +443,21 @@ function center() {
 // ---------- now block, chrome, progress ----------
 
 function setText(id, text) {
-  const el = $(id);
+  setEl($(id), text);
+}
+
+function setEl(el, text) {
   el.textContent = text || "";
   el.hidden = !text;
+}
+
+let nowArtistHtml = ""; // rewritten only when it changes: a focused artist link keeps its focus
+
+function setNowArtist(html) {
+  if (html === nowArtistHtml) return;
+  nowArtistHtml = html;
+  $("nowArtist").innerHTML = html;
+  $("nowArtist").hidden = !html;
 }
 
 function renderNow() {
@@ -440,7 +466,7 @@ function renderNow() {
   if (t) {
     title.textContent = t.name;
     title.title = t.name;
-    setText("nowArtist", t.artists);
+    setNowArtist(artistLinks(t));
     setText("nowAlbum", t.album);
     setText("emptyState", "");
     return;
@@ -459,7 +485,7 @@ function renderNow() {
   }
   title.textContent = head;
   title.title = "";
-  setText("nowArtist", "");
+  setNowArtist("");
   setText("nowAlbum", "");
   setText("emptyState", line);
 }
@@ -1103,28 +1129,93 @@ function onImgError(e) {
   img.replaceWith(Object.assign(document.createElement("span"), { className: "letter", textContent: img.dataset.letter }));
 }
 
-/** A playable track row. num: show the position; art: show the cover (album rows skip it, it's the same every row). */
 const isLocal = (uri) => String(uri).startsWith("spotify:local:");
 
+/** "A, B" as artist links; plain text when Spotify gave no artist ids (local files). */
+function artistLinks(t) {
+  const list = (t.artist_list || []).filter((a) => a && a.id && a.name);
+  if (!list.length) return esc(t.artists);
+  return list.map((a) => `<button class="artist-link" type="button" data-artist="${esc(a.id)}">${esc(a.name)}</button>`).join(", ");
+}
+
+const QUEUE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" /></svg>';
+
+/**
+ * A playable track row. num: show the position; art: show the cover (album rows skip it, it's the same every row).
+ * The title button covers the whole row (CSS), so a click anywhere plays it; the artist links and "+" sit on top.
+ */
 function trackRow(t, i, { num, art }) {
-  const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}`;
   const local = isLocal(t.uri);
+  const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}${local ? " is-local" : ""}`;
   const tip = local ? `${t.name} (a local file: play it in Spotify)` : t.name;
   return (
-    `<button class="row row-track${kind}" type="button" data-i="${i}" title="${esc(tip)}"${local ? " disabled" : ""}>` +
+    `<div class="row row-track${kind}" data-i="${i}" title="${esc(tip)}">` +
     (num ? `<span class="row-num">${i + 1}</span>` : "") +
     (art ? `<span class="art row-art">${artHtml(t.cover, t.name)}</span>` : "") +
-    `<span class="row-text"><span class="row-title">${esc(t.name)}</span><span class="row-sub">${esc(t.artists)}</span></span>` +
-    `<span class="row-time">${fmtTime(t.duration_ms)}</span></button>`
+    `<span class="row-text"><button class="row-title row-play" type="button"${local ? " disabled" : ""}>${esc(t.name)}</button>` +
+    `<span class="row-sub">${artistLinks(t)}</span></span>` +
+    `<span class="row-time">${fmtTime(t.duration_ms)}</span>` +
+    // Spotify can't queue a local file
+    (local ? "<span></span>" : `<button class="row-queue" type="button" aria-label="Add to queue" title="Add to queue">${QUEUE_ICON}</button>`) +
+    `</div>`
   );
 }
 
-// ---------- library: level 1 playlists, level 2 tracks ----------
+/**
+ * A click in a list of track rows: an artist link opens the artist, "+" queues the song, anything else
+ * plays from that row. Returns true if the click was on a row or a link.
+ */
+function onTrackClick(e, tracks, play) {
+  const link = e.target.closest(".artist-link");
+  if (link) return openArtist(link), true;
+  const row = e.target.closest(".row-track");
+  if (!row) return false;
+  const i = Number(row.dataset.i);
+  if (!tracks[i]) return true;
+  if (e.target.closest(".row-queue")) addToQueue(tracks[i]);
+  else if (e.target.closest(".row-play")) play(i);
+  return true;
+}
+
+/** A cover tile for a shelf or the artist page; round = an artist. sub is HTML. */
+function tile(item, i, { round = false, sub = "", attrs = "" } = {}) {
+  return (
+    `<button class="album${round ? " is-artist" : ""}" type="button" data-i="${i}" title="${esc(item.name)}"${attrs}>` +
+    `<span class="art">${artHtml(item.cover, item.name)}</span>` +
+    `<span class="album-name">${esc(item.name)}</span>` +
+    (sub ? `<span class="album-sub">${sub}</span>` : "") +
+    `</button>`
+  );
+}
+
+/** The tile behind a click in a shelf, or null. */
+const tileAt = (e, list) => {
+  const el = e.target.closest(".album[data-i]");
+  return (el && list[Number(el.dataset.i)]) || null;
+};
+
+// ---------- add to queue (a player command, but it doesn't change the track) ----------
+
+async function addToQueue(t) {
+  if (!t || isLocal(t.uri)) return;
+  const ok = await withDevice(async (id) => invoke("add_to_queue", { deviceId: await needDevice(id), uri: t.uri }));
+  if (!ok) return;
+  toast("Added to Up next");
+  queueDirty = true;
+}
+
+// ---------- library: level 1 groups, level 2 details ----------
 
 let playlists = null; // loaded once, then cached
 let playlistsLoading = false;
 let detailTracks = [];
+let detailAlbums = []; // the artist page's albums and singles
 let listScroll = 0;
+let libOpened = false; // the groups were asked for this session: mix changes re-render theirs
+
+const NAV_MAX = 5;
+let navStack = []; // the details Back returns to, oldest first; empty = Back shows the list
+let curDetail = null; // the detail on screen ({kind, id, name, cover, sub}), null = the list
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
@@ -1138,18 +1229,260 @@ function openLibrary() {
   openOverlay("library");
   showList();
   $("sheet").focus();
-  if (!playlists) loadPlaylists();
+  loadGroups();
 }
 
 function showList() {
   overlayRev++;
   state.gen.detail++; // drop any detail response still in flight
   detailTracks = [];
+  detailAlbums = [];
+  navStack = [];
+  curDetail = null;
   $("libDetail").hidden = true;
   $("libBack").hidden = true;
   $("libLevel1").hidden = false;
   $("libTitle").hidden = false;
   $("sheetBody").scrollTop = listScroll;
+}
+
+function goBack() {
+  const prev = navStack.pop();
+  if (prev) openDetail(prev, false);
+  else showList();
+}
+
+// Library groups: each loads on its own, once per login session. A missing scope (403) hides
+// its group without a word; any other failure leaves one line in it and retries on the next open.
+const lib = new Map(); // cache key → promise of the invoke result
+
+function libGet(key, cmd, args) {
+  let p = lib.get(key);
+  if (!p) {
+    p = invoke(cmd, args);
+    lib.set(key, p);
+    p.catch((e) => {
+      if (!isScopeError(e) && lib.get(key) === p) lib.delete(key);
+    });
+  }
+  return p;
+}
+
+function loadGroups() {
+  libOpened = true;
+  if (!playlists) loadPlaylists();
+  fillLiked();
+  fillTop();
+  fillAlbums();
+  fillFollowing();
+  renderMixes();
+}
+
+/** Show one group's data via render(data); what names it in an error line. */
+async function fillGroup(group, load, render, what) {
+  try {
+    const data = await load();
+    const status = group.querySelector(".status");
+    if (status) setEl(status, "");
+    render(data);
+  } catch (e) {
+    if (overlayFailed(e)) return;
+    group.hidden = isScopeError(e);
+    // the Liked Songs row has no status line: its subtitle says it
+    setEl(group.querySelector(".status") || group.querySelector(".row-sub"), `Couldn't load ${what} — ${reason(e)}`);
+  }
+}
+
+function fillLiked() {
+  const row = $("libLiked");
+  const sub = row.querySelector(".row-sub");
+  row.hidden = false;
+  if (!sub.textContent) setEl(sub, "Loading…");
+  fillGroup(row, () => libGet("liked", "get_saved_tracks"), (res) => setEl(sub, plural((res && res.total) || 0, "song", "songs")), "your liked songs");
+}
+
+let savedAlbums = [];
+
+function fillAlbums() {
+  const group = $("libAlbums");
+  fillGroup(
+    group,
+    () => libGet("albums", "get_saved_albums"),
+    (list) => {
+      savedAlbums = (list || []).filter((a) => a && a.id);
+      group.hidden = !savedAlbums.length;
+      group.querySelector(".albums").innerHTML = savedAlbums.map((a, i) => tile(a, i, { sub: esc(a.artists) })).join("");
+    },
+    "your albums",
+  );
+}
+
+let followed = [];
+
+function fillFollowing() {
+  const group = $("libFollowing");
+  fillGroup(
+    group,
+    () => libGet("following", "get_followed_artists"),
+    (list) => {
+      followed = (list || []).filter((a) => a && a.id);
+      group.hidden = !followed.length;
+      group.querySelector(".albums").innerHTML = followed.map((a, i) => tile({ name: a.name, cover: a.image }, i, { round: true })).join("");
+    },
+    "the artists you follow",
+  );
+}
+
+// ---------- your top: 3 time ranges, each cached ----------
+
+const TOP_TRACKS_SHOWN = 10; // of 20: the rest of the Library stays in reach
+let topRange = "short_term";
+let topGen = 0; // the latest tab: an older range's answer is dropped
+let topTrackList = [];
+let topArtistList = [];
+
+async function fillTop() {
+  const range = topRange;
+  const gen = ++topGen;
+  const group = $("libTop");
+  for (const b of $("topTabs").querySelectorAll("[data-range]")) b.setAttribute("aria-selected", String(b.dataset.range === range));
+  const results = await Promise.allSettled(["tracks", "artists"].map((kind) => libGet(`top:${kind}:${range}`, "get_top", { kind, range })));
+  if (gen !== topGen) return;
+  const failed = results.filter((r) => r.status === "rejected").map((r) => r.reason);
+  if (failed.some((e) => isCode(e, "AUTH_EXPIRED"))) return void expire();
+  if (failed.length === 2 && failed.every(isScopeError)) return void (group.hidden = true);
+  const [tracks, artists] = results.map((r) => (r.status === "fulfilled" && r.value) || []);
+  topTrackList = tracks.filter((t) => t && t.uri).slice(0, TOP_TRACKS_SHOWN);
+  topArtistList = artists.filter((a) => a && a.id);
+  group.hidden = false;
+  $("topTracks").innerHTML = topTrackList.map((t, i) => trackRow(t, i, { num: false, art: true })).join("");
+  $("topArtists").innerHTML = topArtistList.map((a, i) => tile({ name: a.name, cover: a.image }, i, { round: true })).join("");
+  $("topArtists").hidden = !topArtistList.length;
+  const err = failed.find((e) => !isScopeError(e));
+  const empty = !topTrackList.length && !topArtistList.length;
+  setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${reason(err)}` : empty ? "Nothing here yet for this time range." : "");
+}
+
+function onTopTab(e) {
+  const b = e.target.closest("[data-range]");
+  if (!b || b.dataset.range === topRange) return;
+  topRange = b.dataset.range;
+  fillTop();
+}
+
+// ---------- Spotify mixes: Spotify doesn't list its own playlists, so remember the ones seen playing ----------
+
+const MIXES_KEY = "therun.knownMixes";
+const MIX_NOTE = "Spotify doesn't share the track list of its own mixes.";
+let knownMixes = null; // [{id, seen}], newest first; null = not read from storage yet
+let notedContext = null; // the last playback context noted, so a poll doesn't note it every second
+const refusedMixes = new Set(); // mixes Spotify wouldn't start this session: history must not bring them back
+const mixInfo = new Map(); // playlist id → promise of {name, cover} or null
+let mixList = []; // the tiles on screen: {id, name, cover}
+let mixesGen = 0;
+
+function mixes() {
+  if (!knownMixes) {
+    try {
+      knownMixes = noteMixes(JSON.parse(localStorage.getItem(MIXES_KEY) || "[]"), [], [], "");
+    } catch {
+      knownMixes = []; // storage blocked or broken: this session's mixes only
+    }
+  }
+  return knownMixes;
+}
+
+const ownIds = () => [...(playlists || []).map((p) => p.id), ...refusedMixes];
+
+/** Note playback contexts (newest first); a new mix is stored and shown. */
+function noteContexts(uris) {
+  const before = mixes();
+  const next = noteMixes(before, uris, ownIds(), new Date().toISOString());
+  // only a seen time moved: not worth a write
+  if (next.length === before.length && next.every((m, i) => m.id === before[i].id)) return;
+  knownMixes = next;
+  try {
+    localStorage.setItem(MIXES_KEY, JSON.stringify(next));
+  } catch {
+    /* kept in memory for this session */
+  }
+  if (libOpened) renderMixes();
+}
+
+function mixInfoFor(id) {
+  let p = mixInfo.get(id);
+  if (!p) {
+    p = invoke("mix_info", { playlistId: id }).catch((e) => {
+      if (isCode(e, "AUTH_EXPIRED")) expire();
+      return null; // a letter tile named "Spotify mix"
+    });
+    mixInfo.set(id, p);
+  }
+  return p;
+}
+
+async function renderMixes() {
+  const gen = ++mixesGen;
+  const own = new Set(ownIds()); // the playlists may have loaded after a mix was noted
+  const list = mixes().filter((m) => !own.has(m.id));
+  const infos = await Promise.all(list.map((m) => mixInfoFor(m.id)));
+  if (gen !== mixesGen) return;
+  mixList = list.map((m, i) => ({ id: m.id, name: (infos[i] && infos[i].name) || "Spotify mix", cover: (infos[i] && infos[i].cover) || null }));
+  const group = $("libMixes");
+  group.hidden = !mixList.length;
+  group.querySelector(".albums").innerHTML = mixList.map((m, i) => tile(m, i, { attrs: ` data-mix="${esc(m.id)}"` })).join("");
+}
+
+/** Spotify refuses some of its own mixes: 403, or a 404 that isn't about the device. */
+const mixRefused = (e) => /\b403\b/.test(String(e)) || (/\b404\b/.test(String(e)) && !/device/i.test(String(e)));
+
+async function playMix(src) {
+  const rev = overlayRev;
+  let refused = false;
+  const ok = await changeTrack(async (id) => {
+    const deviceId = await needDevice(id);
+    try {
+      await invoke("play_context", { deviceId, contextUri: `spotify:playlist:${src.id}` });
+    } catch (e) {
+      if (!mixRefused(e)) throw e;
+      refused = true; // handled here: withDevice would retry it on another device
+    }
+  });
+  kick();
+  if (refused) {
+    toast("Spotify won't start this mix from here");
+    refusedMixes.add(src.id);
+    noteContexts([]); // drops it from the stored list
+    renderMixes();
+    if (rev === overlayRev) $("detailPlay").disabled = true;
+    return;
+  }
+  if (ok && rev === overlayRev) closeOverlay();
+}
+
+/** The next login may be another account: forget everything the Library loaded (not the stored mixes). */
+function resetLibrary() {
+  lib.clear();
+  mixInfo.clear();
+  refusedMixes.clear();
+  knownMixes = null;
+  notedContext = null;
+  libOpened = false;
+  navStack = [];
+  curDetail = null;
+  topRange = "short_term";
+  topGen++;
+  mixesGen++;
+  savedAlbums = [];
+  followed = [];
+  topTrackList = [];
+  topArtistList = [];
+  mixList = [];
+  detailAlbums = [];
+  for (const id of ["libLiked", "libTop", "libAlbums", "libFollowing", "libMixes"]) $(id).hidden = true;
+  for (const el of $("libLevel1").querySelectorAll(".albums, #topTracks")) el.innerHTML = "";
+  for (const el of $("libLevel1").querySelectorAll(".group .status")) setEl(el, "");
+  setEl($("libLiked").querySelector(".row-sub"), "");
 }
 
 async function loadPlaylists() {
@@ -1177,37 +1510,65 @@ function renderPlaylists() {
         `<span class="row-sub">${plural((p.tracks && p.tracks.total) || 0, "track", "tracks")}</span></span></button>`,
     )
     .join("");
+  noteContexts([]); // own playlists noted before this load aren't mixes
+  renderMixes();
 }
 
-/** Level 2 for a playlist or an album: {kind, id, name, cover, sub}. */
-async function openDetail(src) {
+const LIKED_ART = '<svg class="liked-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3S3.8 15.5 3.8 9.4A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 8.2 2.2c0 6.1-8.2 10.9-8.2 10.9z" /></svg>';
+
+const openArtist = (link) => openDetail({ kind: "artist", id: link.dataset.artist, name: link.textContent, cover: null, sub: "Artist" });
+const openArtistTile = (a) => a && openDetail({ kind: "artist", id: a.id, name: a.name, cover: a.image, sub: "Artist" });
+
+/**
+ * Level 2: {kind, id, name, cover, sub}, kind = playlist, album, liked, mix or artist.
+ * push: Back returns to what this replaced (false when Back itself opens it).
+ */
+async function openDetail(src, push = true) {
   if (state.overlay !== "library") {
     openOverlay("library");
     $("sheet").focus();
+    navStack = []; // from the stage or Search: Back shows the list
+    if (!curDetail) listScroll = $("sheetBody").scrollTop;
+    loadGroups(); // so Back has a list to show
+  } else if (push && curDetail) {
+    navStack.push(curDetail);
+    if (navStack.length > NAV_MAX) navStack.shift();
+  } else if (push) {
+    listScroll = $("sheetBody").scrollTop;
+    navStack = [];
   }
-  if (!$("libLevel1").hidden) listScroll = $("sheetBody").scrollTop;
+  curDetail = src;
   overlayRev++;
   const gen = ++state.gen.detail;
   detailTracks = [];
+  detailAlbums = [];
   $("libLevel1").hidden = true;
   $("libTitle").hidden = true;
   $("libBack").hidden = false;
+  $("libBack").querySelector(".back-label").textContent = navStack.length ? "Back" : "Library";
   $("libDetail").hidden = false;
-  $("detailCover").innerHTML = artHtml(src.cover, src.name);
+  const cover = $("detailCover");
+  cover.classList.toggle("is-round", src.kind === "artist");
+  cover.classList.toggle("is-liked", src.kind === "liked");
+  cover.innerHTML = src.kind === "liked" ? LIKED_ART : artHtml(src.cover, src.name);
   $("detailName").textContent = src.name;
   $("detailName").title = src.name;
   setText("detailSub", src.sub);
-  $("detailPlay").disabled = true;
+  setText("detailNote", src.kind === "mix" ? MIX_NOTE : "");
+  $("detailPlay").hidden = src.kind === "artist";
+  $("detailPlay").disabled = src.kind !== "mix"; // a mix plays by its uri: nothing to load
   $("detailRows").innerHTML = "";
-  setText("detailStatus", "Loading tracks…");
+  setText("detailStatus", { mix: "", artist: "Loading albums…" }[src.kind] ?? "Loading tracks…");
   $("sheetBody").scrollTop = 0;
+  if (src.kind === "mix") return;
+  if (src.kind === "artist") return loadArtist(src, gen);
 
-  const album = src.kind === "album";
   let tracks;
+  let total = 0;
   try {
-    tracks = album
-      ? await invoke("get_album_tracks", { albumId: src.id })
-      : await invoke("get_playlist_tracks", { playlistId: src.id });
+    if (src.kind === "liked") ({ tracks, total } = (await libGet("liked", "get_saved_tracks")) || {});
+    else if (src.kind === "album") tracks = await invoke("get_album_tracks", { albumId: src.id });
+    else tracks = await invoke("get_playlist_tracks", { playlistId: src.id });
   } catch (e) {
     if (gen !== state.gen.detail) return;
     if (!overlayFailed(e)) setText("detailStatus", `Couldn't load tracks — ${reason(e)}`);
@@ -1216,18 +1577,72 @@ async function openDetail(src) {
   if (gen !== state.gen.detail) return; // a newer detail (or the list) took over
 
   detailTracks = (tracks || []).filter((t) => t && t.uri);
-  if (!album) setText("detailSub", plural(detailTracks.length, "track", "tracks"));
-  setText("detailStatus", detailTracks.length ? "" : album ? "This album is empty." : "This playlist is empty.");
-  $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: !album })).join("");
+  const n = detailTracks.length;
+  if (src.kind === "playlist") setText("detailSub", plural(n, "track", "tracks"));
+  if (src.kind === "liked") {
+    total = Math.max(total || 0, n);
+    setText("detailSub", plural(total, "song", "songs"));
+    setText("detailNote", total > n ? `Showing your newest ${n} of ${total}` : "");
+  }
+  const empty = { album: "This album is empty.", liked: "No liked songs yet." }[src.kind] || "This playlist is empty.";
+  setText("detailStatus", n ? "" : empty);
+  $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album" })).join("");
   $("detailPlay").disabled = !detailTracks.some((t) => !isLocal(t.uri));
 }
 
-async function playDetailFrom(i) {
+const kindLabel = (k) => (k ? k[0].toUpperCase() + k.slice(1) : "Album");
+
+/** The artist page: photo and name (best effort), then albums and singles. */
+async function loadArtist(src, gen) {
+  const optional = (e) => (isCode(e, "AUTH_EXPIRED") ? Promise.reject(e) : null); // the page works without the photo
+  let info, albums;
+  try {
+    [info, albums] = await Promise.all([
+      invoke("get_artist", { artistId: src.id }).catch(optional),
+      invoke("get_artist_albums", { artistId: src.id }),
+    ]);
+  } catch (e) {
+    if (gen !== state.gen.detail) return;
+    if (!overlayFailed(e)) setText("detailStatus", `Couldn't load albums — ${reason(e)}`);
+    return;
+  }
+  if (gen !== state.gen.detail) return;
+  if (info) {
+    // kept on src: Back to this page shows them at once
+    src.name = info.name || src.name;
+    src.cover = info.image || src.cover;
+    $("detailCover").innerHTML = artHtml(src.cover, src.name);
+    $("detailName").textContent = src.name;
+    $("detailName").title = src.name;
+  }
+  detailAlbums = (albums || []).filter((a) => a && a.id);
+  setText("detailStatus", detailAlbums.length ? "" : "No albums or singles.");
+  $("detailRows").innerHTML =
+    `<div class="albums is-grid">` +
+    detailAlbums.map((a, i) => tile(a, i, { sub: `<span class="album-kind">${esc(kindLabel(a.kind))}</span>${esc(a.year || "")}` })).join("") +
+    `</div>`;
+}
+
+function onDetailClick(e) {
+  if (onTrackClick(e, detailTracks, playDetailFrom)) return;
+  const a = tileAt(e, detailAlbums);
+  if (a) openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: curDetail ? curDetail.name : "" });
+}
+
+function onDetailPlay() {
+  if (curDetail && curDetail.kind === "mix") playMix(curDetail);
+  else playDetailFrom(0);
+}
+
+/** Play tracks from row i on; the overlay closes only if the user is still on that view. */
+async function playFrom(tracks, i) {
   // Spotify lists local files in playlists but rejects them in play requests
-  const uris = detailTracks.slice(i).map((t) => t.uri).filter((u) => !isLocal(u));
+  const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocal(u));
   const rev = overlayRev;
   if ((await playUris(uris)) && rev === overlayRev) closeOverlay();
 }
+
+const playDetailFrom = (i) => playFrom(detailTracks, i);
 
 // ---------- search: songs + albums, debounced, last request wins ----------
 
@@ -1304,21 +1719,12 @@ async function runSearch(q, gen) {
   box.scrollTop = 0;
 }
 
-async function onSearchClick(e) {
-  const song = e.target.closest(".row-track");
-  if (song) {
-    const t = searchHits.tracks[Number(song.dataset.i)];
-    const rev = overlayRev;
-    if (t && (await playUris([t.uri])) && rev === overlayRev) closeOverlay();
-    return;
-  }
+function onSearchClick(e) {
+  // a song plays alone: the rest of the results aren't a playlist
+  if (onTrackClick(e, searchHits.tracks, (i) => playFrom([searchHits.tracks[i]], 0))) return;
   const al = e.target.closest("[data-album]");
-  if (al) {
-    const a = searchHits.albums[Number(al.dataset.album)];
-    if (!a) return;
-    if (!playlists) loadPlaylists(); // so Back has something to show
-    openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: a.artists });
-  }
+  const a = al && searchHits.albums[Number(al.dataset.album)];
+  if (a) openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: a.artists });
 }
 
 // ---------- keyboard: Space = play/pause, Esc = close the overlay ----------
@@ -1379,17 +1785,31 @@ async function boot() {
     $(id).addEventListener("click", (e) => e.target.closest("[data-close]") && closeOverlay());
     $(id).addEventListener("error", onImgError, true);
   }
-  $("libBack").addEventListener("click", showList);
+  $("libBack").addEventListener("click", goBack);
   $("libList").addEventListener("click", (e) => {
     const row = e.target.closest("[data-id]");
     const p = row && playlists && playlists[Number(row.dataset.i)];
     if (p) openDetail({ kind: "playlist", id: p.id, name: p.name, cover: pickImage(p.images), sub: plural((p.tracks && p.tracks.total) || 0, "track", "tracks") });
   });
-  $("detailRows").addEventListener("click", (e) => {
-    const row = e.target.closest("[data-i]");
-    if (row) playDetailFrom(Number(row.dataset.i));
+  $("libLiked").addEventListener("click", () => openDetail({ kind: "liked", id: "liked", name: "Liked Songs", cover: null, sub: "" }));
+  $("topTabs").addEventListener("click", onTopTab);
+  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i) => playFrom(topTrackList, i)));
+  $("topArtists").addEventListener("click", (e) => openArtistTile(tileAt(e, topArtistList)));
+  $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, followed)));
+  $("libAlbums").addEventListener("click", (e) => {
+    const a = tileAt(e, savedAlbums);
+    if (a) openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: a.artists });
   });
-  $("detailPlay").addEventListener("click", () => playDetailFrom(0));
+  $("libMixes").addEventListener("click", (e) => {
+    const m = tileAt(e, mixList);
+    if (m) openDetail({ kind: "mix", id: m.id, name: m.name, cover: m.cover, sub: "Made by Spotify" });
+  });
+  $("detailRows").addEventListener("click", onDetailClick);
+  $("detailPlay").addEventListener("click", onDetailPlay);
+  $("nowArtist").addEventListener("click", (e) => {
+    const link = e.target.closest(".artist-link");
+    if (link) openArtist(link);
+  });
   $("searchInput").addEventListener("input", onSearchInput);
   $("searchResults").addEventListener("click", onSearchClick);
   document.addEventListener("keydown", onKey);
@@ -1401,6 +1821,8 @@ async function boot() {
     if (state.loaded) renderRun();
   });
   $("run").addEventListener("error", onImgError, true);
+  // dev harness only: the `artist` scenario opens a page by id
+  if (window.__mock) window.__openArtist = (id) => openDetail({ kind: "artist", id, name: "", cover: null, sub: "Artist" });
   // a hidden window needs no 1s polling; come back with a fresh poll
   document.addEventListener("visibilitychange", () => {
     if ($("stage").hidden) return;

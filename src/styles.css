@@ -457,6 +457,21 @@ svg {
   font-weight: 500;
 }
 
+/* artist names: links to the artist page, in the now block and in track rows */
+.artist-link {
+  position: relative;
+  z-index: 1; /* above the row's play target */
+  border-radius: 3px;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 120ms ease, color 120ms ease;
+}
+
+.artist-link:hover {
+  color: var(--fg);
+  text-decoration-color: currentColor;
+}
+
 .now-album {
   margin-top: 2px;
   color: var(--fg-2);
@@ -914,6 +929,7 @@ svg {
 
 /* rows: playlists, tracks, songs */
 .row {
+  position: relative;
   display: grid;
   align-items: center;
   gap: 14px;
@@ -929,18 +945,73 @@ svg {
 }
 
 /* local files: listed, but Spotify can't start them from here */
-.row:disabled {
+.row.is-local {
   opacity: 0.4;
-  cursor: default;
 }
 
-.row:disabled:hover {
+.row.is-local:hover {
   background: none;
 }
 
 .row:focus-visible,
 .album:focus-visible {
   outline-offset: -2px;
+}
+
+/* a track row plays from its title button, stretched over the whole row; links and "+" sit above it */
+.row-play {
+  text-align: left;
+}
+
+.row-play::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+
+.row-play:focus-visible {
+  outline: none;
+}
+
+.row:has(.row-play:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
+
+.row-queue {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-right: -6px;
+  border-radius: 50%;
+  color: var(--fg-2);
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.row-queue svg {
+  width: 18px;
+  height: 18px;
+}
+
+.row:hover .row-queue,
+.row-queue:focus-visible {
+  opacity: 1;
+}
+
+.row-queue:hover {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.1);
+}
+
+@media (hover: none) {
+  .row-queue {
+    opacity: 1;
+  }
 }
 
 .row-playlist {
@@ -951,18 +1022,23 @@ svg {
   width: 56px;
 }
 
+/* the last column is the "+" (an empty cell for local files) */
 .row-track {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto 24px;
   padding-top: 6px;
   padding-bottom: 6px;
 }
 
+.row-track.has-art {
+  grid-template-columns: 40px minmax(0, 1fr) auto 24px;
+}
+
 .row-track.has-num {
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto 24px;
 }
 
 .row-track.has-num.has-art {
-  grid-template-columns: 22px 40px minmax(0, 1fr) auto;
+  grid-template-columns: 22px 40px minmax(0, 1fr) auto 24px;
 }
 
 /* album rows have no cover: keep the row height of a covered row */
@@ -987,6 +1063,7 @@ svg {
 }
 
 .row-title {
+  width: 100%;
   font-size: 15px;
   line-height: 20px;
   font-weight: 500;
@@ -1022,6 +1099,37 @@ svg {
   width: 132px;
   border-radius: 6px;
   box-shadow: 0 24px 50px -24px rgb(0 0 0 / 0.7);
+}
+
+.detail-cover.is-round {
+  border-radius: 50%;
+}
+
+/* Liked Songs: a heart tile, in the list row and the detail head */
+.liked-art,
+.detail-cover.is-liked {
+  display: grid;
+  place-items: center;
+  color: var(--fg);
+  background: linear-gradient(135deg, rgb(var(--v) / 0.9), rgb(var(--v) / 0.35));
+}
+
+.liked-art .liked-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.detail-cover.is-liked .liked-icon {
+  width: 52px;
+  height: 52px;
+}
+
+/* the cap note under Liked Songs, the "no track list" line under a mix */
+.detail-note {
+  margin: -10px 12px 10px;
+  color: var(--fg-2);
+  font-size: 13.5px;
+  line-height: 19px;
 }
 
 .detail-meta {
@@ -1113,7 +1221,7 @@ svg {
 
 /* compact song rows so 10 songs and the albums fit at 900px tall */
 .palette .row-track {
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto 24px;
   padding-top: 4px;
   padding-bottom: 4px;
 }
@@ -1136,6 +1244,48 @@ svg {
   color: var(--fg-2);
   font-size: 14px;
   font-weight: 600;
+}
+
+/* Library level 1: Liked Songs, Your top, Playlists, Albums, Following, Spotify mixes */
+#libLevel1 .group {
+  margin-top: 14px;
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 4px 0 0;
+}
+
+.tab {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.1);
+}
+
+#topArtists + #topTracks {
+  margin-top: 6px;
 }
 
 .albums {
@@ -1183,6 +1333,38 @@ svg {
   color: var(--fg-2);
   font-size: 12.5px;
   line-height: 16px;
+}
+
+/* artists: round tiles, names centred */
+.album.is-artist {
+  text-align: center;
+}
+
+.album.is-artist .art {
+  border-radius: 50%;
+}
+
+/* the artist page: albums and singles in a grid, not a shelf */
+.albums.is-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 16px 14px;
+  overflow: visible;
+}
+
+.albums.is-grid .album,
+.albums.is-grid .album .art {
+  width: auto;
+}
+
+.album-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--hair);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 15px;
 }
 
 @keyframes fade-in {
@@ -1292,6 +1474,11 @@ svg {
 
   .toast {
     bottom: 112px;
+  }
+
+  .album.is-artist,
+  .album.is-artist .art {
+    width: 72px;
   }
 }
 

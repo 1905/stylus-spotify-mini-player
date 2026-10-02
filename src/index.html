@@ -116,7 +116,7 @@
           <h2 id="libTitle" class="sheet-title">Library</h2>
           <button id="libBack" class="btn btn-ghost btn-back" type="button" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
-            Library
+            <span class="back-label">Library</span>
           </button>
           <button class="icon-btn" type="button" data-close aria-label="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
@@ -124,8 +124,42 @@
         </header>
         <div id="sheetBody" class="sheet-body">
           <div id="libLevel1">
-            <p id="listStatus" class="status" role="status" hidden></p>
-            <div id="libList" class="rows"></div>
+            <button id="libLiked" class="row row-playlist row-liked" type="button" hidden>
+              <span class="art row-art liked-art"><svg class="liked-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3S3.8 15.5 3.8 9.4A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 8.2 2.2c0 6.1-8.2 10.9-8.2 10.9z" /></svg></span>
+              <span class="row-text"><span class="row-title">Liked Songs</span><span class="row-sub"></span></span>
+            </button>
+            <section id="libTop" class="group" hidden>
+              <div class="group-head">
+                <h3 class="group-title">Your top</h3>
+                <div id="topTabs" class="tabs" role="tablist" aria-label="Time range">
+                  <button class="tab" type="button" role="tab" data-range="short_term" aria-selected="true">4 weeks</button>
+                  <button class="tab" type="button" role="tab" data-range="medium_term" aria-selected="false">6 months</button>
+                  <button class="tab" type="button" role="tab" data-range="long_term" aria-selected="false">All time</button>
+                </div>
+              </div>
+              <p class="status" role="status" hidden></p>
+              <div id="topArtists" class="albums"></div>
+              <div id="topTracks" class="rows"></div>
+            </section>
+            <section class="group">
+              <h3 class="group-title">Playlists</h3>
+              <p id="listStatus" class="status" role="status" hidden></p>
+              <div id="libList" class="rows"></div>
+            </section>
+            <section id="libAlbums" class="group" hidden>
+              <h3 class="group-title">Albums</h3>
+              <p class="status" role="status" hidden></p>
+              <div class="albums"></div>
+            </section>
+            <section id="libFollowing" class="group" hidden>
+              <h3 class="group-title">Following</h3>
+              <p class="status" role="status" hidden></p>
+              <div class="albums"></div>
+            </section>
+            <section id="libMixes" class="group" hidden>
+              <h3 class="group-title">Spotify mixes</h3>
+              <div class="albums"></div>
+            </section>
           </div>
           <div id="libDetail" hidden>
             <div class="detail-head">
@@ -136,6 +170,7 @@
                 <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
               </div>
             </div>
+            <p id="detailNote" class="detail-note" hidden></p>
             <p id="detailStatus" class="status" role="status" hidden></p>
             <div id="detailRows" class="rows"></div>
           </div>
