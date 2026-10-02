@@ -1,7 +1,7 @@
 # Standalone Implementation Plan v1.2
 
 **Date:** 2026-10-02
-**Status:** approved (full auto; v1.2 = v1.1 + Astra plan-review meds #5–#7, user: "verify fix findings")
+**Status:** done 2026-10-02. Astra rounds 1–6 + final (0 crit/high), /simplify, merged to main.
 **Spec:** ./spec.md (P0 passed; this plan is P1 + P2 + exit)
 **Goal:** The app is its own Spotify Connect speaker "The Run" on this Mac (librespot), "This Mac" plays through it with no Spotify app, and media keys + Now Playing work.
 **Architecture:** A long-lived librespot engine (Session + Player + SoftMixer + Spirc) runs inside the Tauri backend and registers through the cloud as a Connect device. The UI keeps controlling everything through the public Web API, so "The Run" is just another device id. OS media controls (souvlaki → MPRemoteCommandCenter / MPNowPlayingInfoCenter) are fed from the existing poll, and route OS commands to the existing JS transport functions.

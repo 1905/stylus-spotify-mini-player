@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 **Scope:** ~/dev/rust-spotify
-**Status:** approved 2026-10-02 (user: "approved but do prototype first super minimal")
+**Status:** shipped 2026-10-02 (as-built notes at the end)
 
 ## TL;DR
 
@@ -141,3 +141,39 @@ Prototype: `spikes/librespot/` (librespot 0.8.0, rodio → CoreAudio). It played
 - **Build:** pin `vergen = 9.0.6` (9.1 breaks `librespot-core`'s build script with `vergen-gitcl` 1.0.8).
 - **Cost while playing:** 25 MB footprint (43 MB RSS), ~1.4% CPU; spike binary 10.6 MB (no size profile).
 - **For P1:** store librespot's credentials in the Keychain (the spike used a file under `~/Library/Application Support/rust-spotify/librespot-spike/`). The app will need 2 logins on first run, Web API and player; ideally both happen in one browser visit.
+
+## As-built notes (2026-10-02)
+
+- **Engine:** librespot 0.8.0 (core/playback/connect) runs in the Tauri backend as the Connect device "The Run" (type Computer). The UI controls it through the Web API like any other device.
+- **Vendored `librespot-core`, 2 patches** (`src-tauri/vendor/`, noted in `Cargo.toml`):
+  1. No `exit(1)` on a non-Premium account. Upstream would kill the whole app.
+  2. A failed dealer URL/token fetch retries instead of ending the worker.
+- **`vergen` pinned to 9.0.6.** Version 9.1 breaks librespot-core's build script.
+- **Player login:** librespot's own OAuth client id, through our `auth.rs` `oauth_login` (3-minute deadline, read timeouts), on port 5588. The app's Web API token logs librespot in but can't fetch audio (`INVALID_CREDENTIALS`).
+- **Credentials:** `player-credentials.json`, mode 0600, next to `tokens.json` (now also 0600). **Not the Keychain:** unsigned builds triggered a Keychain prompt after every rebuild. The user chose the file.
+- **Checks:**
+  - Account check: player username vs Web API `/me` id, giving `account_mismatch`.
+  - Premium pre-check from `/me` `product`.
+  - `/me` is fetched once per engine run.
+  - Logging out of the app no longer reconnects the engine.
+- **Robustness:**
+  - Reconnect with backoff (1–60s).
+  - The player is stopped before every reconnect.
+  - A 5s watchdog checks the player thread and the session.
+  - `panic = "unwind"` (not abort), so a missing audio output can't take the app down.
+- **Media keys + Now Playing:** souvlaki 0.8.3, with the controls on the main thread. JS sends `media_update` on track, play-state or position changes. OS commands go through the existing transport functions. Play and pause are idempotent.
+- **Hidden window:** polls every 3s while playing and every 10s when idle. `backgroundThrottling: "disabled"` stops macOS from suspending it.
+- **Device menu:** the "This Mac" row stays until "The Run" is listed. It refreshes every 3s, one request at a time, and offers a retry after 20s.
+- **Measured live:**
+  - "The Run" registered and played a playlist with the Spotify app quit.
+  - Play, next, seek and volume all worked.
+  - Memory: 54 MB for the debug app process with the engine, 25 MB for the spike alone.
+- **Not verified live:**
+  - Reconnect after Wi-Fi off/on.
+  - Media keys and Control Center.
+  - A fresh browser player login (credentials were seeded from the spike).
+- **Known med findings (skipped by the crit/high rule):**
+  - Two Macs on one account both show as "The Run" (match by device id instead).
+  - A failed `/me` while offline skips the account check for that run.
+  - Overlapping device refreshes (fixed later).
+  - A slow Spirc cleanup can leave an old dealer running.
