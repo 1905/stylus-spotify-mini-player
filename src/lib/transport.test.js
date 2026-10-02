@@ -2,6 +2,14 @@ import { describe, it, expect } from "vitest";
 import { createIntents, nextRepeat, stepVolume } from "./transport.js";
 
 describe("createIntents", () => {
+  it("a command's own lag wins over the key's (local volume settles in 1s)", () => {
+    const i = createIntents(500, { volume: 2500 });
+    i.start("volume:run");
+    i.finish("volume:run", 1000, 1000);
+    expect(i.settled("volume:run", 1999)).toBe(false);
+    expect(i.settled("volume:run", 2000)).toBe(true);
+  });
+
   it("a key can have its own settle lag", () => {
     const i = createIntents(500, { volume: 2500 });
     i.start("volume");

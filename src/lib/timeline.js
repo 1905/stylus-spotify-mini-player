@@ -1,4 +1,5 @@
 // The run: played → now → next. Pure builder + FLIP helpers.
+import { offsettable } from "./session.js";
 
 /**
  * Build the display list, left → right.
@@ -59,6 +60,38 @@ export function mergeHistory(api, session, windowMs) {
   }
   const extra = (session || []).filter((_, i) => !usedS.has(i));
   return [...rows, ...extra].sort((a, b) => time(b) - time(a));
+}
+
+/**
+ * What a click on a run cover plays: {contextUri, trackUri} or {uris, trackUri} (uris start at the
+ * track), or null for the "now" cover. A context goes with a start track only when the track is
+ * known to be in it: Spotify would start an unknown one from the top.
+ * item: a buildRun item ({role, offset, track}).
+ * ctx:
+ *   contextUri: what plays now (poll) or null
+ *   members: uris known to be in contextUri (its loaded rows), or null = unknown
+ *   listUris: the uris list the current play started with, or null
+ *   nowUri: the current track: listUris counts only while it holds it
+ *   nextUris: the visible next covers' uris, in order
+ *   historyContext: for a past cover, the context its play came from (recently-played), or null
+ */
+export function coverTarget(item, ctx = {}) {
+  if (!item || !item.track || !item.track.uri || item.role === "now") return null;
+  const uri = item.track.uri;
+  const list = ctx.listUris && (!ctx.nowUri || ctx.listUris.includes(ctx.nowUri)) ? ctx.listUris : null;
+  const fromList = () => {
+    const i = list ? list.indexOf(uri) : -1;
+    return i < 0 ? null : { uris: list.slice(i), trackUri: uri };
+  };
+  if (item.role === "next") {
+    const { contextUri, members } = ctx;
+    if (contextUri && offsettable(contextUri) && members && members.includes(uri)) return { contextUri, trackUri: uri };
+    const next = ctx.nextUris || [];
+    const at = next[item.offset - 1] === uri ? item.offset - 1 : next.indexOf(uri);
+    return fromList() || { uris: [uri, ...(at < 0 ? [] : next.slice(at + 1))], trackUri: uri };
+  }
+  if (offsettable(ctx.historyContext)) return { contextUri: ctx.historyContext, trackUri: uri };
+  return fromList() || { uris: [uri], trackUri: uri };
 }
 
 const DURATION = 600;

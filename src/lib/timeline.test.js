@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildRun, mergeHistory } from "./timeline.js";
+import { buildRun, mergeHistory, coverTarget } from "./timeline.js";
 
 const T = (n) => ({ id: "t" + n, uri: "spotify:track:" + n, name: "Song " + n, artists: "A", album: "B", cover: null, duration_ms: 1000 });
 const H = (t, i = 0) => ({ track: t, played_at: `2026-10-01T10:${String(59 - i).padStart(2, "0")}:00Z` });
@@ -120,5 +120,59 @@ describe("mergeHistory", () => {
   it("a session play far from any API play is kept", () => {
     const out = mergeHistory([row(1, 0)], [row(1, 40)], W);
     expect(out).toHaveLength(2);
+  });
+});
+
+describe("coverTarget", () => {
+  const U = (n) => `spotify:track:${n}`;
+  const next = (n, offset) => ({ role: "next", offset, track: { uri: U(n) } });
+  const past = (n) => ({ role: "past", offset: -1, track: { uri: U(n) } });
+  const PL = "spotify:playlist:p";
+
+  it("the now cover plays nothing", () => {
+    expect(coverTarget({ role: "now", offset: 0, track: { uri: U(1) } }, {})).toBeNull();
+  });
+
+  it("next, known to be in the playing context: that context at the track", () => {
+    const ctx = { contextUri: PL, members: [U(1), U(2), U(3)], nextUris: [U(2), U(3)], nowUri: U(1) };
+    expect(coverTarget(next(3, 2), ctx)).toEqual({ contextUri: PL, trackUri: U(3) });
+  });
+
+  it("next, a queued track from another album during playlist playback: the visible queue from it", () => {
+    const ctx = { contextUri: PL, members: [U(1), U(2), U(3)], nextUris: [U(9), U(2), U(3)], nowUri: U(1) };
+    expect(coverTarget(next(9, 1), ctx)).toEqual({ uris: [U(9), U(2), U(3)], trackUri: U(9) });
+  });
+
+  it("next, context membership unknown: the visible queue from it", () => {
+    const ctx = { contextUri: PL, members: null, nextUris: [U(2), U(3), U(4)] };
+    expect(coverTarget(next(3, 2), ctx)).toEqual({ uris: [U(3), U(4)], trackUri: U(3) });
+  });
+
+  it("next, a context that takes no offset: never with a start track", () => {
+    const ctx = { contextUri: "spotify:artist:a", members: [U(2)], nextUris: [U(2)] };
+    expect(coverTarget(next(2, 1), ctx)).toEqual({ uris: [U(2)], trackUri: U(2) });
+  });
+
+  it("next, in the uris list the play started with: that list from the track", () => {
+    const ctx = { contextUri: null, listUris: [U(1), U(2), U(3), U(4)], nowUri: U(1), nextUris: [U(2), U(3)] };
+    expect(coverTarget(next(3, 2), ctx)).toEqual({ uris: [U(3), U(4)], trackUri: U(3) });
+  });
+
+  it("a stale uris list (now isn't in it) is ignored", () => {
+    const ctx = { listUris: [U(5), U(3), U(6)], nowUri: U(1), nextUris: [U(3)] };
+    expect(coverTarget(next(3, 1), ctx)).toEqual({ uris: [U(3)], trackUri: U(3) });
+  });
+
+  it("past with its own playlist/album context: that context at the track", () => {
+    expect(coverTarget(past(7), { historyContext: "spotify:album:x" })).toEqual({ contextUri: "spotify:album:x", trackUri: U(7) });
+  });
+
+  it("past with another kind of context, in the current list: that list from it", () => {
+    const ctx = { historyContext: "spotify:artist:a", listUris: [U(6), U(7), U(1)], nowUri: U(1) };
+    expect(coverTarget(past(7), ctx)).toEqual({ uris: [U(7), U(1)], trackUri: U(7) });
+  });
+
+  it("past with nothing known: alone", () => {
+    expect(coverTarget(past(7), { historyContext: null })).toEqual({ uris: [U(7)], trackUri: U(7) });
   });
 });

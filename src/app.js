@@ -1,13 +1,17 @@
 // The Run — stage UI: boot, sequential poll loop, the run of covers, transport.
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
-import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
+import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeline.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, isTheRun, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { ERROR_POLL_MS, pollDelay } from "./lib/poll.js";
+import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
+import { SESSION_KEY, parseSession, playSession, sessionToSave, resumeSource, originUri } from "./lib/session.js";
+import { PENDING_MS, createPending } from "./lib/pending.js";
+import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -102,6 +106,13 @@ function showLogin(kind) {
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
   thisMacBusy = "";
   engine = null; // the next stage reads it fresh: the player re-checks the account on restart
+  accountP = null; // the next login may be another account: ask /me again
+  accountNow = null;
+  activeId = null;
+  lastPoll = null;
+  movingTo = null;
+  pending.reset(); // the stage re-renders its loaders on the next start
+  renderPending(false);
   clearMedia();
   clearTimeout(searchTimer); // a debounced search must not start in the next session
   clearTimeout(seekTimer); // nor a debounced seek
@@ -120,6 +131,7 @@ function showLogin(kind) {
   state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
   playlists = null;
+  playlistsStale = false;
   listScroll = 0;
   $("libList").innerHTML = "";
   $("run").replaceChildren();
@@ -248,6 +260,8 @@ async function refresh(epoch) {
   listen(); // close the old "now"'s listening time before this poll overwrites it
   const active = Boolean(s && s.active);
   const track = active && s.track && s.track.uri ? s.track : null;
+  lastPoll = s || { active: false };
+  activeId = active ? s.device_id || null : null; // routes player commands (isLocal)
   const mode = track ? "track" : active ? "other" : "idle";
   const modeChanged = mode !== state.mode;
   state.mode = mode;
@@ -287,6 +301,9 @@ async function refresh(epoch) {
   if (changed) state.listenedMs = 0;
   state.now = track;
   if (changed) checkSaved(track);
+  // a play the user started is confirmed by a poll that began after it landed
+  if (pending.onPoll({ isPlaying: Boolean(active && s.is_playing), trackUri: track && track.uri, at: startedAt })) clearPending();
+  noteSession(false);
 
   if (changed || modeChanged || !state.loaded) {
     // show the new track now: what's on screen is what a seek or a skip acts on.
@@ -339,6 +356,7 @@ async function refresh(epoch) {
     }
   }
   renderChrome();
+  maybeResume();
 }
 
 const LISTEN_STEP_CAP_MS = ERROR_POLL_MS + 1000; // a longer step is a stall, not listening
@@ -410,17 +428,24 @@ function makeCover(item) {
   el.className = "cover";
   el.dataset.key = item.key;
   // crossorigin: the colour picker loads the same URL with CORS, so both share one cached copy
+  // the play button shows on hover/focus for past and next covers (CSS hides it on "now")
   el.innerHTML =
     `<div class="art">${artHtml(t.cover, t.name, 'crossorigin="anonymous"')}</div>` +
+    (isLocalFile(t.uri) ? "" : `<button class="cover-play" type="button" aria-label="${esc(`Play ${t.name}`)}">${PLAY_ICON}</button>`) +
     `<figcaption><span class="ct">${esc(t.name)}</span><span class="ca">${esc(t.artists)}</span></figcaption>`;
   return el;
 }
+
+const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>';
+
+let runItems = new Map(); // the covers on screen: key → buildRun item
 
 function renderRun() {
   const run = $("run");
   const prev = measure(run);
   const limits = small.matches ? { maxPast: 2, maxNext: 4 } : { maxPast: 4, maxNext: 8 };
   const items = buildRun({ history: history(), now: state.now, queue: state.queue }, limits);
+  runItems = new Map(items.map((it) => [it.key, it]));
 
   const old = new Map([...run.querySelectorAll(".cover")].map((el) => [el.dataset.key, el]));
   const els = [];
@@ -450,6 +475,34 @@ function center() {
   for (const el of run.querySelectorAll(".cover")) el.classList.toggle("is-off", el.dataset.role === "past" && el.offsetLeft < 0);
 }
 
+/** A play button on a past or next cover: jump to that song (see coverTarget). */
+function onRunClick(e) {
+  const btn = e.target.closest(".cover-play");
+  const cover = btn && btn.closest(".cover");
+  if (cover) playCover(runItems.get(cover.dataset.key));
+}
+
+async function playCover(item) {
+  if (!item || item.role === "now" || isLocalFile(item.track.uri)) return;
+  const last = readSession();
+  const ctx = state.contextUri;
+  // what's known to be in the playing context: its loaded rows, or the list the saved play used
+  const sameAsLast = last && ctx && (originUri(last.origin) === ctx || last.contextUri === ctx);
+  const target = coverTarget(item, {
+    contextUri: ctx,
+    members: (ctx && knownRows.get(ctx)) || (sameAsLast && last.uris) || null,
+    listUris: last && last.uris,
+    nowUri: state.now && state.now.uri,
+    nextUris: [...runItems.values()].filter((it) => it.role === "next").map((it) => it.track.uri),
+    historyContext: item.role === "past" ? (history().find((h) => h.track && h.track.uri === item.track.uri) || {}).context_uri || null : null,
+  });
+  if (!target) return;
+  if (target.uris) target.uris = target.uris.filter((u) => !isLocalFile(u));
+  // a jump inside the saved list keeps its origin playlist/album
+  const origin = last && last.uris && target.uris && last.uris.includes(target.trackUri) ? last.origin : null;
+  await startPlay(target, { kind: "cover", origin });
+}
+
 // ---------- now block, chrome, progress ----------
 
 function setText(id, text) {
@@ -476,7 +529,7 @@ function renderNow() {
   if (t) {
     title.textContent = t.name;
     title.title = t.name;
-    setNowArtist(artistLinks(t));
+    setNowArtist(playPending() ? STARTING : artistLinks(t));
     setText("nowAlbum", t.album);
     setText("emptyState", "");
     return;
@@ -495,7 +548,7 @@ function renderNow() {
   }
   title.textContent = head;
   title.title = "";
-  setNowArtist("");
+  setNowArtist(playPending() ? STARTING : "");
   setText("nowAlbum", "");
   setText("emptyState", line);
 }
@@ -506,6 +559,10 @@ function renderChrome() {
   stage.dataset.mode = mode;
   stage.classList.toggle("is-playing", state.isPlaying && mode !== "idle");
   $("playBtn").setAttribute("aria-label", state.isPlaying ? "Pause" : "Play");
+  const starting = playPending();
+  $("playBtn").classList.toggle("is-pending", starting);
+  if (starting) $("playBtn").setAttribute("aria-busy", "true");
+  else $("playBtn").removeAttribute("aria-busy");
   $("playBtn").disabled = mode === "idle"; // an ad or a podcast can still be paused
   for (const id of ["prevBtn", "nextBtn"]) $(id).disabled = mode !== "track";
   $("scrub").tabIndex = mode === "track" ? 0 : -1;
@@ -516,8 +573,11 @@ function renderChrome() {
   // hidden only until the first poll: with no device the button still opens the (empty) list
   const dev = $("deviceBtn");
   dev.hidden = !state.device && !state.loaded;
-  dev.classList.toggle("is-none", !state.device);
-  dev.querySelector(".device-name").textContent = state.device ? state.device.name : "No device";
+  dev.classList.toggle("is-none", !state.device && !movingTo);
+  dev.classList.toggle("is-pending", Boolean(movingTo));
+  if (movingTo) dev.setAttribute("aria-busy", "true");
+  else dev.removeAttribute("aria-busy");
+  dev.querySelector(".device-name").textContent = movingTo ? `Moving to ${movingTo.name}…` : state.device ? state.device.name : "No device";
 
   const song = mode === "track";
   const shuffle = $("shuffleBtn");
@@ -535,7 +595,7 @@ function renderChrome() {
 
   const heart = $("heartBtn");
   const t = state.now;
-  heart.hidden = !song || !t || !t.id || isLocal(t.uri) || libraryDenied;
+  heart.hidden = !song || !t || !t.id || isLocalFile(t.uri) || libraryDenied;
   heart.disabled = state.saved === null; // unknown until is_saved answers
   heart.classList.toggle("is-on", state.saved === true);
   heart.setAttribute("aria-pressed", String(state.saved === true));
@@ -715,11 +775,240 @@ let settleAfter = 0; // 0 = settled; else a poll must start after this time to s
 
 const canSeek = () => changesPending === 0 && settleAfter === 0;
 
-async function playUris(uris) {
+/** Play these uris from the first; opts as startPlay. Returns true on success. */
+async function playUris(uris, opts = {}) {
   if (!uris.length) return false;
-  const ok = await changeTrack(async (id) => invoke("play_on_device", { deviceId: await needDevice(id), uris }));
+  return startPlay({ uris, trackUri: uris[0] }, { kind: "list", ...opts });
+}
+
+// ---------- routing: the in-app player directly, or the Web API ----------
+
+let activeId = null; // the device the last poll showed active, null = none
+
+/**
+ * A play/pause/seek/next/prev/volume for deviceId (the device it was made for): local() when that's
+ * the in-app player and it's active, else remote(). A local call that finds no engine retries once remotely.
+ */
+async function routed(deviceId, local, remote) {
+  if (isLocal(engine, deviceId, activeId)) {
+    try {
+      return await local();
+    } catch (e) {
+      if (!isCode(e, "ENGINE_NOT_READY")) throw e;
+    }
+  }
+  return remote();
+}
+
+/**
+ * Start src ({contextUri, trackUri?} or {uris, trackUri}) on deviceId. The in-app player loads it
+ * itself, active or not (local_load activates it); any other device goes through the Web API.
+ */
+async function playSource(deviceId, src) {
+  if (isEngineDevice(engine, deviceId)) {
+    try {
+      const args = src.contextUri ? { contextUri: src.contextUri, trackUri: src.trackUri } : { uris: src.uris, trackUri: src.trackUri };
+      return await invoke("local_load", { ...args, positionMs: 0, play: true });
+    } catch (e) {
+      if (!isCode(e, "ENGINE_NOT_READY")) throw e;
+    }
+  }
+  if (src.contextUri) return invoke("play_context", { deviceId, contextUri: src.contextUri, trackUri: src.trackUri });
+  // the Web API play has no start offset here: the list starts at the track
+  return invoke("play_on_device", { deviceId, uris: src.uris });
+}
+
+/**
+ * A play the user started: loaders from the click until a poll shows it playing, the last session
+ * written once it lands. origin: the detail view it came from ({kind, id}) or null; row: the clicked
+ * row; refused(e): true for an error the caller handles itself (the play then counts as failed).
+ */
+async function startPlay(src, { kind, origin = null, row = null, refused = null } = {}) {
+  const token = startPending(kind, src.trackUri || null, row);
+  let handled = false;
+  const sent = await changeTrack(async (id) => {
+    const deviceId = await needDevice(id);
+    try {
+      await playSource(deviceId, src);
+    } catch (e) {
+      if (!(refused && refused(e))) throw e;
+      handled = true; // withDevice would retry it on another device
+    }
+  });
+  const ok = sent && !handled;
+  settlePending(token, ok);
+  if (ok) writeSession(playSession(accountNow, src, origin, Date.now()));
   kick();
   return ok;
+}
+
+// ---------- pending play: spinner, "Starting…", the clicked row, an 8s timeout ----------
+
+const pending = createPending();
+const STARTING = "Starting…";
+let pendingTimer = null;
+let pendingRow = null; // the clicked row, dimmed with a small spinner
+
+/** A play the user is waiting for (a resume loads quietly: no loaders). */
+const playPending = () => {
+  const cur = pending.current();
+  return Boolean(cur && cur.kind !== "resume");
+};
+
+function startPending(kind, trackUri, row = null, needPlaying = true) {
+  const token = pending.start(kind, { trackUri, needPlaying });
+  clearTimeout(pendingTimer);
+  pendingTimer = setTimeout(() => {
+    if (!pending.timeout(token)) return;
+    if (kind !== "resume") toast("Spotify is slow to respond");
+    renderPending();
+  }, PENDING_MS);
+  if (pendingRow) pendingRow.classList.remove("is-pending");
+  pendingRow = row;
+  if (row) row.classList.add("is-pending");
+  renderPending();
+  return token;
+}
+
+/** The command for token returned: on success polls may confirm it from now; a failure ends it. */
+function settlePending(token, ok) {
+  if (ok) pending.landed(token, performance.now());
+  else if (pending.cancel(token)) renderPending();
+}
+
+/** No play pending any more (confirmed, cancelled, or a logout). */
+function clearPending() {
+  pending.reset();
+  renderPending();
+}
+
+function renderPending(render = true) {
+  if (!pending.current()) {
+    clearTimeout(pendingTimer);
+    pendingTimer = null;
+    if (pendingRow) pendingRow.classList.remove("is-pending");
+    pendingRow = null;
+  }
+  if (!render || $("stage").hidden) return;
+  renderNow();
+  renderChrome();
+}
+
+// ---------- the last session: written while playing, loaded paused once per launch ----------
+
+let accountP = null; // promise of the /me id for this login session
+let accountNow = null; // that id once known, else null
+let sessionCache; // the stored last session (undefined = not read yet)
+
+/** The signed-in account's id (scopes the list cache and the last session), or null on failure. */
+function accountId() {
+  if (!accountP) {
+    const p = invoke("me_id").then(
+      (id) => {
+        accountNow = id || null;
+        const last = readSession();
+        if (last && accountNow && last.accountId !== accountNow) clearSession(); // another account's
+        return accountNow;
+      },
+      (e) => {
+        if (isCode(e, "AUTH_EXPIRED")) expire();
+        if (accountP === p) accountP = null; // retry on the next ask
+        return null;
+      },
+    );
+    accountP = p;
+  }
+  return accountP;
+}
+
+function readSession() {
+  if (sessionCache === undefined) {
+    try {
+      sessionCache = parseSession(localStorage.getItem(SESSION_KEY));
+    } catch {
+      sessionCache = null;
+    }
+  }
+  return sessionCache;
+}
+
+function writeSession(s) {
+  if (!s || !s.accountId) return;
+  sessionCache = s;
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  } catch {
+    /* kept in memory for this run */
+  }
+}
+
+function clearSession() {
+  sessionCache = null;
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* nothing stored */
+  }
+}
+
+/** Save where the current song is: from polls (throttled), on pause and on quit (force). */
+function noteSession(force) {
+  const t = state.now;
+  if (!t || isLocalFile(t.uri)) return;
+  const poll = { accountId: accountNow, trackUri: t.uri, contextUri: state.contextUri, positionMs: progress() };
+  writeSession(sessionToSave(readSession(), poll, Date.now(), force));
+}
+
+let resumeTried = false; // once per launch
+let lastPoll = null; // the last playback_state
+
+/**
+ * Once the engine is ready and a poll has completed: load the last session on "The Run", paused.
+ * Nothing when something plays, when the user already started a play, or when there is nothing to load.
+ */
+async function maybeResume() {
+  if (resumeTried || !state.loaded || !lastPoll || !engine || engine.state !== "ready" || !engine.device_id) return;
+  resumeTried = true;
+  const sess = authSession;
+  const account = await accountId();
+  const runId = engine && engine.device_id;
+  if (sess !== authSession || !account || !runId || !lastPoll) return;
+  const poll = lastPoll;
+  // (a paused session Spotify still shows on "The Run" is loaded too: the restarted player holds nothing)
+  if (poll.is_playing || changesPending || pending.current()) return;
+  const src = resumeSource(poll, readSession(), account);
+  if (!src || isLocalFile(src.trackUri)) return;
+  const token = startPending("resume", src.trackUri, null, false);
+  let failed = false;
+  await changeTrack(() =>
+    invoke("local_load", { ...src, play: false }).catch((e) => {
+      if (isCode(e, "AUTH_EXPIRED")) throw e;
+      failed = true; // quietly: the app starts idle
+    }),
+  );
+  if (sess !== authSession) return;
+  settlePending(token, !failed);
+  if (failed) return;
+  selectTheRun(runId);
+  kick();
+}
+
+/** Show "The Run" as the device, like a pick, without a transfer: the load made it active. */
+function selectTheRun(runId) {
+  if (state.device && state.device.id === runId) return;
+  if (volTimer) {
+    clearTimeout(volTimer);
+    sendVolume();
+  }
+  const d = (state.devices || []).find((x) => x.id === runId);
+  state.device = { id: runId, name: d ? d.name : "The Run" };
+  if (d) {
+    state.volume = d.volume_percent ?? null;
+    state.supportsVolume = Boolean(d.supports_volume);
+  }
+  intents.start("device"); // a poll already in flight must not put the old device back
+  intents.finish("device", performance.now());
+  renderChrome();
 }
 
 // Play, shuffle, repeat, volume and a device pick flip the UI at once. A poll doesn't overwrite
@@ -732,11 +1021,11 @@ const intents = createIntents(PLAY_LAG_MS, { volume: VOLUME_LAG_MS });
  * Send an optimistic setting through the player chain. The UI already shows it; if the latest
  * command for key fails, revert() puts back what the device still has. Returns true on success.
  */
-async function sendIntent(key, fn, revert, seq = intents.start(key)) {
+async function sendIntent(key, fn, revert, seq = intents.start(key), lag = undefined) {
   const sess = authSession;
   const ok = await withDevice(fn);
   if (sess !== authSession) return false; // logged out meanwhile: the intents were reset
-  intents.finish(key, performance.now());
+  intents.finish(key, performance.now(), lag);
   if (!ok && intents.latest(key, seq)) {
     revert();
     intents.drop(key);
@@ -751,7 +1040,7 @@ async function resumeOrRestart(deviceId) {
     await invoke("resume", { deviceId });
   } catch (e) {
     const t = state.now;
-    if (!t || !t.uri || isLocal(t.uri) || !(/\b40[34]\b/.test(String(e)) || isCode(e, "NO_ACTIVE_DEVICE"))) throw e;
+    if (!t || !t.uri || isLocalFile(t.uri) || !(/\b40[34]\b/.test(String(e)) || isCode(e, "NO_ACTIVE_DEVICE"))) throw e;
     await invoke("resume_at", { deviceId, contextUri: state.contextUri, uri: t.uri, positionMs: Math.round(progress()) });
   }
 }
@@ -763,12 +1052,25 @@ async function togglePlay() {
   state.progressMs = progress();
   state.progressAt = performance.now();
   const want = (state.isPlaying = !state.isPlaying);
+  const dev = state.device && state.device.id; // the device this click is for
+  let token = 0;
+  if (want) token = startPending("play", state.now && state.now.uri);
+  else {
+    clearPending(); // a pause ends any wait for sound
+    noteSession(true);
+  }
   renderChrome();
-  await sendIntent(
+  const ok = await sendIntent(
     "play",
-    async (id) => (want ? resumeOrRestart(await needDevice(id)) : invoke("pause")),
+    (id) =>
+      routed(
+        dev,
+        () => invoke(want ? "local_play" : "local_pause"),
+        async () => (want ? resumeOrRestart(await needDevice(id)) : invoke("pause")),
+      ),
     () => (state.isPlaying = !want), // the device still has the state before this click
   );
+  if (token) settlePending(token, ok);
   kick();
 }
 
@@ -788,9 +1090,8 @@ async function cycleRepeat() {
   await sendIntent("repeat", () => invoke("set_repeat", { mode }), () => (state.repeat = before));
 }
 
-// ---------- volume: the UI moves at once, one set_volume after 200ms of quiet ----------
+// ---------- volume: the UI moves at once, one command after 200ms of quiet (30ms on the in-app player) ----------
 
-const VOLUME_QUIET_MS = 200;
 let volTimer = null;
 let volSeq = 0; // the intent of the current burst of moves
 let volBefore = null; // the volume before that burst: what a failure puts back
@@ -819,7 +1120,8 @@ function setVolume(pct) {
   state.volume = volPercent = v;
   renderVolume();
   clearTimeout(volTimer);
-  volTimer = setTimeout(sendVolume, VOLUME_QUIET_MS);
+  // the in-app player applies a level at once: a short pause still coalesces a drag
+  volTimer = setTimeout(sendVolume, volumeTiming(isLocal(engine, volDevice, activeId)).quietMs);
 }
 
 function sendVolume() {
@@ -831,7 +1133,14 @@ function sendVolume() {
   const revert = () => {
     if (state.device && state.device.id === deviceId) state.volume = before;
   };
-  sendIntent(volKey(deviceId), () => invoke("set_volume", { percent, deviceId }), revert, volSeq);
+  const { lagMs } = volumeTiming(isLocal(engine, deviceId, activeId));
+  sendIntent(
+    volKey(deviceId),
+    () => routed(deviceId, () => invoke("local_volume", { percent }), () => invoke("set_volume", { percent, deviceId })),
+    revert,
+    volSeq,
+    lagMs,
+  );
 }
 
 function toggleMute() {
@@ -911,7 +1220,7 @@ const likedWith = (r, t, saved) => {
 async function checkSaved(track) {
   const gen = ++heartGen;
   state.saved = null;
-  if (!track || !track.id || isLocal(track.uri) || libraryDenied) return;
+  if (!track || !track.id || isLocalFile(track.uri) || libraryDenied) return;
   try {
     // in the same queue as save/unsave: a read must not overtake a write still on its way
     const saved = await queueSaved("is_saved", { trackId: track.id });
@@ -1090,6 +1399,8 @@ function setEngine(st) {
   if (!st || !st.state) return;
   const wasReady = engine && engine.state === "ready";
   engine = st;
+  if (st.state === "account_mismatch") clearSession(); // the player is on another account
+  if (st.state === "ready") maybeResume();
   if (!devicesOpen) return;
   renderDeviceList();
   // ready now: The Run registers with Spotify, so the open list should show it
@@ -1174,6 +1485,7 @@ async function playOnThisMac() {
       await invoke("engine_login"); // resolved = logged in and ready (no event to wait for)
       if (sess !== authSession) return;
       setEngine({ ...st, state: "ready", reason: undefined });
+      refreshEngine(); // its device id
       setBusy("connecting");
     } else if (st.state !== "ready") {
       return void toast(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
@@ -1254,6 +1566,8 @@ function onDeviceClick(ev) {
   if (d) pickDevice(d);
 }
 
+let movingTo = null; // a device pick on its way: {seq, name}, the chip says "Moving to <name>…"
+
 /** Move playback to d. The chip shows d at once; a failure puts the old device back. */
 async function pickDevice(d) {
   closeDevices(true);
@@ -1267,8 +1581,9 @@ async function pickDevice(d) {
   state.device = { id: d.id, name: d.name };
   state.volume = d.volume_percent ?? null;
   state.supportsVolume = Boolean(d.supports_volume);
-  renderChrome();
   const seq = intents.start("device");
+  movingTo = { seq, name: d.name };
+  renderChrome();
   const sess = authSession;
   let failed = null;
   // the error is handled here, not by withDevice: rediscovering would retry a device that's gone
@@ -1280,6 +1595,8 @@ async function pickDevice(d) {
   );
   if (sess !== authSession) return;
   intents.finish("device", performance.now());
+  if (movingTo && movingTo.seq === seq) movingTo = null;
+  renderChrome();
   if (failed) {
     if (intents.latest("device", seq)) {
       state.device = before;
@@ -1304,7 +1621,9 @@ function onOutside(ev) {
 
 async function skip(cmd) {
   if (!state.now) return;
-  await changeTrack(() => invoke(cmd));
+  const dev = state.device && state.device.id; // the device this click is for
+  const local = cmd === "next_track" ? "local_next" : "local_prev";
+  await changeTrack(() => routed(dev, () => invoke(local), () => invoke(cmd)));
   kick();
 }
 
@@ -1345,7 +1664,10 @@ async function seekTo(ms, gen = trackGen) {
   showSeek(ms);
   syncMedia(true); // Now Playing moves with the seek
   const positionMs = state.progressMs;
-  await withDevice(() => (gen === trackGen ? invoke("seek", { positionMs }) : null));
+  const dev = state.device && state.device.id; // the device this seek is for
+  await withDevice(() =>
+    gen === trackGen ? routed(dev, () => invoke("local_seek", { positionMs }), () => invoke("seek", { positionMs })) : null,
+  );
   kick();
 }
 
@@ -1396,7 +1718,7 @@ function onImgError(e) {
   img.replaceWith(Object.assign(document.createElement("span"), { className: "letter", textContent: img.dataset.letter }));
 }
 
-const isLocal = (uri) => String(uri).startsWith("spotify:local:");
+const isLocalFile = (uri) => String(uri).startsWith("spotify:local:");
 
 /** "A, B" as artist links; plain text when Spotify gave no artist ids (local files). */
 function artistLinks(t) {
@@ -1412,7 +1734,7 @@ const QUEUE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2
  * The title button covers the whole row (CSS), so a click anywhere plays it; the artist links and "+" sit on top.
  */
 function trackRow(t, i, { num, art }) {
-  const local = isLocal(t.uri);
+  const local = isLocalFile(t.uri);
   const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}${local ? " is-local" : ""}`;
   const tip = local ? `${t.name} (a local file: play it in Spotify)` : t.name;
   return (
@@ -1430,7 +1752,7 @@ function trackRow(t, i, { num, art }) {
 
 /**
  * A click in a list of track rows: an artist link opens the artist, "+" queues the song, anything else
- * plays from that row. Returns true if the click was on a row or a link.
+ * plays from that row (play(i, rowElement)). Returns true if the click was on a row or a link.
  */
 function onTrackClick(e, tracks, play) {
   const link = e.target.closest(".artist-link");
@@ -1440,7 +1762,7 @@ function onTrackClick(e, tracks, play) {
   const i = Number(row.dataset.i);
   if (!tracks[i]) return true;
   if (e.target.closest(".row-queue")) addToQueue(tracks[i]);
-  else if (e.target.closest(".row-play")) play(i);
+  else if (e.target.closest(".row-play")) play(i, row);
   return true;
 }
 
@@ -1464,7 +1786,7 @@ const tileAt = (e, list) => {
 // ---------- add to queue (a player command, but it doesn't change the track) ----------
 
 async function addToQueue(t) {
-  if (!t || isLocal(t.uri)) return;
+  if (!t || isLocalFile(t.uri)) return;
   const ok = await withDevice(async (id) => invoke("add_to_queue", { deviceId: await needDevice(id), uri: t.uri }));
   if (!ok) return;
   toast("Added to Up next");
@@ -1522,11 +1844,30 @@ function goBack() {
 // Library groups: each loads on its own, once per login session. A missing scope (403) hides
 // its group without a word; any other failure leaves one line in it and retries on the next open.
 const lib = new Map(); // cache key → promise of the invoke result
+const knownRows = new Map(); // context uri → its track uris, from detail views loaded this session
+
+// list commands the backend caches on disk, per account
+const CACHED_CMDS = new Set(["get_playlists", "get_playlist_tracks", "get_album_tracks", "get_saved_tracks", "get_saved_albums", "get_followed_artists", "get_top"]);
+
+/** A list command; a cached one gets the account, so the backend reads and writes its disk cache. */
+const listInvoke = (cmd, args) =>
+  CACHED_CMDS.has(cmd) ? accountId().then((account) => invoke(cmd, { ...args, account })) : invoke(cmd, args);
+
+/** The disk-cached copy of a list for this account, or null. Never read before the account is known. */
+async function diskGet(key) {
+  const account = await accountId();
+  if (!account) return null;
+  try {
+    return await invoke("cache_get", { account, key });
+  } catch {
+    return null;
+  }
+}
 
 function libGet(key, cmd, args) {
   let p = lib.get(key);
   if (!p) {
-    p = invoke(cmd, args);
+    p = listInvoke(cmd, args);
     lib.set(key, p);
     p.catch((e) => {
       if (!isScopeError(e) && lib.get(key) === p) lib.delete(key);
@@ -1537,7 +1878,7 @@ function libGet(key, cmd, args) {
 
 function loadGroups() {
   libOpened = true;
-  if (!playlists) loadPlaylists();
+  if (!playlists || playlistsStale) loadPlaylists();
   fillLiked();
   fillTop();
   fillAlbums();
@@ -1545,26 +1886,65 @@ function loadGroups() {
   renderMixes();
 }
 
-/** Show one group's data via render(data); what names it in an error line. */
-async function fillGroup(group, load, render, what) {
+const fillGen = new Map(); // group → its latest fill: an older one's cached copy must not land
+
+/**
+ * Show one group's data via render(data); what names it in an error line. key: its list cache key.
+ * The first load of a session shows the disk copy at once (or skeleton() while there is none),
+ * marked stale, then the fresh data if it differs.
+ */
+async function fillGroup(group, load, render, what, key = null, skeleton = null) {
+  const gen = (fillGen.get(group) || 0) + 1;
+  fillGen.set(group, gen);
+  const live = () => fillGen.get(group) === gen;
+  let fresh = false;
+  let shown = null; // the cached copy on screen, as JSON
+  if (key && !lib.has(key)) {
+    if (skeleton) skeleton();
+    group.setAttribute("aria-busy", "true");
+    diskGet(key).then((v) => {
+      if (fresh || v == null || !live()) return;
+      shown = JSON.stringify(v);
+      render(v);
+    });
+  }
   try {
     const data = await load();
+    fresh = true;
+    if (!live()) return;
     const status = group.querySelector(".status");
     if (status) setEl(status, "");
-    render(data);
+    if (JSON.stringify(data) !== shown) render(data);
   } catch (e) {
-    if (overlayFailed(e)) return;
+    fresh = true;
+    if (!live() || overlayFailed(e)) return;
+    if (shown !== null && !isScopeError(e)) return; // keep the cached copy
+    for (const el of group.querySelectorAll(".is-skeleton")) el.remove();
     group.hidden = isScopeError(e);
     // the Liked Songs row has no status line: its subtitle says it
     setEl(group.querySelector(".status") || group.querySelector(".row-sub"), `Couldn't load ${what} — ${reason(e)}`);
+  } finally {
+    if (live()) group.removeAttribute("aria-busy");
   }
 }
+
+/** A shelf group's skeleton: shown while it has nothing yet. */
+const shelfSkeleton = (group) => () => {
+  const shelf = group.querySelector(".albums");
+  if (shelf.children.length) return;
+  group.hidden = false;
+  shelf.innerHTML = skeletonTiles(4);
+};
 
 function fillLiked() {
   const row = $("libLiked");
   const sub = row.querySelector(".row-sub");
   row.hidden = false;
-  if (!sub.textContent) setEl(sub, "Loading…");
+  if (!sub.textContent) {
+    setEl(sub, "Loading…");
+    // the cached Liked Songs list knows the count
+    diskGet("liked").then((v) => v && v.total != null && sub.textContent === "Loading…" && setEl(sub, plural(v.total, "song", "songs")));
+  }
   // the count alone is one request; the list (up to 20 pages) loads only when opened
   fillGroup(row, () => libGet("likedCount", "liked_count"), (n) => setEl(sub, plural(n || 0, "song", "songs")), "your liked songs");
 }
@@ -1582,6 +1962,8 @@ function fillAlbums() {
       group.querySelector(".albums").innerHTML = savedAlbums.map((a, i) => tile(a, i, { sub: esc(a.artists) })).join("");
     },
     "your albums",
+    "albums",
+    shelfSkeleton(group),
   );
 }
 
@@ -1598,6 +1980,8 @@ function fillFollowing() {
       group.querySelector(".albums").innerHTML = followed.map((a, i) => tile({ name: a.name, cover: a.image }, i, { round: true })).join("");
     },
     "the artists you follow",
+    "following",
+    shelfSkeleton(group),
   );
 }
 
@@ -1609,17 +1993,48 @@ let topGen = 0; // the latest tab: an older range's answer is dropped
 let topTrackList = [];
 let topArtistList = [];
 
+// the backend caches a top list under top:<kind>:<range>:<limit>
+const TOP_ARTISTS_LIMIT = 20;
+const topArtistsKey = (range) => `top:artists:${range}:${TOP_ARTISTS_LIMIT}`;
+const topTracksKey = (range) => `top:tracks:${range}:50`;
+
 async function fillTop() {
   const range = topRange;
   const gen = ++topGen;
   const group = $("libTop");
   for (const b of $("topTabs").querySelectorAll("[data-range]")) b.setAttribute("aria-selected", String(b.dataset.range === range));
-  const results = await Promise.allSettled([topTracks(range), libGet(`top:artists:${range}`, "get_top", { kind: "artists", range })]);
+  const aKey = topArtistsKey(range);
+  let fresh = false;
+  let shown = null;
+  if (!lib.has(aKey) || !lib.has(topTracksKey(range))) {
+    group.setAttribute("aria-busy", "true");
+    if (!topTrackList.length && !topArtistList.length) {
+      group.hidden = false;
+      $("topArtists").hidden = false;
+      $("topArtists").innerHTML = skeletonTiles(4);
+      $("topTracks").innerHTML = skeletonRows(8);
+    }
+    Promise.all([diskGet(topTracksKey(range)), diskGet(aKey)]).then(([t, a]) => {
+      if (fresh || gen !== topGen || (!t && !a)) return;
+      shown = JSON.stringify([t || [], a || []]);
+      renderTop(t || [], a || [], []);
+    });
+  }
+  const results = await Promise.allSettled([topTracks(range), libGet(aKey, "get_top", { kind: "artists", range, limit: TOP_ARTISTS_LIMIT })]);
+  fresh = true;
   if (gen !== topGen) return;
+  group.removeAttribute("aria-busy");
   const failed = results.filter((r) => r.status === "rejected").map((r) => r.reason);
   if (failed.some((e) => isCode(e, "AUTH_EXPIRED"))) return void expire();
+  if (shown !== null && failed.length === 2 && !failed.every(isScopeError)) return; // keep the cached copy
   if (failed.length === 2 && failed.every(isScopeError)) return void (group.hidden = true);
   const [tracks, artists] = results.map((r) => (r.status === "fulfilled" && r.value) || []);
+  if (!failed.length && JSON.stringify([tracks, artists]) === shown) return;
+  renderTop(tracks, artists, failed);
+}
+
+function renderTop(tracks, artists, failed) {
+  const group = $("libTop");
   topTrackList = tracks.filter((t) => t && t.uri).slice(0, TOP_TRACKS_SHOWN);
   topArtistList = artists.filter((a) => a && a.id);
   group.hidden = false;
@@ -1708,16 +2123,10 @@ const mixRefused = (e) => /\b40[34]\b/.test(String(e)) && !isCode(e, "NO_ACTIVE_
 async function playMix(src) {
   const rev = overlayRev;
   let refused = false;
-  const ok = await changeTrack(async (id) => {
-    const deviceId = await needDevice(id);
-    try {
-      await invoke("play_context", { deviceId, contextUri: `spotify:playlist:${src.id}` });
-    } catch (e) {
-      if (!mixRefused(e)) throw e;
-      refused = true; // handled here: withDevice would retry it on another device
-    }
-  });
-  kick();
+  const ok = await startPlay(
+    { contextUri: `spotify:playlist:${src.id}` },
+    { kind: "mix", refused: (e) => mixRefused(e) && (refused = true) },
+  );
   if (refused) {
     toast("Spotify won't start this mix from here");
     refusedMixes.add(src.id);
@@ -1732,6 +2141,7 @@ async function playMix(src) {
 /** The next login may be another account: forget everything the Library loaded (not the stored mixes). */
 function resetLibrary() {
   lib.clear();
+  knownRows.clear();
   mixInfo.clear();
   refusedMixes.clear();
   knownMixes = null;
@@ -1754,17 +2164,45 @@ function resetLibrary() {
   setEl($("libLiked").querySelector(".row-sub"), "");
 }
 
+let playlistsStale = false; // showing the disk copy after a failed refresh: the next open retries
+
+/** The playlists: the disk copy at once (marked stale) or a skeleton, then the fresh list if it differs. */
 async function loadPlaylists() {
   if (playlistsLoading) return;
   playlistsLoading = true;
-  setText("listStatus", "Loading your playlists…");
+  const list = $("libList");
+  let fresh = false;
+  let shown = playlists ? JSON.stringify(playlists) : null;
+  list.setAttribute("aria-busy", "true");
+  if (!playlists) {
+    setText("listStatus", "");
+    list.innerHTML = skeletonRows(8);
+    diskGet("playlists").then((v) => {
+      if (fresh || !Array.isArray(v) || playlists) return;
+      shown = JSON.stringify(v);
+      playlists = v;
+      renderPlaylists();
+    });
+  }
   try {
-    playlists = (await invoke("get_playlists")) || [];
-    renderPlaylists();
+    const next = (await listInvoke("get_playlists")) || [];
+    fresh = true;
+    playlistsStale = false;
+    if (JSON.stringify(next) !== shown) {
+      playlists = next;
+      renderPlaylists();
+    }
   } catch (e) {
-    if (!overlayFailed(e)) setText("listStatus", `Couldn't load your playlists — ${reason(e)}`);
+    fresh = true;
+    if (overlayFailed(e)) return;
+    if (shown !== null) playlistsStale = true; // keep the cached copy
+    else {
+      list.innerHTML = "";
+      setText("listStatus", `Couldn't load your playlists — ${reason(e)}`);
+    }
   } finally {
     playlistsLoading = false;
+    list.removeAttribute("aria-busy");
   }
 }
 
@@ -1826,26 +2264,73 @@ async function openDetail(src, push = true) {
   setText("detailNote", src.kind === "mix" ? MIX_NOTE : "");
   $("detailPlay").hidden = src.kind === "artist";
   $("detailPlay").disabled = src.kind !== "mix"; // a mix plays by its uri: nothing to load
-  $("detailRows").innerHTML = "";
-  setText("detailStatus", { mix: "", artist: "Loading albums…" }[src.kind] ?? "Loading tracks…");
+  const rows = $("detailRows");
+  setText("detailStatus", "");
   $("sheetBody").scrollTop = 0;
-  if (src.kind === "mix") return;
-  if (src.kind === "artist") return loadArtist(src, gen);
-
-  let tracks;
-  let total = 0;
-  try {
-    if (src.kind === "liked") ({ tracks, total } = (await libGet("liked", "get_saved_tracks")) || {});
-    else if (src.kind === "album") tracks = await invoke("get_album_tracks", { albumId: src.id });
-    else tracks = await invoke("get_playlist_tracks", { playlistId: src.id });
-  } catch (e) {
-    if (gen !== state.gen.detail) return;
-    if (!overlayFailed(e)) setText("detailStatus", `Couldn't load tracks — ${reason(e)}`);
+  if (src.kind === "mix") {
+    rows.innerHTML = "";
+    rows.removeAttribute("aria-busy");
     return;
   }
-  if (gen !== state.gen.detail) return; // a newer detail (or the list) took over
+  rows.setAttribute("aria-busy", "true");
+  if (src.kind === "artist") {
+    rows.innerHTML = `<div class="albums is-grid">${skeletonTiles(4)}</div>`;
+    return loadArtist(src, gen);
+  }
+  rows.innerHTML = skeletonRows(8);
 
+  // the disk copy at once (stale until the fresh list lands), then the fresh list if it differs
+  const key = detailKey(src);
+  let fresh = false;
+  let shown = null;
+  if (key && !(src.kind === "liked" && lib.has("liked"))) {
+    diskGet(key).then((v) => {
+      if (fresh || v == null || gen !== state.gen.detail) return;
+      shown = rowsSig(v);
+      showDetail(src, v);
+    });
+  }
+  let data;
+  try {
+    if (src.kind === "liked") data = await libGet("liked", "get_saved_tracks");
+    else if (src.kind === "album") data = await listInvoke("get_album_tracks", { albumId: src.id });
+    else data = await listInvoke("get_playlist_tracks", { playlistId: src.id, snapshotId: src.snapshotId || null });
+  } catch (e) {
+    fresh = true;
+    if (gen !== state.gen.detail) return;
+    if (overlayFailed(e)) return;
+    rows.removeAttribute("aria-busy");
+    if (shown !== null) return; // keep the cached rows
+    rows.innerHTML = "";
+    setText("detailStatus", `Couldn't load tracks — ${reason(e)}`);
+    return;
+  }
+  fresh = true;
+  if (gen !== state.gen.detail) return; // a newer detail (or the list) took over
+  rows.removeAttribute("aria-busy");
+  if (rowsSig(data) !== shown) showDetail(src, data);
+}
+
+/** The list cache key of a detail view, or null when it has none. */
+function detailKey(src) {
+  if (src.kind === "album") return `album:${src.id}`;
+  if (src.kind === "liked") return "liked";
+  if (src.kind === "playlist" && src.snapshotId) return `playlist:${src.id}:${src.snapshotId}`;
+  return null;
+}
+
+const listTracks = (v) => (Array.isArray(v) ? v : (v && v.tracks) || []);
+
+/** What decides a re-render: the uris in order (and Liked Songs' total). */
+const rowsSig = (v) => `${listTracks(v).map((t) => t && t.uri).join("|")}#${(v && v.total) || ""}`;
+
+/** Render a detail view's tracks (an array, or Liked Songs' {tracks, total}). */
+function showDetail(src, data) {
+  const tracks = listTracks(data);
+  let total = (data && data.total) || 0;
   detailTracks = (tracks || []).filter((t) => t && t.uri);
+  const ctx = originUri(src);
+  if (ctx) knownRows.set(ctx, detailTracks.map((t) => t.uri)); // a cover click can trust a track is in it
   const n = detailTracks.length;
   if (src.kind === "playlist") setText("detailSub", plural(n, "track", "tracks"));
   if (src.kind === "liked") {
@@ -1856,15 +2341,18 @@ async function openDetail(src, push = true) {
   const empty = { album: "This album is empty.", liked: "No liked songs yet." }[src.kind] || "This playlist is empty.";
   setText("detailStatus", n ? "" : empty);
   $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album" })).join("");
-  $("detailPlay").disabled = !detailTracks.some((t) => !isLocal(t.uri));
+  $("detailPlay").disabled = !detailTracks.some((t) => !isLocalFile(t.uri));
 }
+
+/** A detail view as a play's origin: playlists and albums only. */
+const originOf = (src) => (src && (src.kind === "playlist" || src.kind === "album") ? { kind: src.kind, id: src.id } : null);
 
 const kindLabel = (k) => (k ? k[0].toUpperCase() + k.slice(1) : "Album");
 
 const TOP_RANGES = ["short_term", "medium_term", "long_term"];
 
 /** Top tracks at Spotify's max of 50, one cache entry shared by the Library group and artist pages. */
-const topTracks = (range) => libGet(`top50:tracks:${range}`, "get_top", { kind: "tracks", range, limit: 50 });
+const topTracks = (range) => libGet(topTracksKey(range), "get_top", { kind: "tracks", range, limit: 50 });
 
 /** Your own top tracks (50 per range) and Liked Songs, best first; any that fails is just skipped. */
 function favoriteSources(optional) {
@@ -1889,7 +2377,10 @@ async function loadArtist(src, gen) {
     ]);
   } catch (e) {
     if (gen !== state.gen.detail) return;
-    if (!overlayFailed(e)) setText("detailStatus", `Couldn't load albums — ${reason(e)}`);
+    if (overlayFailed(e)) return;
+    $("detailRows").innerHTML = "";
+    $("detailRows").removeAttribute("aria-busy");
+    setText("detailStatus", `Couldn't load albums — ${reason(e)}`);
     return;
   }
   if (gen !== state.gen.detail) return;
@@ -1917,6 +2408,7 @@ async function loadArtist(src, gen) {
 }
 
 function renderArtist() {
+  $("detailRows").removeAttribute("aria-busy");
   $("detailPlay").hidden = !detailTracks.length;
   $("detailPlay").disabled = !detailTracks.length;
   setText("detailStatus", detailAlbums.length || detailTracks.length ? "" : "No albums or singles.");
@@ -1947,15 +2439,16 @@ function onDetailPlay() {
 /** Play tracks from row i on; the overlay closes only if the user is still on that view. */
 const PLAY_URIS_MAX = 200;
 
-async function playFrom(tracks, i) {
+/** opts: {origin, row} — the detail view it came from and the clicked row (see startPlay). */
+async function playFrom(tracks, i, opts = {}) {
   // Spotify lists local files in playlists but rejects them in play requests
   // capped: Liked Songs can hold 1000 rows, and Spotify's limit for one play request is unknown
-  const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocal(u)).slice(0, PLAY_URIS_MAX);
+  const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocalFile(u)).slice(0, PLAY_URIS_MAX);
   const rev = overlayRev;
-  if ((await playUris(uris)) && rev === overlayRev) closeOverlay();
+  if ((await playUris(uris, opts)) && rev === overlayRev) closeOverlay();
 }
 
-const playDetailFrom = (i) => playFrom(detailTracks, i);
+const playDetailFrom = (i, row = null) => playFrom(detailTracks, i, { origin: originOf(curDetail), row });
 
 // ---------- search: songs + albums, debounced, last request wins ----------
 
@@ -1979,6 +2472,7 @@ function onSearchInput() {
     searchHits = { tracks: [], albums: [] };
     $("searchResults").innerHTML = "";
     $("searchResults").hidden = true;
+    $("searchResults").removeAttribute("aria-busy");
     return;
   }
   searchTimer = setTimeout(() => runSearch(q, gen), SEARCH_DEBOUNCE_MS);
@@ -1993,15 +2487,24 @@ function searchMessage(text) {
 }
 
 async function runSearch(q, gen) {
+  const box = $("searchResults");
+  if (!searchHits.tracks.length && !searchHits.albums.length) {
+    // nothing on screen to keep: placeholders until the answer
+    box.innerHTML = `<div class="rows">${skeletonRows(8)}</div>`;
+    box.hidden = false;
+  }
+  box.setAttribute("aria-busy", "true");
   let res;
   try {
     res = await invoke("search", { query: q });
   } catch (e) {
     if (gen !== state.gen.search) return;
+    box.removeAttribute("aria-busy");
     if (!overlayFailed(e)) searchMessage(`Search failed — ${reason(e)}`);
     return;
   }
   if (gen !== state.gen.search) return;
+  box.removeAttribute("aria-busy");
   const tracks = ((res && res.tracks) || []).filter((t) => t && t.uri).slice(0, 10);
   const albums = ((res && res.albums) || []).filter((a) => a && a.id).slice(0, 10);
   if (!tracks.length && !albums.length) return searchMessage(`No songs or albums for "${q}".`);
@@ -2025,7 +2528,6 @@ async function runSearch(q, gen) {
       .join("");
     html += `</div></section>`;
   }
-  const box = $("searchResults");
   overlayRev++; // replaced results are a new view
   box.innerHTML = html;
   box.hidden = false;
@@ -2034,7 +2536,7 @@ async function runSearch(q, gen) {
 
 function onSearchClick(e) {
   // a song plays alone: the rest of the results aren't a playlist
-  if (onTrackClick(e, searchHits.tracks, (i) => playFrom([searchHits.tracks[i]], 0))) return;
+  if (onTrackClick(e, searchHits.tracks, (i, row) => playFrom([searchHits.tracks[i]], 0, { row }))) return;
   const al = e.target.closest("[data-album]");
   const a = al && searchHits.albums[Number(al.dataset.album)];
   if (a) openAlbum(a);
@@ -2068,6 +2570,7 @@ function startStage() {
   renderChrome();
   startPolling();
   refreshEngine();
+  accountId(); // the list cache and the last session are per account: ask once, early
 }
 
 async function boot() {
@@ -2103,11 +2606,14 @@ async function boot() {
   $("libList").addEventListener("click", (e) => {
     const row = e.target.closest("[data-id]");
     const p = row && playlists && playlists[Number(row.dataset.i)];
-    if (p) openDetail({ kind: "playlist", id: p.id, name: p.name, cover: pickImage(p.images), sub: plural((p.tracks && p.tracks.total) || 0, "track", "tracks") });
+    if (p) {
+      const sub = plural((p.tracks && p.tracks.total) || 0, "track", "tracks");
+      openDetail({ kind: "playlist", id: p.id, name: p.name, cover: pickImage(p.images), sub, snapshotId: p.snapshot_id || null });
+    }
   });
   $("libLiked").addEventListener("click", () => openDetail({ kind: "liked", id: "liked", name: "Liked Songs", cover: null, sub: "" }));
   $("topTabs").addEventListener("click", onTopTab);
-  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i) => playFrom(topTrackList, i)));
+  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row) => playFrom(topTrackList, i, { row })));
   $("topArtists").addEventListener("click", (e) => openArtistTile(tileAt(e, topArtistList)));
   $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, followed)));
   $("libAlbums").addEventListener("click", (e) => {
@@ -2135,6 +2641,9 @@ async function boot() {
     if (state.loaded) renderRun();
   });
   $("run").addEventListener("error", onImgError, true);
+  $("run").addEventListener("click", onRunClick);
+  // quitting mid-song: the next launch starts here
+  addEventListener("beforeunload", () => !$("stage").hidden && noteSession(true));
   // dev harness only: the `artist` scenario opens a page by id
   if (window.__mock) window.__openArtist = (id) => openDetail({ kind: "artist", id, name: "", cover: null, sub: "Artist" });
   document.addEventListener("visibilitychange", () => {

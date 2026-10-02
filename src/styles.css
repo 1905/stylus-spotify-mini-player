@@ -1508,3 +1508,159 @@ svg {
   content-visibility: auto;
   contain-intrinsic-size: auto 52px;
 }
+
+/* ---------- loaders: skeletons, pending plays, stale lists ---------- */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* grey blocks shaped like the rows and tiles that are loading (reduced motion: static, no shimmer) */
+.sk {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgb(246 244 248 / 0.06) 0%, rgb(246 244 248 / 0.13) 50%, rgb(246 244 248 / 0.06) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.row.is-skeleton {
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding-top: 6px;
+  padding-bottom: 6px;
+  pointer-events: none;
+}
+
+.sk-art {
+  width: 40px;
+  aspect-ratio: 1;
+}
+
+.sk-text {
+  min-width: 0;
+}
+
+.sk-line {
+  height: 12px;
+  margin: 4px 0;
+}
+
+.sk-sub {
+  height: 10px;
+  margin-top: 8px;
+}
+
+.album.is-skeleton {
+  display: block;
+  pointer-events: none;
+}
+
+.album.is-skeleton .sk-line {
+  width: 80%;
+}
+
+.album.is-skeleton .sk-sub {
+  width: 55%;
+}
+
+/* a cached list on screen while the fresh one loads */
+[aria-busy="true"] > .row:not(.is-skeleton),
+[aria-busy="true"] .albums > .album:not(.is-skeleton) {
+  opacity: 0.8;
+  transition: opacity 200ms ease;
+}
+
+/* a small ring spinner, shared by the play button, a clicked row and the device chip */
+.ctl-play {
+  position: relative;
+}
+
+.ctl-play.is-pending::after,
+.row.is-pending .row-time::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgb(246 244 248 / 0.25);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+.ctl-play.is-pending::after {
+  inset: -6px;
+}
+
+/* nothing plays yet, so the button is disabled: keep the spinner readable */
+.ctl-play.is-pending:disabled {
+  opacity: 1;
+}
+
+.row.is-pending {
+  opacity: 0.6;
+}
+
+.row.is-pending .row-time {
+  position: relative;
+  color: transparent;
+}
+
+.row.is-pending .row-time::after {
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+}
+
+.device.is-pending .device-dot {
+  width: 10px;
+  height: 10px;
+  background: none;
+  box-shadow: none;
+  border: 2px solid rgb(246 244 248 / 0.25);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+/* ---------- play a nearby cover ---------- */
+
+.cover-play {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  color: var(--ink);
+  background: rgb(246 244 248 / 0.92);
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.6);
+  opacity: 0;
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.cover-play svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cover-play:hover {
+  background: #fff;
+}
+
+.cover:hover .cover-play,
+.cover:focus-within .cover-play,
+.cover:focus-within figcaption {
+  opacity: 1;
+}
+
+.cover[data-role="now"] .cover-play {
+  display: none;
+}
