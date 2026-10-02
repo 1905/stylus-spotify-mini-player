@@ -443,6 +443,13 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                                 engine.stop_spirc();
                                 return;
                             }
+                            // a dead session doesn't always end the Spirc task (a paused player sends
+                            // nothing, the dealer's token refresh can fail while offline): reconnect anyway
+                            if session.is_invalid() {
+                                engine.stop_spirc();
+                                let _ = tokio::time::timeout(Duration::from_secs(3), &mut spirc_task).await;
+                                break;
+                            }
                         }
                     }
                 }
