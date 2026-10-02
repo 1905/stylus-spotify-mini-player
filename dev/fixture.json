@@ -120,7 +120,29 @@
     "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
     "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
-    "duration_ms": 194607
+    "duration_ms": 194607,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
    },
    {
     "id": "3RXUgPNIbUgFxsDWuBQEt6",
@@ -129,7 +151,29 @@
     "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
     "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
-    "duration_ms": 176059
+    "duration_ms": 176059,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
    },
    {
     "id": "5sBDrrtLGbV64QJnEqfjer",
@@ -138,7 +182,29 @@
     "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
     "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
-    "duration_ms": 250268
+    "duration_ms": 250268,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
    },
    {
     "id": "0MHStU0muAIEMbwdnebYu2",
@@ -147,7 +213,29 @@
     "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
     "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
-    "duration_ms": 182016
+    "duration_ms": 182016,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
    },
    {
     "id": "09CtPGIpYB4BrO8qb1RGsF",
@@ -156,7 +244,13 @@
     "artists": "Justin Bieber",
     "album": "Purpose (Deluxe)",
     "cover": "https://i.scdn.co/image/ab67616d0000b273f46b9d202509a8f7384b90de",
-    "duration_ms": 200786
+    "duration_ms": 200786,
+    "artist_list": [
+     {
+      "id": "ar_justin_bieber",
+      "name": "Justin Bieber"
+     }
+    ]
    },
    {
     "id": "2tpWsVSb9UEmDRxAl1zhX1",
@@ -165,7 +259,13 @@
     "artists": "OneRepublic",
     "album": "Native",
     "cover": "https://i.scdn.co/image/ab67616d0000b2739e2f95ae77cf436017ada9cb",
-    "duration_ms": 257265
+    "duration_ms": 257265,
+    "artist_list": [
+     {
+      "id": "ar_onerepublic",
+      "name": "OneRepublic"
+     }
+    ]
    },
    {
     "id": "7JJmb5XwzOO8jgpou264Ml",
@@ -174,7 +274,13 @@
     "artists": "Shawn Mendes",
     "album": "Illuminate (Deluxe)",
     "cover": "https://i.scdn.co/image/ab67616d0000b273ea3ef7697cfd5705b8f47521",
-    "duration_ms": 199440
+    "duration_ms": 199440,
+    "artist_list": [
+     {
+      "id": "ar_shawn_mendes",
+      "name": "Shawn Mendes"
+     }
+    ]
    },
    {
     "id": "2UbVnbE5FH6008mAm6Mmgw",
@@ -183,7 +289,13 @@
     "artists": "OneRepublic",
     "album": "Run",
     "cover": "https://i.scdn.co/image/ab67616d0000b2738120d2b107af14b1bf67cd06",
-    "duration_ms": 169010
+    "duration_ms": 169010,
+    "artist_list": [
+     {
+      "id": "ar_onerepublic",
+      "name": "OneRepublic"
+     }
+    ]
    },
    {
     "id": "7x5xYW5W42OGPAdHUyyguy",
@@ -192,7 +304,17 @@
     "artists": "R. City, Adam Levine",
     "album": "What Dreams Are Made Of",
     "cover": "https://i.scdn.co/image/ab67616d0000b27374b157379e7686df3d0850a4",
-    "duration_ms": 227475
+    "duration_ms": 227475,
+    "artist_list": [
+     {
+      "id": "ar_r_city",
+      "name": "R. City"
+     },
+     {
+      "id": "ar_adam_levine",
+      "name": "Adam Levine"
+     }
+    ]
    },
    {
     "id": "161DnLWsx1i3u1JT05lzqU",
@@ -201,7 +323,13 @@
     "artists": "Bruno Mars",
     "album": "Doo-Wops & Hooligans",
     "cover": "https://i.scdn.co/image/ab67616d0000b2737039c1c841fc3dfa2ad8a0d8",
-    "duration_ms": 217866
+    "duration_ms": 217866,
+    "artist_list": [
+     {
+      "id": "ar_bruno_mars",
+      "name": "Bruno Mars"
+     }
+    ]
    },
    {
     "id": "1whAXVGN8AdfrnoXNIXfJf",
@@ -210,7 +338,13 @@
     "artists": "Tyla",
     "album": "TYLA",
     "cover": "https://i.scdn.co/image/ab67616d0000b273cc9e6203ed1182fe83b98985",
-    "duration_ms": 190392
+    "duration_ms": 190392,
+    "artist_list": [
+     {
+      "id": "ar_tyla",
+      "name": "Tyla"
+     }
+    ]
    },
    {
     "id": "6vn8dvUpDC4YeaAh3BI25r",
@@ -219,7 +353,13 @@
     "artists": "Taron Egerton",
     "album": "Sing (Original Motion Picture Soundtrack Deluxe)",
     "cover": "https://i.scdn.co/image/ab67616d0000b27370120e0cfe4add0fb2eba28b",
-    "duration_ms": 187853
+    "duration_ms": 187853,
+    "artist_list": [
+     {
+      "id": "ar_taron_egerton",
+      "name": "Taron Egerton"
+     }
+    ]
    },
    {
     "id": "5hx7w26Zi3zafMgvMTUqF6",
@@ -228,7 +368,13 @@
     "artists": "Rosa Linn",
     "album": "SNAP",
     "cover": "https://i.scdn.co/image/ab67616d0000b273927f72f3739f256fb01d1470",
-    "duration_ms": 179551
+    "duration_ms": 179551,
+    "artist_list": [
+     {
+      "id": "ar_rosa_linn",
+      "name": "Rosa Linn"
+     }
+    ]
    },
    {
     "id": "2gQPv5jvVPqU2a9HhMNO1v",
@@ -237,7 +383,13 @@
     "artists": "BoyWithUke",
     "album": "Toxic",
     "cover": "https://i.scdn.co/image/ab67616d0000b27382a18aa0d3374049c6b78f6a",
-    "duration_ms": 168020
+    "duration_ms": 168020,
+    "artist_list": [
+     {
+      "id": "ar_boywithuke",
+      "name": "BoyWithUke"
+     }
+    ]
    },
    {
     "id": "3zkWCteF82vJwv0hRLba76",
@@ -246,7 +398,13 @@
     "artists": "Shawn Mendes",
     "album": "Handwritten",
     "cover": "https://i.scdn.co/image/ab67616d0000b27375bd5306fb4669a15ee74eff",
-    "duration_ms": 206880
+    "duration_ms": 206880,
+    "artist_list": [
+     {
+      "id": "ar_shawn_mendes",
+      "name": "Shawn Mendes"
+     }
+    ]
    }
   ],
   "0gCOBBt9PJVPltc6moPGug": [
@@ -257,7 +415,13 @@
     "artists": "Carbon Based Lifeforms",
     "album": "Hydroponic Garden",
     "cover": "https://i.scdn.co/image/ab67616d0000b273ab1de7a28d96c3044b7c2dd0",
-    "duration_ms": 440000
+    "duration_ms": 440000,
+    "artist_list": [
+     {
+      "id": "ar_carbon_based_lifeforms",
+      "name": "Carbon Based Lifeforms"
+     }
+    ]
    },
    {
     "id": "4nQZtkIyr1U3CJ0ZmE4f6C",
@@ -266,7 +430,13 @@
     "artists": "Lorn",
     "album": "REMNANT",
     "cover": "https://i.scdn.co/image/ab67616d0000b273b5b9ef714b83c177f8425d8d",
-    "duration_ms": 250687
+    "duration_ms": 250687,
+    "artist_list": [
+     {
+      "id": "ar_lorn",
+      "name": "Lorn"
+     }
+    ]
    },
    {
     "id": "5z0QLEpkbUh00SevSuYxOh",
@@ -275,7 +445,13 @@
     "artists": "Shpongle",
     "album": "Are You Shpongled?",
     "cover": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2",
-    "duration_ms": 620333
+    "duration_ms": 620333,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
    },
    {
     "id": "2KZAI37A6imv9FrvFM7WTV",
@@ -284,7 +460,13 @@
     "artists": "Mano Le Tough",
     "album": "Trails",
     "cover": "https://i.scdn.co/image/ab67616d0000b27317378ec9ece13f0ba9d86ec5",
-    "duration_ms": 265413
+    "duration_ms": 265413,
+    "artist_list": [
+     {
+      "id": "ar_mano_le_tough",
+      "name": "Mano Le Tough"
+     }
+    ]
    },
    {
     "id": "5YcqLilTaxiTHxjX31kjeN",
@@ -293,7 +475,17 @@
     "artists": "Ten Walls, Domas Aleksa",
     "album": "Queen",
     "cover": "https://i.scdn.co/image/ab67616d0000b27396275f993a07bdc40d87f91a",
-    "duration_ms": 189314
+    "duration_ms": 189314,
+    "artist_list": [
+     {
+      "id": "ar_ten_walls",
+      "name": "Ten Walls"
+     },
+     {
+      "id": "ar_domas_aleksa",
+      "name": "Domas Aleksa"
+     }
+    ]
    },
    {
     "id": "4LkejFo7l7D36wrUfgs10W",
@@ -302,7 +494,13 @@
     "artists": "Nils Frahm",
     "album": "Spaces",
     "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
-    "duration_ms": 1009000
+    "duration_ms": 1009000,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
    },
    {
     "id": "2BndJYJQ17UcEeUFJP5JmY",
@@ -311,7 +509,17 @@
     "artists": "Massive Attack, Hope Sandoval",
     "album": "Heligoland",
     "cover": "https://i.scdn.co/image/ab67616d0000b273852aaa233e122f1dbfefcf00",
-    "duration_ms": 297774
+    "duration_ms": 297774,
+    "artist_list": [
+     {
+      "id": "ar_massive_attack",
+      "name": "Massive Attack"
+     },
+     {
+      "id": "ar_hope_sandoval",
+      "name": "Hope Sandoval"
+     }
+    ]
    },
    {
     "id": "7G7qAvwD7kGBRnY9D1G0o3",
@@ -320,7 +528,13 @@
     "artists": "Infected Mushroom",
     "album": "Converting Vegetarians",
     "cover": "https://i.scdn.co/image/ab67616d0000b27323fad8bd3a0351c0e183f075",
-    "duration_ms": 623866
+    "duration_ms": 623866,
+    "artist_list": [
+     {
+      "id": "ar_infected_mushroom",
+      "name": "Infected Mushroom"
+     }
+    ]
    },
    {
     "id": "643gyipSU7dkmrFhJ8UAIm",
@@ -329,7 +543,13 @@
     "artists": "Aphex Twin",
     "album": "Selected Ambient Works 85-92",
     "cover": "https://i.scdn.co/image/ab67616d0000b27338906032688bb13b135ce19a",
-    "duration_ms": 228053
+    "duration_ms": 228053,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
    },
    {
     "id": "2AACF7qh9u5qWxxLyHhwSd",
@@ -338,7 +558,13 @@
     "artists": "Younger Brother",
     "album": "Vaccine",
     "cover": "https://i.scdn.co/image/ab67616d0000b2732e5247eb1ef12ec0966b0d80",
-    "duration_ms": 449666
+    "duration_ms": 449666,
+    "artist_list": [
+     {
+      "id": "ar_younger_brother",
+      "name": "Younger Brother"
+     }
+    ]
    },
    {
     "id": "6IT02SvltW0WtmxF9mxeBf",
@@ -347,7 +573,13 @@
     "artists": "Nordlight & David",
     "album": "A Deep Dive",
     "cover": "https://i.scdn.co/image/ab67616d0000b273f16e76424c8579a75f208e80",
-    "duration_ms": 455847
+    "duration_ms": 455847,
+    "artist_list": [
+     {
+      "id": "ar_nordlight_david",
+      "name": "Nordlight & David"
+     }
+    ]
    },
    {
     "id": "2sW8fmnISifQTRgnRrQTYW",
@@ -356,7 +588,13 @@
     "artists": "Portishead",
     "album": "Dummy",
     "cover": "https://i.scdn.co/image/ab67616d0000b273dc20397b139223620af148f6",
-    "duration_ms": 303973
+    "duration_ms": 303973,
+    "artist_list": [
+     {
+      "id": "ar_portishead",
+      "name": "Portishead"
+     }
+    ]
    },
    {
     "id": "7pM9cLbrgRGX1hHElTX92m",
@@ -365,7 +603,13 @@
     "artists": "Lorn",
     "album": "The Maze To Nowhere",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734e7be339cee55cf14e6bc50f",
-    "duration_ms": 172473
+    "duration_ms": 172473,
+    "artist_list": [
+     {
+      "id": "ar_lorn",
+      "name": "Lorn"
+     }
+    ]
    },
    {
     "id": "2j9YZ66Crpyi9Zd16Jut7j",
@@ -374,7 +618,13 @@
     "artists": "Shpongle",
     "album": "Are You Shpongled?",
     "cover": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2",
-    "duration_ms": 436173
+    "duration_ms": 436173,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
    },
    {
     "id": "1QHWgXRQdbekMFbscWJRMh",
@@ -383,7 +633,13 @@
     "artists": "Entheogenic",
     "album": "Kykeon",
     "cover": "https://i.scdn.co/image/ab67616d0000b2737e1dbad5b301aee621aeee63",
-    "duration_ms": 307160
+    "duration_ms": 307160,
+    "artist_list": [
+     {
+      "id": "ar_entheogenic",
+      "name": "Entheogenic"
+     }
+    ]
    },
    {
     "id": "3ja3agaXFeeKQCcwk6W1eR",
@@ -392,7 +648,13 @@
     "artists": "Mees Dierdorp",
     "album": "Aviar Alom",
     "cover": "https://i.scdn.co/image/ab67616d0000b27345446b344c52fc1e07f0bc89",
-    "duration_ms": 406269
+    "duration_ms": 406269,
+    "artist_list": [
+     {
+      "id": "ar_mees_dierdorp",
+      "name": "Mees Dierdorp"
+     }
+    ]
    },
    {
     "id": "7kEEo8jl4RGQjcFYEFmIEw",
@@ -401,7 +663,13 @@
     "artists": "Nils Frahm",
     "album": "Spaces",
     "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
-    "duration_ms": 299066
+    "duration_ms": 299066,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
    },
    {
     "id": "7wAF8APlRYWKlIzidN4wzp",
@@ -410,7 +678,17 @@
     "artists": "Ambyion, Shockline",
     "album": "Floating",
     "cover": "https://i.scdn.co/image/ab67616d0000b273657775611aa9c74cdc4854c6",
-    "duration_ms": 251612
+    "duration_ms": 251612,
+    "artist_list": [
+     {
+      "id": "ar_ambyion",
+      "name": "Ambyion"
+     },
+     {
+      "id": "ar_shockline",
+      "name": "Shockline"
+     }
+    ]
    },
    {
     "id": "4o6Ufgnf7pT55tI4j78RkT",
@@ -419,7 +697,13 @@
     "artists": "Peace Orchestra",
     "album": "Peace Orchestra",
     "cover": "https://i.scdn.co/image/ab67616d0000b273d0e8225109806fd9be09175a",
-    "duration_ms": 357826
+    "duration_ms": 357826,
+    "artist_list": [
+     {
+      "id": "ar_peace_orchestra",
+      "name": "Peace Orchestra"
+     }
+    ]
    },
    {
     "id": "6ryJQswzoXDmmFazg91c0c",
@@ -428,7 +712,13 @@
     "artists": "Aphex Twin",
     "album": "Selected Ambient Works Volume II",
     "cover": "https://i.scdn.co/image/ab67616d0000b2738155dc4dae262f31d39d8296",
-    "duration_ms": 447800
+    "duration_ms": 447800,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
    },
    {
     "id": "6nPpCVYvtAPLeu3KySLDrK",
@@ -437,7 +727,13 @@
     "artists": "Younger Brother",
     "album": "The Last Days Of Gravity",
     "cover": "https://i.scdn.co/image/ab67616d0000b27348a5185195990d92e4dd47eb",
-    "duration_ms": 451000
+    "duration_ms": 451000,
+    "artist_list": [
+     {
+      "id": "ar_younger_brother",
+      "name": "Younger Brother"
+     }
+    ]
    },
    {
     "id": "3NJgsL49NedjwvsrcoWlcq",
@@ -446,7 +742,13 @@
     "artists": "Azaleh",
     "album": "Endeavour",
     "cover": "https://i.scdn.co/image/ab67616d0000b273ee6c6d7f1452fad23a70d406",
-    "duration_ms": 201459
+    "duration_ms": 201459,
+    "artist_list": [
+     {
+      "id": "ar_azaleh",
+      "name": "Azaleh"
+     }
+    ]
    },
    {
     "id": "4GhRWItcoyUAh5RmgQTHiV",
@@ -455,7 +757,13 @@
     "artists": "Synthetic Epiphany",
     "album": "Icarus (feat. CoMa)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2738b4958256e692260143447f0",
-    "duration_ms": 449253
+    "duration_ms": 449253,
+    "artist_list": [
+     {
+      "id": "ar_synthetic_epiphany",
+      "name": "Synthetic Epiphany"
+     }
+    ]
    },
    {
     "id": "4aMRygNyVjq7r9cgqdkQN5",
@@ -464,7 +772,13 @@
     "artists": "Lorn",
     "album": "A/D, Music For Picture",
     "cover": "https://i.scdn.co/image/ab67616d0000b273b3aa5176106a556e5274642f",
-    "duration_ms": 87924
+    "duration_ms": 87924,
+    "artist_list": [
+     {
+      "id": "ar_lorn",
+      "name": "Lorn"
+     }
+    ]
    },
    {
     "id": "5ThP1U6kxJEuGV4pK9ims8",
@@ -473,7 +787,13 @@
     "artists": "Shpongle",
     "album": "Live in London (2013) (Live)",
     "cover": "https://i.scdn.co/image/ab67616d0000b273f8e3bdaa80afb907ef5192e4",
-    "duration_ms": 511500
+    "duration_ms": 511500,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
    },
    {
     "id": "2usrT8QIbIk9y0NEtQwS4j",
@@ -482,7 +802,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 127920
+    "duration_ms": 127920,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "4K4kedXFAuW6gn8iwgGFTw",
@@ -491,7 +817,13 @@
     "artists": "Biosphere",
     "album": "Substrata + Man with a Movie Camera",
     "cover": "https://i.scdn.co/image/ab67616d0000b2733f1900e26ff44e8821bd8350",
-    "duration_ms": 251066
+    "duration_ms": 251066,
+    "artist_list": [
+     {
+      "id": "ar_biosphere",
+      "name": "Biosphere"
+     }
+    ]
    },
    {
     "id": "2X4Cj5zIdnav7767iPiDou",
@@ -500,7 +832,13 @@
     "artists": "Nils Frahm",
     "album": "Spaces",
     "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
-    "duration_ms": 578933
+    "duration_ms": 578933,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
    },
    {
     "id": "6MFTr9Id56RwjiUq5CONhC",
@@ -509,7 +847,13 @@
     "artists": "Fyze",
     "album": "Fading",
     "cover": "https://i.scdn.co/image/ab67616d0000b2730d1fcc43dd7b15eb7facfd73",
-    "duration_ms": 245624
+    "duration_ms": 245624,
+    "artist_list": [
+     {
+      "id": "ar_fyze",
+      "name": "Fyze"
+     }
+    ]
    },
    {
     "id": "4kLyPZvYQE2N1K2rFQ3e6a",
@@ -518,7 +862,13 @@
     "artists": "Max Cooper",
     "album": "Emergence",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a24eb1aa0c049e3ca5f0b162",
-    "duration_ms": 331000
+    "duration_ms": 331000,
+    "artist_list": [
+     {
+      "id": "ar_max_cooper",
+      "name": "Max Cooper"
+     }
+    ]
    },
    {
     "id": "4fQEbOabaTSC80INS7cD3Q",
@@ -527,7 +877,13 @@
     "artists": "Aphex Twin",
     "album": "Selected Ambient Works Volume II",
     "cover": "https://i.scdn.co/image/ab67616d0000b2738155dc4dae262f31d39d8296",
-    "duration_ms": 279666
+    "duration_ms": 279666,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
    },
    {
     "id": "4VxaUj96W2jw9UOtKHu51p",
@@ -536,7 +892,17 @@
     "artists": "Apparat, Soap&Skin",
     "album": "The Devil's Walk",
     "cover": "https://i.scdn.co/image/ab67616d0000b27376f2cb2ac2670e125a4670ca",
-    "duration_ms": 256786
+    "duration_ms": 256786,
+    "artist_list": [
+     {
+      "id": "ar_apparat",
+      "name": "Apparat"
+     },
+     {
+      "id": "ar_soap_skin",
+      "name": "Soap&Skin"
+     }
+    ]
    },
    {
     "id": "0YPuRrM2NwzdtuShUKkts6",
@@ -545,7 +911,13 @@
     "artists": "Polyphia",
     "album": "New Levels New Devils",
     "cover": "https://i.scdn.co/image/ab67616d0000b2737a799cc62e624fd6432779e3",
-    "duration_ms": 215998
+    "duration_ms": 215998,
+    "artist_list": [
+     {
+      "id": "ar_polyphia",
+      "name": "Polyphia"
+     }
+    ]
    },
    {
     "id": "4uJXr3G8CR8dkjmUKj7iKS",
@@ -554,7 +926,13 @@
     "artists": "Eelke Kleijn",
     "album": "Moments Of Clarity",
     "cover": "https://i.scdn.co/image/ab67616d0000b273c9d6472496b3af9079435dba",
-    "duration_ms": 265397
+    "duration_ms": 265397,
+    "artist_list": [
+     {
+      "id": "ar_eelke_kleijn",
+      "name": "Eelke Kleijn"
+     }
+    ]
    },
    {
     "id": "5VpMEN1kJMhBdCvtc2fE4k",
@@ -563,7 +941,13 @@
     "artists": "The Bianca Story",
     "album": "Dancing People Are Never Wrong",
     "cover": "https://i.scdn.co/image/ab67616d0000b273e61179a51c5ebc8f34472137",
-    "duration_ms": 216639
+    "duration_ms": 216639,
+    "artist_list": [
+     {
+      "id": "ar_the_bianca_story",
+      "name": "The Bianca Story"
+     }
+    ]
    },
    {
     "id": "6pMtdOSLOtTtd7fmtqeqGg",
@@ -572,7 +956,13 @@
     "artists": "Shpongle",
     "album": "Tales of the Inexpressible",
     "cover": "https://i.scdn.co/image/ab67616d0000b27312c9a218e8fb0c9dd2c64145",
-    "duration_ms": 450866
+    "duration_ms": 450866,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
    },
    {
     "id": "6si9uxnluUHhZBOx9oe1J9",
@@ -581,7 +971,13 @@
     "artists": "Gidge",
     "album": "Autumn Bells",
     "cover": "https://i.scdn.co/image/ab67616d0000b2739c72445324a38f73ba0fbb4a",
-    "duration_ms": 484682
+    "duration_ms": 484682,
+    "artist_list": [
+     {
+      "id": "ar_gidge",
+      "name": "Gidge"
+     }
+    ]
    },
    {
     "id": "188s885TL0EgDz07BShopC",
@@ -590,7 +986,13 @@
     "artists": "Ott",
     "album": "Skylon",
     "cover": "https://i.scdn.co/image/ab67616d0000b273be9084d4ba29c6a5e69251c6",
-    "duration_ms": 472400
+    "duration_ms": 472400,
+    "artist_list": [
+     {
+      "id": "ar_ott",
+      "name": "Ott"
+     }
+    ]
    },
    {
     "id": "1TSqX33n0SFrgsjEbn0rg7",
@@ -599,7 +1001,13 @@
     "artists": "Nils Frahm",
     "album": "All Melody",
     "cover": "https://i.scdn.co/image/ab67616d0000b273d1474ac08537f5d9655552f2",
-    "duration_ms": 580016
+    "duration_ms": 580016,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
    },
    {
     "id": "3VbrfHyBiVjJxBSCMnjDhG",
@@ -608,7 +1016,13 @@
     "artists": "Catching Flies",
     "album": "Silver Linings",
     "cover": "https://i.scdn.co/image/ab67616d0000b273078114e4b7451c51dec7049e",
-    "duration_ms": 230341
+    "duration_ms": 230341,
+    "artist_list": [
+     {
+      "id": "ar_catching_flies",
+      "name": "Catching Flies"
+     }
+    ]
    },
    {
     "id": "3xVTbxVNTcy3P0eBXlAIUh",
@@ -617,7 +1031,13 @@
     "artists": "Kiasmos",
     "album": "Kiasmos",
     "cover": "https://i.scdn.co/image/ab67616d0000b273bb0ea18476f664df4f9fd460",
-    "duration_ms": 384763
+    "duration_ms": 384763,
+    "artist_list": [
+     {
+      "id": "ar_kiasmos",
+      "name": "Kiasmos"
+     }
+    ]
    },
    {
     "id": "3kMWvClYqkjWK5hjgDIyYy",
@@ -626,7 +1046,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 158240
+    "duration_ms": 158240,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "30u5328ERA8OFk3qrla5m2",
@@ -635,7 +1061,13 @@
     "artists": "Emancipator",
     "album": "Dusk to Dawn",
     "cover": "https://i.scdn.co/image/ab67616d0000b273683812adb2b4eb20fb688c9d",
-    "duration_ms": 315768
+    "duration_ms": 315768,
+    "artist_list": [
+     {
+      "id": "ar_emancipator",
+      "name": "Emancipator"
+     }
+    ]
    },
    {
     "id": "1ym6WoyPytqbXcKYcnktlS",
@@ -644,7 +1076,13 @@
     "artists": "Azaleh",
     "album": "Rainy Nights",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734df0b94280b7565961e73cdd",
-    "duration_ms": 226285
+    "duration_ms": 226285,
+    "artist_list": [
+     {
+      "id": "ar_azaleh",
+      "name": "Azaleh"
+     }
+    ]
    },
    {
     "id": "7dBbrLvzisvSSBPreD6nGS",
@@ -653,7 +1091,13 @@
     "artists": "Jon Hopkins",
     "album": "Insides",
     "cover": "https://i.scdn.co/image/ab67616d0000b273e021ba9b3cb2f941c7934c87",
-    "duration_ms": 558493
+    "duration_ms": 558493,
+    "artist_list": [
+     {
+      "id": "ar_jon_hopkins",
+      "name": "Jon Hopkins"
+     }
+    ]
    },
    {
     "id": "7KRQoq9GeWeCm0ZAXg5XMb",
@@ -662,7 +1106,13 @@
     "artists": "Aphex Twin",
     "album": "Selected Ambient Works 85-92",
     "cover": "https://i.scdn.co/image/ab67616d0000b27338906032688bb13b135ce19a",
-    "duration_ms": 323186
+    "duration_ms": 323186,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
    },
    {
     "id": "35dwFJhWGxOujWfqupuSJc",
@@ -671,7 +1121,13 @@
     "artists": "Shpongle",
     "album": "Museum of Consciousness",
     "cover": "https://i.scdn.co/image/ab67616d0000b273c8b7a789f217ffe8b043644d",
-    "duration_ms": 710361
+    "duration_ms": 710361,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
    },
    {
     "id": "4auPkl8KDB2a1kk4zj0HHp",
@@ -680,7 +1136,13 @@
     "artists": "Gidge",
     "album": "New Light",
     "cover": "https://i.scdn.co/image/ab67616d0000b2732d5af1e395f56f69244a9778",
-    "duration_ms": 352215
+    "duration_ms": 352215,
+    "artist_list": [
+     {
+      "id": "ar_gidge",
+      "name": "Gidge"
+     }
+    ]
    },
    {
     "id": "5FE9EjOf2QaIEN74PxSJM7",
@@ -689,7 +1151,13 @@
     "artists": "trentemøller",
     "album": "The Last Resort",
     "cover": "https://i.scdn.co/image/ab67616d0000b27312467d7cca4ad137bbf16b43",
-    "duration_ms": 247817
+    "duration_ms": 247817,
+    "artist_list": [
+     {
+      "id": "ar_trentem_ller",
+      "name": "trentemøller"
+     }
+    ]
    },
    {
     "id": "5626KdflSKfeDK7RJQfSrE",
@@ -698,7 +1166,13 @@
     "artists": "Nils Frahm",
     "album": "Spaces",
     "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
-    "duration_ms": 498000
+    "duration_ms": 498000,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
    }
   ]
  },
@@ -710,7 +1184,17 @@
    "artists": "The xx, Jamie xx",
    "album": "I See You (Remixes)",
    "cover": "https://i.scdn.co/image/ab67616d0000b27380ddfb1877a52549d5ee1ff6",
-   "duration_ms": 371533
+   "duration_ms": 371533,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    },
+    {
+     "id": "ar_jamie_xx",
+     "name": "Jamie xx"
+    }
+   ]
   },
   {
    "id": "2qKioq4HNraWk0DXH4Rdut",
@@ -719,7 +1203,13 @@
    "artists": "The xx",
    "album": "xx",
    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-   "duration_ms": 313386
+   "duration_ms": 313386,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "1E5HgxGmPFETzZp6g929hu",
@@ -728,7 +1218,13 @@
    "artists": "The xx",
    "album": "Coexist",
    "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
-   "duration_ms": 167546
+   "duration_ms": 167546,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "0l42kqoxQv5L6LZVqHdc2Q",
@@ -737,7 +1233,13 @@
    "artists": "The xx",
    "album": "I See You",
    "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
-   "duration_ms": 250000
+   "duration_ms": 250000,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "51fK4tBe0X09zb6KgGSsKX",
@@ -746,7 +1248,13 @@
    "artists": "The xx",
    "album": "I See You (Deluxe)",
    "cover": "https://i.scdn.co/image/ab67616d0000b273a158601b8622fd62f97f019f",
-   "duration_ms": 260292
+   "duration_ms": 260292,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "2C5YDhSJqLFCHrymIBzNSg",
@@ -755,7 +1263,13 @@
    "artists": "The xx",
    "album": "I See You",
    "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
-   "duration_ms": 238373
+   "duration_ms": 238373,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "5rFpYRlh0KDmlGiuk525QB",
@@ -764,7 +1278,13 @@
    "artists": "The xx",
    "album": "Coexist (Deluxe)",
    "cover": "https://i.scdn.co/image/ab67616d0000b2737af446276606879354126948",
-   "duration_ms": 482026
+   "duration_ms": 482026,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "2p60pcvouN5mX6xDYE2cFf",
@@ -773,7 +1293,13 @@
    "artists": "The xx",
    "album": "Coexist",
    "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
-   "duration_ms": 181000
+   "duration_ms": 181000,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "7ygrTWuppClAgsCa8QD5go",
@@ -782,7 +1308,13 @@
    "artists": "The xx",
    "album": "xx",
    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-   "duration_ms": 242266
+   "duration_ms": 242266,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "4Xs4CSjF2hz4DC6cnm5YRy",
@@ -791,7 +1323,13 @@
    "artists": "The xx",
    "album": "Coexist",
    "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
-   "duration_ms": 237173
+   "duration_ms": 237173,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "5UBBJnFxsfjFxfrtvErQoH",
@@ -800,7 +1338,13 @@
    "artists": "The xx",
    "album": "xx",
    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-   "duration_ms": 201946
+   "duration_ms": 201946,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "61WE54H3MD9N5P56Mpr6TN",
@@ -809,7 +1353,13 @@
    "artists": "The xx",
    "album": "I See You",
    "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
-   "duration_ms": 249000
+   "duration_ms": 249000,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "6n8Ypn9YvoHBzCGRUo9uCu",
@@ -818,7 +1368,13 @@
    "artists": "The xx",
    "album": "Jamie xx Edits",
    "cover": "https://i.scdn.co/image/ab67616d0000b27336e0f29bd75b796101726eaf",
-   "duration_ms": 331643
+   "duration_ms": 331643,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "10QOoEpAFpA45zJqp8culW",
@@ -827,7 +1383,13 @@
    "artists": "The xx",
    "album": "I See You (Deluxe)",
    "cover": "https://i.scdn.co/image/ab67616d0000b273a158601b8622fd62f97f019f",
-   "duration_ms": 214518
+   "duration_ms": 214518,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "0Cr3j6qhDItBeFbAzdXtN2",
@@ -836,7 +1398,13 @@
    "artists": "The xx",
    "album": "xx",
    "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-   "duration_ms": 177093
+   "duration_ms": 177093,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "5hnx6uqwVsIj7L8D4ME4Li",
@@ -845,7 +1413,13 @@
    "artists": "The xx",
    "album": "I See You",
    "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
-   "duration_ms": 200626
+   "duration_ms": 200626,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "3zsRP8rH1kaIAo9fmiP4El",
@@ -854,7 +1428,13 @@
    "artists": "The xx",
    "album": "Coexist",
    "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
-   "duration_ms": 171653
+   "duration_ms": 171653,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "0eZmfIreBsmixv3LMZpdDH",
@@ -863,7 +1443,13 @@
    "artists": "The xx",
    "album": "xx (Deluxe)",
    "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
-   "duration_ms": 148746
+   "duration_ms": 148746,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "0zGxmR5JVtMNAETyXsEwVk",
@@ -872,7 +1458,13 @@
    "artists": "The xx",
    "album": "xx (Deluxe)",
    "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
-   "duration_ms": 231466
+   "duration_ms": 231466,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   },
   {
    "id": "4nkrSzVWLOJ2fWKoW3jleI",
@@ -881,7 +1473,13 @@
    "artists": "The xx",
    "album": "xx (Deluxe)",
    "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
-   "duration_ms": 133266
+   "duration_ms": 133266,
+   "artist_list": [
+    {
+     "id": "3iOvXCl6edW5Um0fXEBRXy",
+     "name": "The xx"
+    }
+   ]
   }
  ],
  "now": {
@@ -891,7 +1489,13 @@
   "artists": "The xx",
   "album": "xx (Deluxe)",
   "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
-  "duration_ms": 217186
+  "duration_ms": 217186,
+  "artist_list": [
+   {
+    "id": "3iOvXCl6edW5Um0fXEBRXy",
+    "name": "The xx"
+   }
+  ]
  },
  "recent": [
   {
@@ -902,9 +1506,16 @@
     "artists": "The xx",
     "album": "Fiction EP",
     "cover": "https://i.scdn.co/image/ab67616d0000b2735998bc5e570f7cec5fc2cb95",
-    "duration_ms": 325968
+    "duration_ms": 325968,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:40:10.450Z"
+   "played_at": "2026-10-01T15:40:10.450Z",
+   "context_uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb"
   },
   {
    "track": {
@@ -914,9 +1525,16 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 127920
+    "duration_ms": 127920,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:34:43.959Z"
+   "played_at": "2026-10-01T15:34:43.959Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -926,9 +1544,16 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 127920
+    "duration_ms": 127920,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:26:47.137Z"
+   "played_at": "2026-10-01T15:26:47.137Z",
+   "context_uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq"
   },
   {
    "track": {
@@ -938,9 +1563,16 @@
     "artists": "Shpongle",
     "album": "Tales of the Inexpressible (2018 Remaster)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2735ccbf2c32c94e95c90566883",
-    "duration_ms": 533586
+    "duration_ms": 533586,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:24:38.621Z"
+   "played_at": "2026-10-01T15:24:38.621Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -950,9 +1582,16 @@
     "artists": "Nuage",
     "album": "Whyme",
     "cover": "https://i.scdn.co/image/ab67616d0000b273e1d2c0878b13c390a858fdee",
-    "duration_ms": 220444
+    "duration_ms": 220444,
+    "artist_list": [
+     {
+      "id": "ar_nuage",
+      "name": "Nuage"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:10:29.437Z"
+   "played_at": "2026-10-01T15:10:29.437Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -962,9 +1601,20 @@
     "artists": "Bonobo, Nilüfer Yanya",
     "album": "Distance in Static",
     "cover": "https://i.scdn.co/image/ab67616d0000b273dd6e0f2e911f3d04f576aba9",
-    "duration_ms": 238051
+    "duration_ms": 238051,
+    "artist_list": [
+     {
+      "id": "0cmWgDlu9CwTgxPhf403hb",
+      "name": "Bonobo"
+     },
+     {
+      "id": "ar_nil_fer_yanya",
+      "name": "Nilüfer Yanya"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:06:48.481Z"
+   "played_at": "2026-10-01T15:06:48.481Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -974,9 +1624,16 @@
     "artists": "Mark Barrott",
     "album": "The Exit Diaries",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a7b6898b69cf08e10aff3216",
-    "duration_ms": 344000
+    "duration_ms": 344000,
+    "artist_list": [
+     {
+      "id": "ar_mark_barrott",
+      "name": "Mark Barrott"
+     }
+    ]
    },
-   "played_at": "2026-10-01T15:02:49.915Z"
+   "played_at": "2026-10-01T15:02:49.915Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -986,9 +1643,16 @@
     "artists": "Baril",
     "album": "One More Rush",
     "cover": "https://i.scdn.co/image/ab67616d0000b273ecec6ec082ed977d6d0315d2",
-    "duration_ms": 240000
+    "duration_ms": 240000,
+    "artist_list": [
+     {
+      "id": "ar_baril",
+      "name": "Baril"
+     }
+    ]
    },
-   "played_at": "2026-10-01T14:57:05.475Z"
+   "played_at": "2026-10-01T14:57:05.475Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -998,9 +1662,20 @@
     "artists": "Thylacine, Catching Flies",
     "album": "Shark Island (Catching Flies Remix)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2734a8a2ba31631cf0977c513d3",
-    "duration_ms": 199500
+    "duration_ms": 199500,
+    "artist_list": [
+     {
+      "id": "ar_thylacine",
+      "name": "Thylacine"
+     },
+     {
+      "id": "ar_catching_flies",
+      "name": "Catching Flies"
+     }
+    ]
    },
-   "played_at": "2026-10-01T14:53:04.966Z"
+   "played_at": "2026-10-01T14:53:04.966Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1010,9 +1685,16 @@
     "artists": "il:lo",
     "album": "Haïve",
     "cover": "https://i.scdn.co/image/ab67616d0000b273b5b5405f7efa4e75ff254be3",
-    "duration_ms": 295042
+    "duration_ms": 295042,
+    "artist_list": [
+     {
+      "id": "ar_il_lo",
+      "name": "il:lo"
+     }
+    ]
    },
-   "played_at": "2026-10-01T14:49:44.955Z"
+   "played_at": "2026-10-01T14:49:44.955Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1022,9 +1704,16 @@
     "artists": "BICEP",
     "album": "Air / Lemonder / Viper",
     "cover": "https://i.scdn.co/image/ab67616d0000b273393c9807f16285559134dc8e",
-    "duration_ms": 268134
+    "duration_ms": 268134,
+    "artist_list": [
+     {
+      "id": "ar_bicep",
+      "name": "BICEP"
+     }
+    ]
    },
-   "played_at": "2026-10-01T14:44:49.490Z"
+   "played_at": "2026-10-01T14:44:49.490Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1034,9 +1723,16 @@
     "artists": "Bonobo",
     "album": "Distance in Static",
     "cover": "https://i.scdn.co/image/ab67616d0000b273dd6e0f2e911f3d04f576aba9",
-    "duration_ms": 236820
+    "duration_ms": 236820,
+    "artist_list": [
+     {
+      "id": "0cmWgDlu9CwTgxPhf403hb",
+      "name": "Bonobo"
+     }
+    ]
    },
-   "played_at": "2026-10-01T14:40:20.843Z"
+   "played_at": "2026-10-01T14:40:20.843Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1046,9 +1742,16 @@
     "artists": "Lake Turner",
     "album": "Over a God / Centre",
     "cover": "https://i.scdn.co/image/ab67616d0000b27380880074a2fbe44dc123ca88",
-    "duration_ms": 190991
+    "duration_ms": 190991,
+    "artist_list": [
+     {
+      "id": "ar_lake_turner",
+      "name": "Lake Turner"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:52:01.807Z"
+   "played_at": "2026-10-01T12:52:01.807Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1058,9 +1761,16 @@
     "artists": "BlauDisS",
     "album": "Another Way",
     "cover": "https://i.scdn.co/image/ab67616d0000b273689160af47b3297ccbaecd2c",
-    "duration_ms": 204000
+    "duration_ms": 204000,
+    "artist_list": [
+     {
+      "id": "ar_blaudiss",
+      "name": "BlauDisS"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:49:24.239Z"
+   "played_at": "2026-10-01T12:49:24.239Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1070,9 +1780,16 @@
     "artists": "Tomas Novoa",
     "album": "Tornasol",
     "cover": "https://i.scdn.co/image/ab67616d0000b273496eb21d70d44a895570d361",
-    "duration_ms": 283099
+    "duration_ms": 283099,
+    "artist_list": [
+     {
+      "id": "ar_tomas_novoa",
+      "name": "Tomas Novoa"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:46:27.720Z"
+   "played_at": "2026-10-01T12:46:27.720Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1082,9 +1799,16 @@
     "artists": "Tokari",
     "album": "Streetlight",
     "cover": "https://i.scdn.co/image/ab67616d0000b2736a17ca72a33ca647fa85610a",
-    "duration_ms": 200112
+    "duration_ms": 200112,
+    "artist_list": [
+     {
+      "id": "ar_tokari",
+      "name": "Tokari"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:42:13.351Z"
+   "played_at": "2026-10-01T12:42:13.351Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1094,9 +1818,16 @@
     "artists": "Lycoriscoris",
     "album": "Chiyu",
     "cover": "https://i.scdn.co/image/ab67616d0000b273878c5c9ac42cbb0c19de8205",
-    "duration_ms": 295766
+    "duration_ms": 295766,
+    "artist_list": [
+     {
+      "id": "ar_lycoriscoris",
+      "name": "Lycoriscoris"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:39:22.616Z"
+   "played_at": "2026-10-01T12:39:22.616Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1106,9 +1837,20 @@
     "artists": "John Hayes, il:lo",
     "album": "Closer",
     "cover": "https://i.scdn.co/image/ab67616d0000b27368fe23ec8935748bdee139a1",
-    "duration_ms": 232665
+    "duration_ms": 232665,
+    "artist_list": [
+     {
+      "id": "ar_john_hayes",
+      "name": "John Hayes"
+     },
+     {
+      "id": "ar_il_lo",
+      "name": "il:lo"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:34:48.226Z"
+   "played_at": "2026-10-01T12:34:48.226Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1118,9 +1860,16 @@
     "artists": "Boreas1550",
     "album": "Un poco de fantasmas",
     "cover": "https://i.scdn.co/image/ab67616d0000b273b4484401d92bdd6ab82b6819",
-    "duration_ms": 185861
+    "duration_ms": 185861,
+    "artist_list": [
+     {
+      "id": "ar_boreas1550",
+      "name": "Boreas1550"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:31:04.345Z"
+   "played_at": "2026-10-01T12:31:04.345Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1130,9 +1879,24 @@
     "artists": "Lemon And Soul, Or Mahapatra, Okaya",
     "album": "Drowning in the Sea of Love",
     "cover": "https://i.scdn.co/image/ab67616d0000b2733265008db285a52734f7f8d4",
-    "duration_ms": 324500
+    "duration_ms": 324500,
+    "artist_list": [
+     {
+      "id": "ar_lemon_and_soul",
+      "name": "Lemon And Soul"
+     },
+     {
+      "id": "ar_or_mahapatra",
+      "name": "Or Mahapatra"
+     },
+     {
+      "id": "ar_okaya",
+      "name": "Okaya"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:27:58.509Z"
+   "played_at": "2026-10-01T12:27:58.509Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1142,9 +1906,16 @@
     "artists": "Silk Static",
     "album": "Thoughts Unclouded",
     "cover": "https://i.scdn.co/image/ab67616d0000b2737dd2dedf5e9cf6743b357000",
-    "duration_ms": 198750
+    "duration_ms": 198750,
+    "artist_list": [
+     {
+      "id": "ar_silk_static",
+      "name": "Silk Static"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:23:31.941Z"
+   "played_at": "2026-10-01T12:23:31.941Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1154,9 +1925,16 @@
     "artists": "Avoure",
     "album": "XXI",
     "cover": "https://i.scdn.co/image/ab67616d0000b273f7cfa83f783cb98c355abec9",
-    "duration_ms": 233658
+    "duration_ms": 233658,
+    "artist_list": [
+     {
+      "id": "ar_avoure",
+      "name": "Avoure"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:20:54.493Z"
+   "played_at": "2026-10-01T12:20:54.493Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1166,9 +1944,16 @@
     "artists": "Rautu",
     "album": "Horizon",
     "cover": "https://i.scdn.co/image/ab67616d0000b2739b9d8aff37035a197bb06ca7",
-    "duration_ms": 188575
+    "duration_ms": 188575,
+    "artist_list": [
+     {
+      "id": "ar_rautu",
+      "name": "Rautu"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:17:17.476Z"
+   "played_at": "2026-10-01T12:17:17.476Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1178,9 +1963,16 @@
     "artists": "Al Lethbridge",
     "album": "The Road Less Travelled",
     "cover": "https://i.scdn.co/image/ab67616d0000b27348dc4e170e2eedf2058b9ab1",
-    "duration_ms": 182181
+    "duration_ms": 182181,
+    "artist_list": [
+     {
+      "id": "ar_al_lethbridge",
+      "name": "Al Lethbridge"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:14:13.970Z"
+   "played_at": "2026-10-01T12:14:13.970Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1190,9 +1982,16 @@
     "artists": "Tineidae",
     "album": "Dead Chapters",
     "cover": "https://i.scdn.co/image/ab67616d0000b273d4916ab0a57d16348ec16d1c",
-    "duration_ms": 214379
+    "duration_ms": 214379,
+    "artist_list": [
+     {
+      "id": "ar_tineidae",
+      "name": "Tineidae"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:11:11.574Z"
+   "played_at": "2026-10-01T12:11:11.574Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1202,9 +2001,16 @@
     "artists": "Jameson Nathan Jones",
     "album": "Signals",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a52719c4c156849d1dabb0ec",
-    "duration_ms": 243843
+    "duration_ms": 243843,
+    "artist_list": [
+     {
+      "id": "ar_jameson_nathan_jones",
+      "name": "Jameson Nathan Jones"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:07:53.456Z"
+   "played_at": "2026-10-01T12:07:53.456Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1214,9 +2020,16 @@
     "artists": "Niklas Paschburg",
     "album": "The Six Billion Dollar Man (Original Motion Picture Soundtrack)",
     "cover": "https://i.scdn.co/image/ab67616d0000b2731fc8244745d5536b92d8e0b6",
-    "duration_ms": 121982
+    "duration_ms": 121982,
+    "artist_list": [
+     {
+      "id": "ar_niklas_paschburg",
+      "name": "Niklas Paschburg"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:03:51.884Z"
+   "played_at": "2026-10-01T12:03:51.884Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1226,9 +2039,16 @@
     "artists": "Ben Chatwin",
     "album": "Refractions",
     "cover": "https://i.scdn.co/image/ab67616d0000b27371726f6d273164a62f955e07",
-    "duration_ms": 219095
+    "duration_ms": 219095,
+    "artist_list": [
+     {
+      "id": "ar_ben_chatwin",
+      "name": "Ben Chatwin"
+     }
+    ]
    },
-   "played_at": "2026-10-01T12:01:49.377Z"
+   "played_at": "2026-10-01T12:01:49.377Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1238,9 +2058,16 @@
     "artists": "Christian Cohle",
     "album": "Holy Trouble",
     "cover": "https://i.scdn.co/image/ab67616d0000b273915a5f6f13382f416369f239",
-    "duration_ms": 271106
+    "duration_ms": 271106,
+    "artist_list": [
+     {
+      "id": "ar_christian_cohle",
+      "name": "Christian Cohle"
+     }
+    ]
    },
-   "played_at": "2026-10-01T11:58:09.052Z"
+   "played_at": "2026-10-01T11:58:09.052Z",
+   "context_uri": null
   },
   {
    "track": {
@@ -1250,9 +2077,16 @@
     "artists": "Marina Ortega Mira",
     "album": "Oppressor",
     "cover": "https://i.scdn.co/image/ab67616d0000b273bf76e25b9bd3c5c38b4eff9a",
-    "duration_ms": 179400
+    "duration_ms": 179400,
+    "artist_list": [
+     {
+      "id": "ar_marina_ortega_mira",
+      "name": "Marina Ortega Mira"
+     }
+    ]
    },
-   "played_at": "2026-10-01T11:53:38.193Z"
+   "played_at": "2026-10-01T11:53:38.193Z",
+   "context_uri": null
   }
  ],
  "search": {
@@ -1265,7 +2099,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 127920
+    "duration_ms": 127920,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "5UBBJnFxsfjFxfrtvErQoH",
@@ -1274,7 +2114,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 201946
+    "duration_ms": 201946,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "3zsRP8rH1kaIAo9fmiP4El",
@@ -1283,7 +2129,13 @@
     "artists": "The xx",
     "album": "Coexist",
     "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
-    "duration_ms": 171653
+    "duration_ms": 171653,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "52fFB9VZ9tiJFLMxpu08Ee",
@@ -1292,7 +2144,13 @@
     "artists": "Makrill",
     "album": "Tropical Summer",
     "cover": "https://i.scdn.co/image/ab67616d0000b273277b3b9898267ae1782a40fa",
-    "duration_ms": 127212
+    "duration_ms": 127212,
+    "artist_list": [
+     {
+      "id": "ar_makrill",
+      "name": "Makrill"
+     }
+    ]
    },
    {
     "id": "2dIi21bJASzEKP20LIutOE",
@@ -1301,7 +2159,13 @@
     "artists": "The xx",
     "album": "xx (Deluxe)",
     "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
-    "duration_ms": 127920
+    "duration_ms": 127920,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "5Nu5Uyoauauy9LFePYL1Z3",
@@ -1310,7 +2174,13 @@
     "artists": "ODESZA",
     "album": "A Moment Apart",
     "cover": "https://i.scdn.co/image/ab67616d0000b27345951a69fe39a6e163122eab",
-    "duration_ms": 228590
+    "duration_ms": 228590,
+    "artist_list": [
+     {
+      "id": "ar_odesza",
+      "name": "ODESZA"
+     }
+    ]
    },
    {
     "id": "59wlTaYOL5tDUgXnbBQ3my",
@@ -1319,7 +2189,13 @@
     "artists": "ODESZA",
     "album": "A Moment Apart",
     "cover": "https://i.scdn.co/image/ab67616d0000b27345951a69fe39a6e163122eab",
-    "duration_ms": 234244
+    "duration_ms": 234244,
+    "artist_list": [
+     {
+      "id": "ar_odesza",
+      "name": "ODESZA"
+     }
+    ]
    },
    {
     "id": "6aw5G0HhAmyqM2OlqjTjOb",
@@ -1328,7 +2204,13 @@
     "artists": "The Adams",
     "album": "The Adams",
     "cover": "https://i.scdn.co/image/ab67616d0000b273535749cdd3ac5452d99289be",
-    "duration_ms": 239386
+    "duration_ms": 239386,
+    "artist_list": [
+     {
+      "id": "ar_the_adams",
+      "name": "The Adams"
+     }
+    ]
    },
    {
     "id": "5j7HESfa8OXs3hTqQ1ZvnR",
@@ -1337,7 +2219,13 @@
     "artists": "The Panturas",
     "album": "Mabuk Laut",
     "cover": "https://i.scdn.co/image/ab67616d0000b2733d3e53004945125cfeeeadc5",
-    "duration_ms": 254400
+    "duration_ms": 254400,
+    "artist_list": [
+     {
+      "id": "ar_the_panturas",
+      "name": "The Panturas"
+     }
+    ]
    },
    {
     "id": "67YVZ8XKist6XE3Usm0cZt",
@@ -1346,7 +2234,13 @@
     "artists": "Reality Club",
     "album": "What Do You Really Know?",
     "cover": "https://i.scdn.co/image/ab67616d0000b2736019b1ddb28634421cc291a0",
-    "duration_ms": 321082
+    "duration_ms": 321082,
+    "artist_list": [
+     {
+      "id": "ar_reality_club",
+      "name": "Reality Club"
+     }
+    ]
    }
   ],
   "albums": [
@@ -1451,7 +2345,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 127920
+    "duration_ms": 127920,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "0Cr3j6qhDItBeFbAzdXtN2",
@@ -1460,7 +2360,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 177093
+    "duration_ms": 177093,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "5UBBJnFxsfjFxfrtvErQoH",
@@ -1469,7 +2375,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 201946
+    "duration_ms": 201946,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "0Rqwa6i410IwhTiugt6vXi",
@@ -1478,7 +2390,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 160720
+    "duration_ms": 160720,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "7ygrTWuppClAgsCa8QD5go",
@@ -1487,7 +2405,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 242266
+    "duration_ms": 242266,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "3kMWvClYqkjWK5hjgDIyYy",
@@ -1496,7 +2420,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 158240
+    "duration_ms": 158240,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "74quLhuRBoSU6zMagxUQZC",
@@ -1505,7 +2435,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 270240
+    "duration_ms": 270240,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "0G1Lnbm8oXN5Wzn9e729gK",
@@ -1514,7 +2450,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 188120
+    "duration_ms": 188120,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "2qKioq4HNraWk0DXH4Rdut",
@@ -1523,7 +2465,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 313386
+    "duration_ms": 313386,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "0ibXYHIS1vPqpkm1LoIWZR",
@@ -1532,7 +2480,13 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 216853
+    "duration_ms": 216853,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    },
    {
     "id": "4dSI5Fa2sDC5HTNvH88o07",
@@ -1541,8 +2495,1489 @@
     "artists": "The xx",
     "album": "xx",
     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
-    "duration_ms": 262640
+    "duration_ms": 262640,
+    "artist_list": [
+     {
+      "id": "3iOvXCl6edW5Um0fXEBRXy",
+      "name": "The xx"
+     }
+    ]
    }
   ]
+ },
+ "devices": [
+  {
+   "id": "dev_macbook_pro",
+   "name": "MacBook Pro",
+   "type": "Computer",
+   "is_active": false,
+   "is_restricted": false,
+   "supports_volume": true,
+   "volume_percent": 70
+  },
+  {
+   "id": "dev_marantz_stereo_70s",
+   "name": "Marantz STEREO 70s",
+   "type": "AVR",
+   "is_active": true,
+   "is_restricted": false,
+   "supports_volume": true,
+   "volume_percent": 43
+  }
+ ],
+ "restrictedDevice": {
+  "id": "dev_living_room_tv",
+  "name": "Living Room TV",
+  "type": "TV",
+  "is_active": false,
+  "is_restricted": true,
+  "supports_volume": false,
+  "volume_percent": null
+ },
+ "liked": {
+  "tracks": [
+   {
+    "id": "1CPZ5BxNNd0n0nF4Orb9JS",
+    "uri": "spotify:track:1CPZ5BxNNd0n0nF4Orb9JS",
+    "name": "Golden",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 194607,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "3RXUgPNIbUgFxsDWuBQEt6",
+    "uri": "spotify:track:3RXUgPNIbUgFxsDWuBQEt6",
+    "name": "How It’s Done",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 176059,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "5sBDrrtLGbV64QJnEqfjer",
+    "uri": "spotify:track:5sBDrrtLGbV64QJnEqfjer",
+    "name": "What It Sounds Like",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 250268,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "0MHStU0muAIEMbwdnebYu2",
+    "uri": "spotify:track:0MHStU0muAIEMbwdnebYu2",
+    "name": "Takedown",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 182016,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "09CtPGIpYB4BrO8qb1RGsF",
+    "uri": "spotify:track:09CtPGIpYB4BrO8qb1RGsF",
+    "name": "Sorry",
+    "artists": "Justin Bieber",
+    "album": "Purpose (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f46b9d202509a8f7384b90de",
+    "duration_ms": 200786,
+    "artist_list": [
+     {
+      "id": "ar_justin_bieber",
+      "name": "Justin Bieber"
+     }
+    ]
+   },
+   {
+    "id": "2tpWsVSb9UEmDRxAl1zhX1",
+    "uri": "spotify:track:2tpWsVSb9UEmDRxAl1zhX1",
+    "name": "Counting Stars",
+    "artists": "OneRepublic",
+    "album": "Native",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739e2f95ae77cf436017ada9cb",
+    "duration_ms": 257265,
+    "artist_list": [
+     {
+      "id": "ar_onerepublic",
+      "name": "OneRepublic"
+     }
+    ]
+   },
+   {
+    "id": "7JJmb5XwzOO8jgpou264Ml",
+    "uri": "spotify:track:7JJmb5XwzOO8jgpou264Ml",
+    "name": "There's Nothing Holdin' Me Back",
+    "artists": "Shawn Mendes",
+    "album": "Illuminate (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ea3ef7697cfd5705b8f47521",
+    "duration_ms": 199440,
+    "artist_list": [
+     {
+      "id": "ar_shawn_mendes",
+      "name": "Shawn Mendes"
+     }
+    ]
+   },
+   {
+    "id": "2UbVnbE5FH6008mAm6Mmgw",
+    "uri": "spotify:track:2UbVnbE5FH6008mAm6Mmgw",
+    "name": "Run",
+    "artists": "OneRepublic",
+    "album": "Run",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738120d2b107af14b1bf67cd06",
+    "duration_ms": 169010,
+    "artist_list": [
+     {
+      "id": "ar_onerepublic",
+      "name": "OneRepublic"
+     }
+    ]
+   },
+   {
+    "id": "7x5xYW5W42OGPAdHUyyguy",
+    "uri": "spotify:track:7x5xYW5W42OGPAdHUyyguy",
+    "name": "Locked Away (feat. Adam Levine)",
+    "artists": "R. City, Adam Levine",
+    "album": "What Dreams Are Made Of",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27374b157379e7686df3d0850a4",
+    "duration_ms": 227475,
+    "artist_list": [
+     {
+      "id": "ar_r_city",
+      "name": "R. City"
+     },
+     {
+      "id": "ar_adam_levine",
+      "name": "Adam Levine"
+     }
+    ]
+   },
+   {
+    "id": "161DnLWsx1i3u1JT05lzqU",
+    "uri": "spotify:track:161DnLWsx1i3u1JT05lzqU",
+    "name": "Talking to the Moon",
+    "artists": "Bruno Mars",
+    "album": "Doo-Wops & Hooligans",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737039c1c841fc3dfa2ad8a0d8",
+    "duration_ms": 217866,
+    "artist_list": [
+     {
+      "id": "ar_bruno_mars",
+      "name": "Bruno Mars"
+     }
+    ]
+   },
+   {
+    "id": "1whAXVGN8AdfrnoXNIXfJf",
+    "uri": "spotify:track:1whAXVGN8AdfrnoXNIXfJf",
+    "name": "Truth or Dare",
+    "artists": "Tyla",
+    "album": "TYLA",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273cc9e6203ed1182fe83b98985",
+    "duration_ms": 190392,
+    "artist_list": [
+     {
+      "id": "ar_tyla",
+      "name": "Tyla"
+     }
+    ]
+   },
+   {
+    "id": "6vn8dvUpDC4YeaAh3BI25r",
+    "uri": "spotify:track:6vn8dvUpDC4YeaAh3BI25r",
+    "name": "I'm Still Standing",
+    "artists": "Taron Egerton",
+    "album": "Sing (Original Motion Picture Soundtrack Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27370120e0cfe4add0fb2eba28b",
+    "duration_ms": 187853,
+    "artist_list": [
+     {
+      "id": "ar_taron_egerton",
+      "name": "Taron Egerton"
+     }
+    ]
+   },
+   {
+    "id": "5hx7w26Zi3zafMgvMTUqF6",
+    "uri": "spotify:track:5hx7w26Zi3zafMgvMTUqF6",
+    "name": "SNAP",
+    "artists": "Rosa Linn",
+    "album": "SNAP",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273927f72f3739f256fb01d1470",
+    "duration_ms": 179551,
+    "artist_list": [
+     {
+      "id": "ar_rosa_linn",
+      "name": "Rosa Linn"
+     }
+    ]
+   },
+   {
+    "id": "2gQPv5jvVPqU2a9HhMNO1v",
+    "uri": "spotify:track:2gQPv5jvVPqU2a9HhMNO1v",
+    "name": "Toxic",
+    "artists": "BoyWithUke",
+    "album": "Toxic",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27382a18aa0d3374049c6b78f6a",
+    "duration_ms": 168020,
+    "artist_list": [
+     {
+      "id": "ar_boywithuke",
+      "name": "BoyWithUke"
+     }
+    ]
+   },
+   {
+    "id": "3zkWCteF82vJwv0hRLba76",
+    "uri": "spotify:track:3zkWCteF82vJwv0hRLba76",
+    "name": "Stitches",
+    "artists": "Shawn Mendes",
+    "album": "Handwritten",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27375bd5306fb4669a15ee74eff",
+    "duration_ms": 206880,
+    "artist_list": [
+     {
+      "id": "ar_shawn_mendes",
+      "name": "Shawn Mendes"
+     }
+    ]
+   },
+   {
+    "id": "3JpzqRcjxif901JZKAPLn6",
+    "uri": "spotify:track:3JpzqRcjxif901JZKAPLn6",
+    "name": "Mos 6581",
+    "artists": "Carbon Based Lifeforms",
+    "album": "Hydroponic Garden",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ab1de7a28d96c3044b7c2dd0",
+    "duration_ms": 440000,
+    "artist_list": [
+     {
+      "id": "ar_carbon_based_lifeforms",
+      "name": "Carbon Based Lifeforms"
+     }
+    ]
+   },
+   {
+    "id": "4nQZtkIyr1U3CJ0ZmE4f6C",
+    "uri": "spotify:track:4nQZtkIyr1U3CJ0ZmE4f6C",
+    "name": "DRAWN OUT LIKE AN ACHE",
+    "artists": "Lorn",
+    "album": "REMNANT",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273b5b9ef714b83c177f8425d8d",
+    "duration_ms": 250687,
+    "artist_list": [
+     {
+      "id": "ar_lorn",
+      "name": "Lorn"
+     }
+    ]
+   },
+   {
+    "id": "5z0QLEpkbUh00SevSuYxOh",
+    "uri": "spotify:track:5z0QLEpkbUh00SevSuYxOh",
+    "name": "Divine Moments of Truth",
+    "artists": "Shpongle",
+    "album": "Are You Shpongled?",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2",
+    "duration_ms": 620333,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
+   },
+   {
+    "id": "2KZAI37A6imv9FrvFM7WTV",
+    "uri": "spotify:track:2KZAI37A6imv9FrvFM7WTV",
+    "name": "Generations",
+    "artists": "Mano Le Tough",
+    "album": "Trails",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27317378ec9ece13f0ba9d86ec5",
+    "duration_ms": 265413,
+    "artist_list": [
+     {
+      "id": "ar_mano_le_tough",
+      "name": "Mano Le Tough"
+     }
+    ]
+   },
+   {
+    "id": "5YcqLilTaxiTHxjX31kjeN",
+    "uri": "spotify:track:5YcqLilTaxiTHxjX31kjeN",
+    "name": "1983",
+    "artists": "Ten Walls, Domas Aleksa",
+    "album": "Queen",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27396275f993a07bdc40d87f91a",
+    "duration_ms": 189314,
+    "artist_list": [
+     {
+      "id": "ar_ten_walls",
+      "name": "Ten Walls"
+     },
+     {
+      "id": "ar_domas_aleksa",
+      "name": "Domas Aleksa"
+     }
+    ]
+   },
+   {
+    "id": "4LkejFo7l7D36wrUfgs10W",
+    "uri": "spotify:track:4LkejFo7l7D36wrUfgs10W",
+    "name": "For – Peter – Toilet Brushes – More",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 1009000,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
+   },
+   {
+    "id": "2BndJYJQ17UcEeUFJP5JmY",
+    "uri": "spotify:track:2BndJYJQ17UcEeUFJP5JmY",
+    "name": "Paradise Circus",
+    "artists": "Massive Attack, Hope Sandoval",
+    "album": "Heligoland",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273852aaa233e122f1dbfefcf00",
+    "duration_ms": 297774,
+    "artist_list": [
+     {
+      "id": "ar_massive_attack",
+      "name": "Massive Attack"
+     },
+     {
+      "id": "ar_hope_sandoval",
+      "name": "Hope Sandoval"
+     }
+    ]
+   },
+   {
+    "id": "7G7qAvwD7kGBRnY9D1G0o3",
+    "uri": "spotify:track:7G7qAvwD7kGBRnY9D1G0o3",
+    "name": "Avratz",
+    "artists": "Infected Mushroom",
+    "album": "Converting Vegetarians",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27323fad8bd3a0351c0e183f075",
+    "duration_ms": 623866,
+    "artist_list": [
+     {
+      "id": "ar_infected_mushroom",
+      "name": "Infected Mushroom"
+     }
+    ]
+   },
+   {
+    "id": "643gyipSU7dkmrFhJ8UAIm",
+    "uri": "spotify:track:643gyipSU7dkmrFhJ8UAIm",
+    "name": "Pulsewidth",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works 85-92",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27338906032688bb13b135ce19a",
+    "duration_ms": 228053,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
+   },
+   {
+    "id": "2AACF7qh9u5qWxxLyHhwSd",
+    "uri": "spotify:track:2AACF7qh9u5qWxxLyHhwSd",
+    "name": "Train",
+    "artists": "Younger Brother",
+    "album": "Vaccine",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2732e5247eb1ef12ec0966b0d80",
+    "duration_ms": 449666,
+    "artist_list": [
+     {
+      "id": "ar_younger_brother",
+      "name": "Younger Brother"
+     }
+    ]
+   },
+   {
+    "id": "6IT02SvltW0WtmxF9mxeBf",
+    "uri": "spotify:track:6IT02SvltW0WtmxF9mxeBf",
+    "name": "Silk & Roses",
+    "artists": "Nordlight & David",
+    "album": "A Deep Dive",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f16e76424c8579a75f208e80",
+    "duration_ms": 455847,
+    "artist_list": [
+     {
+      "id": "ar_nordlight_david",
+      "name": "Nordlight & David"
+     }
+    ]
+   },
+   {
+    "id": "2sW8fmnISifQTRgnRrQTYW",
+    "uri": "spotify:track:2sW8fmnISifQTRgnRrQTYW",
+    "name": "Roads",
+    "artists": "Portishead",
+    "album": "Dummy",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273dc20397b139223620af148f6",
+    "duration_ms": 303973,
+    "artist_list": [
+     {
+      "id": "ar_portishead",
+      "name": "Portishead"
+     }
+    ]
+   },
+   {
+    "id": "7pM9cLbrgRGX1hHElTX92m",
+    "uri": "spotify:track:7pM9cLbrgRGX1hHElTX92m",
+    "name": "Acid Rain",
+    "artists": "Lorn",
+    "album": "The Maze To Nowhere",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734e7be339cee55cf14e6bc50f",
+    "duration_ms": 172473,
+    "artist_list": [
+     {
+      "id": "ar_lorn",
+      "name": "Lorn"
+     }
+    ]
+   },
+   {
+    "id": "2j9YZ66Crpyi9Zd16Jut7j",
+    "uri": "spotify:track:2j9YZ66Crpyi9Zd16Jut7j",
+    "name": "Shpongle Spores",
+    "artists": "Shpongle",
+    "album": "Are You Shpongled?",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2",
+    "duration_ms": 436173,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
+   },
+   {
+    "id": "1QHWgXRQdbekMFbscWJRMh",
+    "uri": "spotify:track:1QHWgXRQdbekMFbscWJRMh",
+    "name": "Kykeon",
+    "artists": "Entheogenic",
+    "album": "Kykeon",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737e1dbad5b301aee621aeee63",
+    "duration_ms": 307160,
+    "artist_list": [
+     {
+      "id": "ar_entheogenic",
+      "name": "Entheogenic"
+     }
+    ]
+   },
+   {
+    "id": "3ja3agaXFeeKQCcwk6W1eR",
+    "uri": "spotify:track:3ja3agaXFeeKQCcwk6W1eR",
+    "name": "Las Parañas",
+    "artists": "Mees Dierdorp",
+    "album": "Aviar Alom",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27345446b344c52fc1e07f0bc89",
+    "duration_ms": 406269,
+    "artist_list": [
+     {
+      "id": "ar_mees_dierdorp",
+      "name": "Mees Dierdorp"
+     }
+    ]
+   },
+   {
+    "id": "7kEEo8jl4RGQjcFYEFmIEw",
+    "uri": "spotify:track:7kEEo8jl4RGQjcFYEFmIEw",
+    "name": "Went Missing",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 299066,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
+   },
+   {
+    "id": "7wAF8APlRYWKlIzidN4wzp",
+    "uri": "spotify:track:7wAF8APlRYWKlIzidN4wzp",
+    "name": "Floating",
+    "artists": "Ambyion, Shockline",
+    "album": "Floating",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273657775611aa9c74cdc4854c6",
+    "duration_ms": 251612,
+    "artist_list": [
+     {
+      "id": "ar_ambyion",
+      "name": "Ambyion"
+     },
+     {
+      "id": "ar_shockline",
+      "name": "Shockline"
+     }
+    ]
+   },
+   {
+    "id": "4o6Ufgnf7pT55tI4j78RkT",
+    "uri": "spotify:track:4o6Ufgnf7pT55tI4j78RkT",
+    "name": "Who Am I",
+    "artists": "Peace Orchestra",
+    "album": "Peace Orchestra",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273d0e8225109806fd9be09175a",
+    "duration_ms": 357826,
+    "artist_list": [
+     {
+      "id": "ar_peace_orchestra",
+      "name": "Peace Orchestra"
+     }
+    ]
+   },
+   {
+    "id": "6ryJQswzoXDmmFazg91c0c",
+    "uri": "spotify:track:6ryJQswzoXDmmFazg91c0c",
+    "name": "#1",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works Volume II",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738155dc4dae262f31d39d8296",
+    "duration_ms": 447800,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
+   },
+   {
+    "id": "6nPpCVYvtAPLeu3KySLDrK",
+    "uri": "spotify:track:6nPpCVYvtAPLeu3KySLDrK",
+    "name": "Psychic Gibbon",
+    "artists": "Younger Brother",
+    "album": "The Last Days Of Gravity",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27348a5185195990d92e4dd47eb",
+    "duration_ms": 451000,
+    "artist_list": [
+     {
+      "id": "ar_younger_brother",
+      "name": "Younger Brother"
+     }
+    ]
+   },
+   {
+    "id": "3NJgsL49NedjwvsrcoWlcq",
+    "uri": "spotify:track:3NJgsL49NedjwvsrcoWlcq",
+    "name": "Endeavour",
+    "artists": "Azaleh",
+    "album": "Endeavour",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ee6c6d7f1452fad23a70d406",
+    "duration_ms": 201459,
+    "artist_list": [
+     {
+      "id": "ar_azaleh",
+      "name": "Azaleh"
+     }
+    ]
+   },
+   {
+    "id": "4GhRWItcoyUAh5RmgQTHiV",
+    "uri": "spotify:track:4GhRWItcoyUAh5RmgQTHiV",
+    "name": "Icarus (feat. CoMa)",
+    "artists": "Synthetic Epiphany",
+    "album": "Icarus (feat. CoMa)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738b4958256e692260143447f0",
+    "duration_ms": 449253,
+    "artist_list": [
+     {
+      "id": "ar_synthetic_epiphany",
+      "name": "Synthetic Epiphany"
+     }
+    ]
+   },
+   {
+    "id": "4aMRygNyVjq7r9cgqdkQN5",
+    "uri": "spotify:track:4aMRygNyVjq7r9cgqdkQN5",
+    "name": "Folding",
+    "artists": "Lorn",
+    "album": "A/D, Music For Picture",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273b3aa5176106a556e5274642f",
+    "duration_ms": 87924,
+    "artist_list": [
+     {
+      "id": "ar_lorn",
+      "name": "Lorn"
+     }
+    ]
+   },
+   {
+    "id": "5ThP1U6kxJEuGV4pK9ims8",
+    "uri": "spotify:track:5ThP1U6kxJEuGV4pK9ims8",
+    "name": "Brain in a Fish Tank - Live",
+    "artists": "Shpongle",
+    "album": "Live in London (2013) (Live)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f8e3bdaa80afb907ef5192e4",
+    "duration_ms": 511500,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
+   },
+   {
+    "id": "4K4kedXFAuW6gn8iwgGFTw",
+    "uri": "spotify:track:4K4kedXFAuW6gn8iwgGFTw",
+    "name": "Poa Alpina",
+    "artists": "Biosphere",
+    "album": "Substrata + Man with a Movie Camera",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2733f1900e26ff44e8821bd8350",
+    "duration_ms": 251066,
+    "artist_list": [
+     {
+      "id": "ar_biosphere",
+      "name": "Biosphere"
+     }
+    ]
+   },
+   {
+    "id": "2X4Cj5zIdnav7767iPiDou",
+    "uri": "spotify:track:2X4Cj5zIdnav7767iPiDou",
+    "name": "Said and Done",
+    "artists": "Nils Frahm",
+    "album": "Spaces",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3",
+    "duration_ms": 578933,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
+   },
+   {
+    "id": "6MFTr9Id56RwjiUq5CONhC",
+    "uri": "spotify:track:6MFTr9Id56RwjiUq5CONhC",
+    "name": "Alone",
+    "artists": "Fyze",
+    "album": "Fading",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2730d1fcc43dd7b15eb7facfd73",
+    "duration_ms": 245624,
+    "artist_list": [
+     {
+      "id": "ar_fyze",
+      "name": "Fyze"
+     }
+    ]
+   },
+   {
+    "id": "4kLyPZvYQE2N1K2rFQ3e6a",
+    "uri": "spotify:track:4kLyPZvYQE2N1K2rFQ3e6a",
+    "name": "Waves",
+    "artists": "Max Cooper",
+    "album": "Emergence",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273a24eb1aa0c049e3ca5f0b162",
+    "duration_ms": 331000,
+    "artist_list": [
+     {
+      "id": "ar_max_cooper",
+      "name": "Max Cooper"
+     }
+    ]
+   },
+   {
+    "id": "4fQEbOabaTSC80INS7cD3Q",
+    "uri": "spotify:track:4fQEbOabaTSC80INS7cD3Q",
+    "name": "#4",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works Volume II",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738155dc4dae262f31d39d8296",
+    "duration_ms": 279666,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
+   },
+   {
+    "id": "4VxaUj96W2jw9UOtKHu51p",
+    "uri": "spotify:track:4VxaUj96W2jw9UOtKHu51p",
+    "name": "Goodbye",
+    "artists": "Apparat, Soap&Skin",
+    "album": "The Devil's Walk",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27376f2cb2ac2670e125a4670ca",
+    "duration_ms": 256786,
+    "artist_list": [
+     {
+      "id": "ar_apparat",
+      "name": "Apparat"
+     },
+     {
+      "id": "ar_soap_skin",
+      "name": "Soap&Skin"
+     }
+    ]
+   },
+   {
+    "id": "0YPuRrM2NwzdtuShUKkts6",
+    "uri": "spotify:track:0YPuRrM2NwzdtuShUKkts6",
+    "name": "G.O.A.T.",
+    "artists": "Polyphia",
+    "album": "New Levels New Devils",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737a799cc62e624fd6432779e3",
+    "duration_ms": 215998,
+    "artist_list": [
+     {
+      "id": "ar_polyphia",
+      "name": "Polyphia"
+     }
+    ]
+   },
+   {
+    "id": "4uJXr3G8CR8dkjmUKj7iKS",
+    "uri": "spotify:track:4uJXr3G8CR8dkjmUKj7iKS",
+    "name": "Moments Of Clarity",
+    "artists": "Eelke Kleijn",
+    "album": "Moments Of Clarity",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273c9d6472496b3af9079435dba",
+    "duration_ms": 265397,
+    "artist_list": [
+     {
+      "id": "ar_eelke_kleijn",
+      "name": "Eelke Kleijn"
+     }
+    ]
+   },
+   {
+    "id": "5VpMEN1kJMhBdCvtc2fE4k",
+    "uri": "spotify:track:5VpMEN1kJMhBdCvtc2fE4k",
+    "name": "Dancing People Are Never Wrong - Jan Blomqvist Remix Radio Edit",
+    "artists": "The Bianca Story",
+    "album": "Dancing People Are Never Wrong",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e61179a51c5ebc8f34472137",
+    "duration_ms": 216639,
+    "artist_list": [
+     {
+      "id": "ar_the_bianca_story",
+      "name": "The Bianca Story"
+     }
+    ]
+   },
+   {
+    "id": "6pMtdOSLOtTtd7fmtqeqGg",
+    "uri": "spotify:track:6pMtdOSLOtTtd7fmtqeqGg",
+    "name": "Once Upon the Sea of Blissful Awareness",
+    "artists": "Shpongle",
+    "album": "Tales of the Inexpressible",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27312c9a218e8fb0c9dd2c64145",
+    "duration_ms": 450866,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
+   },
+   {
+    "id": "6si9uxnluUHhZBOx9oe1J9",
+    "uri": "spotify:track:6si9uxnluUHhZBOx9oe1J9",
+    "name": "Norrland",
+    "artists": "Gidge",
+    "album": "Autumn Bells",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739c72445324a38f73ba0fbb4a",
+    "duration_ms": 484682,
+    "artist_list": [
+     {
+      "id": "ar_gidge",
+      "name": "Gidge"
+     }
+    ]
+   },
+   {
+    "id": "188s885TL0EgDz07BShopC",
+    "uri": "spotify:track:188s885TL0EgDz07BShopC",
+    "name": "The Queen Of All Everything",
+    "artists": "Ott",
+    "album": "Skylon",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273be9084d4ba29c6a5e69251c6",
+    "duration_ms": 472400,
+    "artist_list": [
+     {
+      "id": "ar_ott",
+      "name": "Ott"
+     }
+    ]
+   },
+   {
+    "id": "1TSqX33n0SFrgsjEbn0rg7",
+    "uri": "spotify:track:1TSqX33n0SFrgsjEbn0rg7",
+    "name": "#2",
+    "artists": "Nils Frahm",
+    "album": "All Melody",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273d1474ac08537f5d9655552f2",
+    "duration_ms": 580016,
+    "artist_list": [
+     {
+      "id": "ar_nils_frahm",
+      "name": "Nils Frahm"
+     }
+    ]
+   },
+   {
+    "id": "3VbrfHyBiVjJxBSCMnjDhG",
+    "uri": "spotify:track:3VbrfHyBiVjJxBSCMnjDhG",
+    "name": "Komorebi",
+    "artists": "Catching Flies",
+    "album": "Silver Linings",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273078114e4b7451c51dec7049e",
+    "duration_ms": 230341,
+    "artist_list": [
+     {
+      "id": "ar_catching_flies",
+      "name": "Catching Flies"
+     }
+    ]
+   },
+   {
+    "id": "3xVTbxVNTcy3P0eBXlAIUh",
+    "uri": "spotify:track:3xVTbxVNTcy3P0eBXlAIUh",
+    "name": "Lit",
+    "artists": "Kiasmos",
+    "album": "Kiasmos",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273bb0ea18476f664df4f9fd460",
+    "duration_ms": 384763,
+    "artist_list": [
+     {
+      "id": "ar_kiasmos",
+      "name": "Kiasmos"
+     }
+    ]
+   },
+   {
+    "id": "30u5328ERA8OFk3qrla5m2",
+    "uri": "spotify:track:30u5328ERA8OFk3qrla5m2",
+    "name": "Natural Cause",
+    "artists": "Emancipator",
+    "album": "Dusk to Dawn",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273683812adb2b4eb20fb688c9d",
+    "duration_ms": 315768,
+    "artist_list": [
+     {
+      "id": "ar_emancipator",
+      "name": "Emancipator"
+     }
+    ]
+   },
+   {
+    "id": "1ym6WoyPytqbXcKYcnktlS",
+    "uri": "spotify:track:1ym6WoyPytqbXcKYcnktlS",
+    "name": "Rainy Nights",
+    "artists": "Azaleh",
+    "album": "Rainy Nights",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734df0b94280b7565961e73cdd",
+    "duration_ms": 226285,
+    "artist_list": [
+     {
+      "id": "ar_azaleh",
+      "name": "Azaleh"
+     }
+    ]
+   },
+   {
+    "id": "7dBbrLvzisvSSBPreD6nGS",
+    "uri": "spotify:track:7dBbrLvzisvSSBPreD6nGS",
+    "name": "Light Through The Veins",
+    "artists": "Jon Hopkins",
+    "album": "Insides",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273e021ba9b3cb2f941c7934c87",
+    "duration_ms": 558493,
+    "artist_list": [
+     {
+      "id": "ar_jon_hopkins",
+      "name": "Jon Hopkins"
+     }
+    ]
+   },
+   {
+    "id": "7KRQoq9GeWeCm0ZAXg5XMb",
+    "uri": "spotify:track:7KRQoq9GeWeCm0ZAXg5XMb",
+    "name": "Ageispolis",
+    "artists": "Aphex Twin",
+    "album": "Selected Ambient Works 85-92",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27338906032688bb13b135ce19a",
+    "duration_ms": 323186,
+    "artist_list": [
+     {
+      "id": "ar_aphex_twin",
+      "name": "Aphex Twin"
+     }
+    ]
+   },
+   {
+    "id": "35dwFJhWGxOujWfqupuSJc",
+    "uri": "spotify:track:35dwFJhWGxOujWfqupuSJc",
+    "name": "The Aquatic Garden of Extra-Celestial Delights",
+    "artists": "Shpongle",
+    "album": "Museum of Consciousness",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273c8b7a789f217ffe8b043644d",
+    "duration_ms": 710361,
+    "artist_list": [
+     {
+      "id": "ar_shpongle",
+      "name": "Shpongle"
+     }
+    ]
+   }
+  ],
+  "total": 1234
+ },
+ "savedAlbums": [
+  {
+   "id": "2av2ZSHlvD7rvLSsMvtYCG",
+   "name": "xx",
+   "artists": "The xx",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+   "total_tracks": 11
+  },
+  {
+   "id": "al_kpop_demon_hunters_soundtrack_from_the_netflix_film",
+   "name": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+   "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+   "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+   "total_tracks": 10
+  },
+  {
+   "id": "al_purpose_deluxe",
+   "name": "Purpose (Deluxe)",
+   "artists": "Justin Bieber",
+   "cover": "https://i.scdn.co/image/ab67616d0000b273f46b9d202509a8f7384b90de",
+   "total_tracks": 10
+  }
+ ],
+ "top": {
+  "tracks": [
+   {
+    "id": "3zkWCteF82vJwv0hRLba76",
+    "uri": "spotify:track:3zkWCteF82vJwv0hRLba76",
+    "name": "Stitches",
+    "artists": "Shawn Mendes",
+    "album": "Handwritten",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27375bd5306fb4669a15ee74eff",
+    "duration_ms": 206880,
+    "artist_list": [
+     {
+      "id": "ar_shawn_mendes",
+      "name": "Shawn Mendes"
+     }
+    ]
+   },
+   {
+    "id": "2gQPv5jvVPqU2a9HhMNO1v",
+    "uri": "spotify:track:2gQPv5jvVPqU2a9HhMNO1v",
+    "name": "Toxic",
+    "artists": "BoyWithUke",
+    "album": "Toxic",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27382a18aa0d3374049c6b78f6a",
+    "duration_ms": 168020,
+    "artist_list": [
+     {
+      "id": "ar_boywithuke",
+      "name": "BoyWithUke"
+     }
+    ]
+   },
+   {
+    "id": "5hx7w26Zi3zafMgvMTUqF6",
+    "uri": "spotify:track:5hx7w26Zi3zafMgvMTUqF6",
+    "name": "SNAP",
+    "artists": "Rosa Linn",
+    "album": "SNAP",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273927f72f3739f256fb01d1470",
+    "duration_ms": 179551,
+    "artist_list": [
+     {
+      "id": "ar_rosa_linn",
+      "name": "Rosa Linn"
+     }
+    ]
+   },
+   {
+    "id": "6vn8dvUpDC4YeaAh3BI25r",
+    "uri": "spotify:track:6vn8dvUpDC4YeaAh3BI25r",
+    "name": "I'm Still Standing",
+    "artists": "Taron Egerton",
+    "album": "Sing (Original Motion Picture Soundtrack Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27370120e0cfe4add0fb2eba28b",
+    "duration_ms": 187853,
+    "artist_list": [
+     {
+      "id": "ar_taron_egerton",
+      "name": "Taron Egerton"
+     }
+    ]
+   },
+   {
+    "id": "1whAXVGN8AdfrnoXNIXfJf",
+    "uri": "spotify:track:1whAXVGN8AdfrnoXNIXfJf",
+    "name": "Truth or Dare",
+    "artists": "Tyla",
+    "album": "TYLA",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273cc9e6203ed1182fe83b98985",
+    "duration_ms": 190392,
+    "artist_list": [
+     {
+      "id": "ar_tyla",
+      "name": "Tyla"
+     }
+    ]
+   },
+   {
+    "id": "161DnLWsx1i3u1JT05lzqU",
+    "uri": "spotify:track:161DnLWsx1i3u1JT05lzqU",
+    "name": "Talking to the Moon",
+    "artists": "Bruno Mars",
+    "album": "Doo-Wops & Hooligans",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2737039c1c841fc3dfa2ad8a0d8",
+    "duration_ms": 217866,
+    "artist_list": [
+     {
+      "id": "ar_bruno_mars",
+      "name": "Bruno Mars"
+     }
+    ]
+   },
+   {
+    "id": "7x5xYW5W42OGPAdHUyyguy",
+    "uri": "spotify:track:7x5xYW5W42OGPAdHUyyguy",
+    "name": "Locked Away (feat. Adam Levine)",
+    "artists": "R. City, Adam Levine",
+    "album": "What Dreams Are Made Of",
+    "cover": "https://i.scdn.co/image/ab67616d0000b27374b157379e7686df3d0850a4",
+    "duration_ms": 227475,
+    "artist_list": [
+     {
+      "id": "ar_r_city",
+      "name": "R. City"
+     },
+     {
+      "id": "ar_adam_levine",
+      "name": "Adam Levine"
+     }
+    ]
+   },
+   {
+    "id": "2UbVnbE5FH6008mAm6Mmgw",
+    "uri": "spotify:track:2UbVnbE5FH6008mAm6Mmgw",
+    "name": "Run",
+    "artists": "OneRepublic",
+    "album": "Run",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2738120d2b107af14b1bf67cd06",
+    "duration_ms": 169010,
+    "artist_list": [
+     {
+      "id": "ar_onerepublic",
+      "name": "OneRepublic"
+     }
+    ]
+   },
+   {
+    "id": "7JJmb5XwzOO8jgpou264Ml",
+    "uri": "spotify:track:7JJmb5XwzOO8jgpou264Ml",
+    "name": "There's Nothing Holdin' Me Back",
+    "artists": "Shawn Mendes",
+    "album": "Illuminate (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273ea3ef7697cfd5705b8f47521",
+    "duration_ms": 199440,
+    "artist_list": [
+     {
+      "id": "ar_shawn_mendes",
+      "name": "Shawn Mendes"
+     }
+    ]
+   },
+   {
+    "id": "2tpWsVSb9UEmDRxAl1zhX1",
+    "uri": "spotify:track:2tpWsVSb9UEmDRxAl1zhX1",
+    "name": "Counting Stars",
+    "artists": "OneRepublic",
+    "album": "Native",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2739e2f95ae77cf436017ada9cb",
+    "duration_ms": 257265,
+    "artist_list": [
+     {
+      "id": "ar_onerepublic",
+      "name": "OneRepublic"
+     }
+    ]
+   },
+   {
+    "id": "09CtPGIpYB4BrO8qb1RGsF",
+    "uri": "spotify:track:09CtPGIpYB4BrO8qb1RGsF",
+    "name": "Sorry",
+    "artists": "Justin Bieber",
+    "album": "Purpose (Deluxe)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b273f46b9d202509a8f7384b90de",
+    "duration_ms": 200786,
+    "artist_list": [
+     {
+      "id": "ar_justin_bieber",
+      "name": "Justin Bieber"
+     }
+    ]
+   },
+   {
+    "id": "0MHStU0muAIEMbwdnebYu2",
+    "uri": "spotify:track:0MHStU0muAIEMbwdnebYu2",
+    "name": "Takedown",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 182016,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "5sBDrrtLGbV64QJnEqfjer",
+    "uri": "spotify:track:5sBDrrtLGbV64QJnEqfjer",
+    "name": "What It Sounds Like",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 250268,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "3RXUgPNIbUgFxsDWuBQEt6",
+    "uri": "spotify:track:3RXUgPNIbUgFxsDWuBQEt6",
+    "name": "How It’s Done",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 176059,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   },
+   {
+    "id": "1CPZ5BxNNd0n0nF4Orb9JS",
+    "uri": "spotify:track:1CPZ5BxNNd0n0nF4Orb9JS",
+    "name": "Golden",
+    "artists": "HUNTR/X, EJAE, AUDREY NUNA, REI AMI, KPop Demon Hunters Cast",
+    "album": "KPop Demon Hunters (Soundtrack from the Netflix Film)",
+    "cover": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4",
+    "duration_ms": 194607,
+    "artist_list": [
+     {
+      "id": "ar_huntr_x",
+      "name": "HUNTR/X"
+     },
+     {
+      "id": "ar_ejae",
+      "name": "EJAE"
+     },
+     {
+      "id": "ar_audrey_nuna",
+      "name": "AUDREY NUNA"
+     },
+     {
+      "id": "ar_rei_ami",
+      "name": "REI AMI"
+     },
+     {
+      "id": "ar_kpop_demon_hunters_cast",
+      "name": "KPop Demon Hunters Cast"
+     }
+    ]
+   }
+  ],
+  "artists": [
+   {
+    "id": "3iOvXCl6edW5Um0fXEBRXy",
+    "name": "The xx",
+    "image": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e"
+   },
+   {
+    "id": "ar_shpongle",
+    "name": "Shpongle",
+    "image": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2"
+   },
+   {
+    "id": "ar_nils_frahm",
+    "name": "Nils Frahm",
+    "image": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3"
+   },
+   {
+    "id": "0cmWgDlu9CwTgxPhf403hb",
+    "name": "Bonobo",
+    "image": "https://i.scdn.co/image/ab67616d0000b273dd6e0f2e911f3d04f576aba9"
+   },
+   {
+    "id": "ar_huntr_x",
+    "name": "HUNTR/X",
+    "image": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"
+   },
+   {
+    "id": "ar_ejae",
+    "name": "EJAE",
+    "image": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"
+   },
+   {
+    "id": "ar_audrey_nuna",
+    "name": "AUDREY NUNA",
+    "image": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"
+   },
+   {
+    "id": "ar_rei_ami",
+    "name": "REI AMI",
+    "image": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"
+   }
+  ]
+ },
+ "followed": [
+  {
+   "id": "3iOvXCl6edW5Um0fXEBRXy",
+   "name": "The xx",
+   "image": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e"
+  },
+  {
+   "id": "0cmWgDlu9CwTgxPhf403hb",
+   "name": "Bonobo",
+   "image": "https://i.scdn.co/image/ab67616d0000b273dd6e0f2e911f3d04f576aba9"
+  },
+  {
+   "id": "ar_shpongle",
+   "name": "Shpongle",
+   "image": "https://i.scdn.co/image/ab67616d0000b273e0f03f5fd443de7fe838dbb2"
+  },
+  {
+   "id": "ar_ejae",
+   "name": "EJAE",
+   "image": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"
+  },
+  {
+   "id": "ar_nils_frahm",
+   "name": "Nils Frahm",
+   "image": "https://i.scdn.co/image/ab67616d0000b27344beff2f0733508e7284acb3"
+  },
+  {
+   "id": "ar_rei_ami",
+   "name": "REI AMI",
+   "image": "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"
+  }
+ ],
+ "artists": {
+  "3iOvXCl6edW5Um0fXEBRXy": {
+   "artist": {
+    "id": "3iOvXCl6edW5Um0fXEBRXy",
+    "name": "The xx",
+    "image": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e"
+   },
+   "albums": [
+    {
+     "id": "al_i_see_you",
+     "name": "I See You",
+     "cover": "https://i.scdn.co/image/ab67616d0000b273fa132d6237850ac3f29e3af3",
+     "year": "2017",
+     "kind": "album"
+    },
+    {
+     "id": "al_on_hold",
+     "name": "On Hold",
+     "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+     "year": "2016",
+     "kind": "single"
+    },
+    {
+     "id": "al_coexist",
+     "name": "Coexist",
+     "cover": "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41",
+     "year": "2012",
+     "kind": "album"
+    },
+    {
+     "id": "al_angels",
+     "name": "Angels",
+     "cover": "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a",
+     "year": "2012",
+     "kind": "single"
+    },
+    {
+     "id": "al_fiction_ep",
+     "name": "Fiction EP",
+     "cover": "https://i.scdn.co/image/ab67616d0000b2735998bc5e570f7cec5fc2cb95",
+     "year": "2010",
+     "kind": "single"
+    },
+    {
+     "id": "2av2ZSHlvD7rvLSsMvtYCG",
+     "name": "xx",
+     "cover": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+     "year": "2009",
+     "kind": "album"
+    }
+   ]
+  }
+ },
+ "mixInfo": {
+  "37i9dQZF1E4yLltmVk3nyb": {
+   "name": "Bonobo Radio",
+   "cover": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/radio/artist/0cmWgDlu9CwTgxPhf403hb/en"
+  },
+  "37i9dQZF1EYkqdzj48dyYq": {
+   "name": "Spotify mix",
+   "cover": null
+  }
  }
 }
