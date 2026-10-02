@@ -309,6 +309,7 @@
     list_devices: () =>
       state.devices.map((d) => ({ ...clone(d), is_active: state.active && d.id === state.deviceId })),
 
+    app_log: () => null,
     play_on_device: ({ deviceId, uris }) => {
       useDevice(deviceId);
       const tracks = (uris || []).map((u) => byUri.get(u)).filter(Boolean).map(clone);

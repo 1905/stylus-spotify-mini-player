@@ -386,6 +386,12 @@ svg {
   opacity: 1;
 }
 
+/* what plays next is always named; cover-wide, so neighbours never overlap */
+.cover[data-role="next"] figcaption {
+  width: 100%;
+  opacity: 1;
+}
+
 .cover[data-role="now"] figcaption {
   display: none;
 }

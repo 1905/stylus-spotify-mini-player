@@ -33,6 +33,8 @@ librespot-connect = "0.8.0"
 librespot-protocol = "0.8.0"
 # OS media keys + Now Playing (MPRemoteCommandCenter / MPNowPlayingInfoCenter on macOS)
 souvlaki = "0.8.3"
+# the app log file (applog.rs); already in the tree via librespot
+log = "0.4"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

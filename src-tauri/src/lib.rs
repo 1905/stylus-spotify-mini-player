@@ -1,3 +1,4 @@
+mod applog;
 mod auth;
 mod cache;
 mod media;
@@ -9,6 +10,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    applog::init();
     let engine = player::Engine::new(Arc::new(player::FileStore));
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -23,6 +25,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            applog::app_log,
             auth::auth_status,
             auth::login,
             player::engine_status,

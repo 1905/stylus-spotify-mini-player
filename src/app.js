@@ -66,6 +66,8 @@ const state = {
 // ---------- errors ----------
 
 const isCode = (e, code) => String(e).startsWith(code);
+/** A line in the app log file (<app dir>/logs/the-run.log). Never throws. */
+const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
 const reason = (e) => String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
 
 // ---------- toast ----------
@@ -548,8 +550,7 @@ function renderNow() {
   if (t) {
     title.classList.remove("is-connecting");
     title.textContent = t.name;
-    title.title = t.name;
-    setNowArtist(playPending() ? STARTING : artistLinks(t));
+    setNowArtist(artistLinks(t));
     setText("nowAlbum", t.album);
     setText("emptyState", "");
     return;
@@ -570,9 +571,8 @@ function renderNow() {
     line = "Your Mac, phone, or speaker — then press play.";
   }
   title.textContent = head;
-  title.title = "";
   title.classList.toggle("is-connecting", !state.loaded && !gaveUp(failures));
-  setNowArtist(playPending() ? STARTING : "");
+  setNowArtist("");
   setText("nowAlbum", "");
   setText("emptyState", line);
 }
@@ -848,12 +848,14 @@ async function playSource(deviceId, src) {
  */
 async function startPlay(src, { kind, origin = null, row = null, refused = null, members = null } = {}) {
   const token = startPending(kind, src.trackUri || null, row);
+  applog("info", `play ${kind}: ${JSON.stringify({ ...src, uris: src.uris && src.uris.length })} on ${state.device && state.device.name}`);
   let handled = false;
   const sent = await changeTrack(async (id) => {
     const deviceId = await needDevice(id);
     try {
       await playSource(deviceId, src);
     } catch (e) {
+      applog("warn", `play ${kind} failed: ${e}`);
       if (!(refused && refused(e))) throw e;
       handled = true; // withDevice would retry it on another device
     }
@@ -865,10 +867,9 @@ async function startPlay(src, { kind, origin = null, row = null, refused = null,
   return ok;
 }
 
-// ---------- pending play: spinner, "Starting…", the clicked row, an 8s timeout ----------
+// ---------- pending play: spinner, the clicked row, an 8s timeout ----------
 
 const pending = createPending();
-const STARTING = "Starting…";
 let pendingTimer = null;
 let pendingRow = null; // the clicked row, dimmed with a small spinner
 
@@ -883,6 +884,7 @@ function startPending(kind, trackUri, row = null, needPlaying = true) {
   clearTimeout(pendingTimer);
   pendingTimer = setTimeout(() => {
     if (!pending.timeout(token)) return;
+    applog("warn", `play ${kind} not confirmed after ${PENDING_MS}ms: want ${trackUri}, now ${state.now && state.now.uri}, playing ${state.isPlaying}`);
     if (kind !== "resume") toast("Spotify is slow to respond");
     renderPending();
   }, PENDING_MS);
@@ -1375,10 +1377,10 @@ function renderDeviceList() {
   $("deviceList").innerHTML = list
     .map((d, i) => {
       const active = cur ? d.id === cur : d.is_active;
-      const tip = d.is_restricted ? "Spotify doesn't allow remote control of this device" : d.name;
+      const tip = d.is_restricted ? "Spotify doesn't allow remote control of this device" : "";
       return (
         `<button class="device-row${active ? " is-active" : ""}" type="button" role="option" data-i="${i}" data-device="${esc(d.id)}"` +
-        ` aria-selected="${active}" title="${esc(tip)}"${d.is_restricted ? ' aria-disabled="true"' : ""} tabindex="-1">` +
+        ` aria-selected="${active}"${tip ? ` title="${esc(tip)}"` : ""}${d.is_restricted ? ' aria-disabled="true"' : ""} tabindex="-1">` +
         `<span class="device-row-dot"></span><span class="device-row-name">${esc(d.name)}</span>` +
         `<span class="device-row-type">${esc(d.type || "")}</span></button>`
       );
@@ -1757,9 +1759,9 @@ const QUEUE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2
 function trackRow(t, i, { num, art }) {
   const local = isLocalFile(t.uri);
   const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}${local ? " is-local" : ""}`;
-  const tip = local ? `${t.name} (a local file: play it in Spotify)` : t.name;
+  const tip = local ? "A local file: play it in Spotify" : "";
   return (
-    `<div class="row row-track${kind}" data-i="${i}" title="${esc(tip)}">` +
+    `<div class="row row-track${kind}" data-i="${i}"${tip ? ` title="${esc(tip)}"` : ""}>` +
     (num ? `<span class="row-num">${i + 1}</span>` : "") +
     (art ? `<span class="art row-art">${artHtml(t.cover, t.name)}</span>` : "") +
     `<span class="row-text"><button class="row-title row-play" type="button"${local ? " disabled" : ""}>${esc(t.name)}</button>` +
@@ -1790,7 +1792,7 @@ function onTrackClick(e, tracks, play) {
 /** A cover tile for a shelf or the artist page; round = an artist. sub is HTML. */
 function tile(item, i, { round = false, sub = "", attrs = "" } = {}) {
   return (
-    `<button class="album${round ? " is-artist" : ""}" type="button" data-i="${i}" title="${esc(item.name)}"${attrs}>` +
+    `<button class="album${round ? " is-artist" : ""}" type="button" data-i="${i}"${attrs}>` +
     `<span class="art">${artHtml(item.cover, item.name)}</span>` +
     `<span class="album-name">${esc(item.name)}</span>` +
     (sub ? `<span class="album-sub">${sub}</span>` : "") +
@@ -2290,7 +2292,7 @@ function renderPlaylists() {
   $("libList").innerHTML = playlists
     .map(
       (p, i) =>
-        `<button class="row row-playlist" type="button" data-id="${esc(p.id)}" data-i="${i}" title="${esc(p.name)}">` +
+        `<button class="row row-playlist" type="button" data-id="${esc(p.id)}" data-i="${i}">` +
         `<span class="art row-art">${artHtml(pickImage(p.images), p.name)}</span>` +
         `<span class="row-text"><span class="row-title">${esc(p.name)}</span>` +
         `<span class="row-sub">${plural((p.tracks && p.tracks.total) || 0, "track", "tracks")}</span></span></button>`,
@@ -2343,7 +2345,6 @@ async function openDetail(src, push = true) {
   cover.classList.toggle("is-liked", src.kind === "liked");
   cover.innerHTML = src.kind === "liked" ? LIKED_ART : artHtml(src.cover, src.name);
   $("detailName").textContent = src.name;
-  $("detailName").title = src.name;
   setText("detailSub", src.sub);
   setText("detailNote", src.kind === "mix" ? MIX_NOTE : "");
   $("detailPlay").hidden = src.kind === "artist";
@@ -2477,7 +2478,6 @@ async function loadArtist(src, gen) {
     src.cover = info.image || src.cover;
     $("detailCover").innerHTML = artHtml(src.cover, src.name);
     $("detailName").textContent = src.name;
-    $("detailName").title = src.name;
   }
   detailAlbums = (albums || []).filter((a) => a && a.id);
   detailTracks = [];
@@ -2735,7 +2735,6 @@ function renderPage() {
   setText("pageKicker", search ? "Search results for" : page.kind === "topArtists" ? "Your top" : "Your library");
   const title = search ? `“${page.query}”` : SHELVES[page.kind].title;
   $("pageTitle").textContent = title;
-  $("pageTitle").title = title;
   $("pageTabs").hidden = !search;
   for (const b of $("pageTabs").querySelectorAll("[data-tab]")) {
     const on = b.dataset.tab === page.tab;
