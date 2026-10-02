@@ -7,6 +7,7 @@ mod media;
 mod player;
 mod settings;
 mod spotify;
+mod store;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -29,6 +30,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             applog::app_log,
+            store::store_all,
+            store::store_set,
             auth::auth_status,
             auth::login,
             player::engine_status,
