@@ -12,15 +12,30 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const CLIENT_ID: &str = "9b2bc32ee90c4ef6aa0a25ccc1b076c7";
 pub const REDIRECT_URI: &str = "http://127.0.0.1:1420/callback";
 const CALLBACK_ADDR: &str = "127.0.0.1:1420";
-/// Scopes requested at login. A stored grant missing any of them → "reconnect".
+/// Scopes requested at login: every standard Spotify scope, so a new feature
+/// never needs another login (user, 2026-10-02). Partner-only scopes are left
+/// out: Spotify rejects the whole login if an app asks for one.
+/// A stored grant missing any of them → "reconnect".
 const REQUIRED_SCOPES: &[&str] = &[
     "user-read-private",
     "user-read-email",
     "playlist-read-private",
     "playlist-read-collaborative",
+    "playlist-modify-private",
+    "playlist-modify-public",
     "user-read-playback-state",
     "user-modify-playback-state",
+    "user-read-currently-playing",
     "user-read-recently-played",
+    "user-read-playback-position",
+    "user-library-read",
+    "user-library-modify",
+    "user-top-read",
+    "user-follow-read",
+    "user-follow-modify",
+    "ugc-image-upload",
+    "app-remote-control",
+    "streaming",
 ];
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -428,16 +443,33 @@ mod tests {
     }
     use super::*;
 
-    const ALL: &str = "user-read-private user-read-email playlist-read-private playlist-read-collaborative user-read-playback-state user-modify-playback-state user-read-recently-played";
+    /// A grant holding exactly the scopes the app asks for.
+    fn all() -> String {
+        REQUIRED_SCOPES.join(" ")
+    }
+
+    #[test]
+    fn scopes_cover_every_standard_scope() {
+        assert_eq!(REQUIRED_SCOPES.len(), 19);
+        for s in ["playlist-modify-private", "user-follow-modify", "user-read-currently-playing", "ugc-image-upload"] {
+            assert!(REQUIRED_SCOPES.contains(&s), "missing {s}");
+        }
+    }
+
+    #[test]
+    fn scopes_missing_library_is_reconnect() {
+        let s = all().replace(" user-library-read", "");
+        assert!(!has_required_scopes(&s));
+    }
 
     #[test]
     fn scopes_all_present() {
-        assert!(has_required_scopes(ALL));
+        assert!(has_required_scopes(&all()));
     }
 
     #[test]
     fn scopes_missing_recently_played() {
-        let s = ALL.replace(" user-read-recently-played", "");
+        let s = all().replace(" user-read-recently-played", "");
         assert!(!has_required_scopes(&s));
     }
 
@@ -448,13 +480,13 @@ mod tests {
 
     #[test]
     fn scopes_extra_unknown() {
-        assert!(has_required_scopes(&format!("streaming {ALL} something-new")));
+        assert!(has_required_scopes(&format!("{} something-new", all())));
     }
 
     #[test]
     fn status_for_cases() {
-        let ok = Tokens { refresh_token: "r".into(), scope: ALL.into(), ..Default::default() };
-        let no_rt = Tokens { scope: ALL.into(), ..Default::default() };
+        let ok = Tokens { refresh_token: "r".into(), scope: all(), ..Default::default() };
+        let no_rt = Tokens { scope: all(), ..Default::default() };
         let old = Tokens { refresh_token: "r".into(), ..Default::default() };
         assert_eq!(status_for(None), "login");
         assert_eq!(status_for(Some(&no_rt)), "login");

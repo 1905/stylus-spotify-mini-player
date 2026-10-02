@@ -187,22 +187,133 @@ svg {
   gap: 4px;
 }
 
+/* ---------- device picker: the chip and its popover ---------- */
+
+.device-wrap {
+  position: relative;
+  min-width: 0;
+}
+
 .device {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding-right: 14px;
+  max-width: min(320px, 40vw);
+  height: 36px;
+  padding: 0 10px 0 14px;
+  border-radius: 999px;
   color: var(--fg-2);
   font-size: 13px;
   font-weight: 500;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
-.device-dot {
+.device:hover,
+.device[aria-expanded="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+}
+
+.device-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-caret {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+
+.device-dot,
+.device-row-dot {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--live);
   box-shadow: 0 0 0 3px rgb(30 215 96 / 0.16);
+}
+
+.device.is-none .device-dot {
+  background: var(--fg-3);
+  box-shadow: none;
+}
+
+.device-pop {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.07), transparent 160px),
+    rgb(var(--i));
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
+  animation: pop-in 160ms var(--ease) both;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 120ms ease;
+}
+
+.device-row:hover:not([aria-disabled="true"]) {
+  background: rgba(246, 244, 248, 0.07);
+}
+
+.device-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* only the active device shows its dot */
+.device-row:not(.is-active) .device-row-dot {
+  visibility: hidden;
+}
+
+.device-row[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.device-row-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-row-type {
+  color: var(--fg-3);
+  font-size: 12.5px;
+}
+
+.device-note {
+  padding: 10px 12px;
+  color: var(--fg-2);
+  font-size: 13.5px;
+  line-height: 19px;
+}
+
+.device-list:not([hidden]) + .device-note {
+  border-top: 1px solid var(--hair);
+  margin-top: 6px;
 }
 
 /* ---------- the run ---------- */
@@ -346,6 +457,21 @@ svg {
   font-weight: 500;
 }
 
+/* artist names: links to the artist page, in the now block and in track rows */
+.artist-link {
+  position: relative;
+  z-index: 1; /* above the row's play target */
+  border-radius: 3px;
+  text-decoration: underline transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 120ms ease, color 120ms ease;
+}
+
+.artist-link:hover {
+  color: var(--fg);
+  text-decoration-color: currentColor;
+}
+
 .now-album {
   margin-top: 2px;
   color: var(--fg-2);
@@ -435,8 +561,9 @@ svg {
 
 .controls {
   display: flex;
+  flex-wrap: wrap; /* very narrow windows: heart and volume drop under the transport */
   align-items: center;
-  gap: 10px;
+  gap: 4px 10px;
   margin-top: 12px;
   margin-left: -10px; /* the prev icon, not its hit area, lines up with the column */
 }
@@ -489,6 +616,89 @@ svg {
 
 .ctl:disabled {
   opacity: 0.3;
+}
+
+/* shuffle, repeat, heart: off = faint, on = full colour + a dot under the icon */
+.ctl-toggle {
+  position: relative;
+  color: var(--fg-3);
+}
+
+.ctl-toggle.is-on {
+  color: var(--fg);
+}
+
+.ctl-toggle.is-on::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ctl-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* repeat this song: a "1" badge on the loop */
+#repeatBtn[data-mode="track"]::before {
+  content: "1";
+  position: absolute;
+  top: 9px;
+  right: 7px;
+  min-width: 11px;
+  height: 11px;
+  border-radius: 6px;
+  background: var(--fg);
+  color: var(--ink);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+}
+
+#heartBtn.is-on .heart {
+  fill: currentColor;
+}
+
+/* heart and volume sit at the right end of the control row */
+.controls-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: -10px; /* the icon, not its hit area, lines up with the scrub's end */
+}
+
+.volume {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.volume .i-mute,
+.volume.is-muted .i-vol {
+  display: none;
+}
+
+.volume.is-muted .i-mute {
+  display: block;
+}
+
+.vol-slider {
+  width: 112px;
+  margin-right: 10px;
+  touch-action: none; /* a drag moves the volume, not the page */
+}
+
+.vol-slider:hover .scrub-fill::after,
+.vol-slider:focus-visible .scrub-fill::after {
+  transform: scale(1);
 }
 
 [data-mode="idle"] .transport,
@@ -719,6 +929,7 @@ svg {
 
 /* rows: playlists, tracks, songs */
 .row {
+  position: relative;
   display: grid;
   align-items: center;
   gap: 14px;
@@ -734,18 +945,73 @@ svg {
 }
 
 /* local files: listed, but Spotify can't start them from here */
-.row:disabled {
+.row.is-local {
   opacity: 0.4;
-  cursor: default;
 }
 
-.row:disabled:hover {
+.row.is-local:hover {
   background: none;
 }
 
 .row:focus-visible,
 .album:focus-visible {
   outline-offset: -2px;
+}
+
+/* a track row plays from its title button, stretched over the whole row; links and "+" sit above it */
+.row-play {
+  text-align: left;
+}
+
+.row-play::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+
+.row-play:focus-visible {
+  outline: none;
+}
+
+.row:has(.row-play:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: -2px;
+}
+
+.row-queue {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-right: -6px;
+  border-radius: 50%;
+  color: var(--fg-2);
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.row-queue svg {
+  width: 18px;
+  height: 18px;
+}
+
+.row:hover .row-queue,
+.row-queue:focus-visible {
+  opacity: 1;
+}
+
+.row-queue:hover {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.1);
+}
+
+@media (hover: none) {
+  .row-queue {
+    opacity: 1;
+  }
 }
 
 .row-playlist {
@@ -756,18 +1022,23 @@ svg {
   width: 56px;
 }
 
+/* the last column is the "+" (an empty cell for local files) */
 .row-track {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto 24px;
   padding-top: 6px;
   padding-bottom: 6px;
 }
 
+.row-track.has-art {
+  grid-template-columns: 40px minmax(0, 1fr) auto 24px;
+}
+
 .row-track.has-num {
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto 24px;
 }
 
 .row-track.has-num.has-art {
-  grid-template-columns: 22px 40px minmax(0, 1fr) auto;
+  grid-template-columns: 22px 40px minmax(0, 1fr) auto 24px;
 }
 
 /* album rows have no cover: keep the row height of a covered row */
@@ -786,12 +1057,14 @@ svg {
 .row-title,
 .row-sub {
   display: block;
-  overflow: hidden;
+  /* clip, not hidden: a focused artist link past the ellipsis must not scroll the line sideways */
+  overflow: clip;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .row-title {
+  width: 100%;
   font-size: 15px;
   line-height: 20px;
   font-weight: 500;
@@ -827,6 +1100,37 @@ svg {
   width: 132px;
   border-radius: 6px;
   box-shadow: 0 24px 50px -24px rgb(0 0 0 / 0.7);
+}
+
+.detail-cover.is-round {
+  border-radius: 50%;
+}
+
+/* Liked Songs: a heart tile, in the list row and the detail head */
+.liked-art,
+.detail-cover.is-liked {
+  display: grid;
+  place-items: center;
+  color: var(--fg);
+  background: linear-gradient(135deg, rgb(var(--v) / 0.9), rgb(var(--v) / 0.35));
+}
+
+.liked-art .liked-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.detail-cover.is-liked .liked-icon {
+  width: 52px;
+  height: 52px;
+}
+
+/* the cap note under Liked Songs, the "no track list" line under a mix */
+.detail-note {
+  margin: -10px 12px 10px;
+  color: var(--fg-2);
+  font-size: 13.5px;
+  line-height: 19px;
 }
 
 .detail-meta {
@@ -918,7 +1222,7 @@ svg {
 
 /* compact song rows so 10 songs and the albums fit at 900px tall */
 .palette .row-track {
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto 24px;
   padding-top: 4px;
   padding-bottom: 4px;
 }
@@ -943,11 +1247,55 @@ svg {
   font-weight: 600;
 }
 
+/* Library level 1: Liked Songs, Your top, Playlists, Albums, Following, Spotify mixes */
+#libLevel1 .group {
+  margin-top: 14px;
+}
+
+.group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 4px 0 0;
+}
+
+.tab {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.1);
+}
+
+#topArtists + #topTracks {
+  margin-top: 6px;
+}
+
 .albums {
   display: flex;
   gap: 14px;
   padding: 4px 12px 6px;
   overflow-x: auto;
+  /* a soft right edge says the shelf scrolls */
+  mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
   scrollbar-width: thin;
   scrollbar-color: var(--hair) transparent;
 }
@@ -990,12 +1338,48 @@ svg {
   line-height: 16px;
 }
 
+/* artists: round tiles, names centred */
+.album.is-artist {
+  text-align: center;
+}
+
+.album.is-artist .art {
+  border-radius: 50%;
+}
+
+/* the artist page: albums and singles in a grid, not a shelf */
+.albums.is-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 16px 14px;
+  overflow: visible;
+}
+
+.albums.is-grid .album,
+.albums.is-grid .album .art {
+  width: auto;
+}
+
+.album-kind {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--hair);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 15px;
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
 }
 
 @keyframes slide-in {
   from { transform: translateX(-100%); }
+}
+
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
 }
 
 @keyframes drop-in {
@@ -1064,8 +1448,42 @@ svg {
     height: 52px;
   }
 
+  .controls {
+    gap: 4px;
+  }
+
+  /* the speaker opens the slider in a small popover above it */
+  .vol-pop {
+    position: absolute;
+    z-index: 4;
+    /* beside the speaker button, in the control row: above it would cover the seek bar */
+    right: calc(100% + 6px);
+    top: 50%;
+    margin-top: -20px;
+    padding: 8px 14px;
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    background: rgb(var(--i));
+    box-shadow: 0 20px 50px -16px rgb(0 0 0 / 0.6);
+    animation: pop-in 160ms var(--ease) both;
+  }
+
+  .volume:not(.is-open) .vol-pop {
+    display: none;
+  }
+
+  .vol-slider {
+    width: 140px;
+    margin-right: 0;
+  }
+
   .toast {
     bottom: 112px;
+  }
+
+  .album.is-artist,
+  .album.is-artist .art {
+    width: 72px;
   }
 }
 
@@ -1078,4 +1496,15 @@ svg {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* the ring of a link inside a clipped line: draw it inside the link */
+.row-sub .artist-link:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Liked Songs can be 1000 rows: skip layout and paint for the ones off screen */
+.row-track {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
 }
