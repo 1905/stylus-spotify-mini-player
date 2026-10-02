@@ -5,6 +5,9 @@ import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
+import { CONNECTING, NEEDS_LOGIN, isTheRun, thisMacRow } from "./lib/engine.js";
+import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
+import { ERROR_POLL_MS, pollDelay } from "./lib/poll.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -19,8 +22,6 @@ function invoke(cmd, args) {
 }
 const $ = (id) => document.getElementById(id);
 
-const POLL_MS = 1000;
-const ERROR_POLL_MS = 4000;
 const QUEUE_EVERY = 10; // ticks
 const HOLD_MS = 1500; // keep a local seek position this long against polls that may lag
 const PLAY_LAG_MS = 500; // Spotify can report the old play state this long after a command lands
@@ -94,11 +95,14 @@ const LOGIN_COPY = {
 };
 
 function showLogin(kind) {
+  const loggedOut = !$("stage").hidden; // leaving a session (not the first screen at launch)
   stopPolling();
   authSession++;
   playlistsLoading = false; // a load from the old session will never finish
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
-  thisMacStarting = false;
+  thisMacBusy = "";
+  engine = null; // the next stage reads it fresh: the player re-checks the account on restart
+  clearMedia();
   clearTimeout(searchTimer); // a debounced search must not start in the next session
   clearTimeout(seekTimer); // nor a debounced seek
   clearTimeout(volTimer); // nor a debounced volume change
@@ -145,7 +149,10 @@ async function onLogin() {
   try {
     await invoke("login");
     const status = await invoke("auth_status");
-    if (status === "ok") return startStage();
+    if (status === "ok") {
+      restartEngine(); // maybe another account now: the player re-checks it
+      return startStage();
+    }
     showLogin(status);
   } catch (e) {
     $("loginError").textContent = `Couldn't connect: ${reason(e)}`;
@@ -210,7 +217,6 @@ async function poll() {
   if (!polling) return;
   const epoch = pollEpoch;
   inFlight = true;
-  let delay = POLL_MS;
   try {
     await refresh(epoch);
     if (epoch !== pollEpoch) return;
@@ -221,11 +227,12 @@ async function poll() {
     if (isCode(e, "AUTH_EXPIRED")) return expire();
     if (!state.error && state.loaded) toast("Can't reach Spotify. Retrying.");
     state.error = reason(e);
-    delay = ERROR_POLL_MS;
     renderNow();
   }
   inFlight = false;
   if (!polling) return;
+  // hidden: 3s while something plays (Now Playing, media keys), 10s when idle; visible again restarts
+  let delay = pollDelay({ hidden: document.hidden, mode: state.mode, error: Boolean(state.error) });
   if (pollAgain) {
     pollAgain = false;
     delay = 0;
@@ -539,6 +546,7 @@ function renderChrome() {
   renderVolume();
   renderProgress();
   startFrames();
+  syncMedia();
 }
 
 const REPEAT_LABEL = { off: "Repeat", context: "Repeat: on", track: "Repeat: this song" };
@@ -954,6 +962,9 @@ async function toggleSaved() {
 let devicesOpen = false;
 let devicesGen = 0; // the latest list_devices request: an older answer is dropped
 let devicesNote = ""; // loading or error line while there is no list to show
+let devicesTimer = null; // refreshes the open menu while "The Run" isn't listed
+const DEVICES_REFRESH_MS = 3000;
+let runMissingSince = 0; // menu open, engine ready, The Run not listed: since when (0 = not missing)
 
 function toggleDevices() {
   if (devicesOpen) closeDevices(true);
@@ -968,19 +979,39 @@ function openDevices() {
   renderDeviceList();
   focusDevice(0);
   refreshDevices();
+  clearInterval(devicesTimer);
+  devicesTimer = setInterval(() => {
+    // The Run may be listed any second now; one request at a time, so a slow answer isn't
+    // discarded by the next tick's newer generation
+    if (!devicesBusy && !thisMacBusy && !(state.devices || []).some(isTheRun)) refreshDevices();
+  }, DEVICES_REFRESH_MS);
 }
 
 function closeDevices(refocus = false) {
   if (!devicesOpen) return;
   devicesOpen = false;
+  clearInterval(devicesTimer);
+  devicesTimer = null;
+  runMissingSince = 0;
   devicesGen++; // a list still in flight would re-render a closed popover
   $("devicePop").hidden = true;
   $("deviceBtn").setAttribute("aria-expanded", "false");
   if (refocus) $("deviceBtn").focus();
 }
 
+let devicesBusy = false;
+
 async function refreshDevices() {
   const gen = ++devicesGen;
+  devicesBusy = true;
+  try {
+    await loadDeviceList(gen);
+  } finally {
+    devicesBusy = false;
+  }
+}
+
+async function loadDeviceList(gen) {
   if (!state.devices) devicesNote = "Looking for devices…";
   renderDeviceList();
   let list;
@@ -1017,7 +1048,7 @@ function renderDeviceList() {
         `<span class="device-row-type">${esc(d.type || "")}</span></button>`
       );
     })
-    .join("") + thisMacRow(list);
+    .join("") + renderThisMacRow(list);
   $("deviceList").hidden = !$("deviceList").children.length;
   const note = $("devicePop").querySelector(".device-note");
   note.textContent = devicesNote || (state.devices && !list.length ? "Open Spotify on a phone or speaker, or play on this Mac." : "");
@@ -1025,47 +1056,173 @@ function renderDeviceList() {
   if (focused) $("deviceList").querySelector(`[data-device="${CSS.escape(focused)}"]`)?.focus();
 }
 
-/** No computer in the list: offer this Mac, which starts the Spotify app in the background. */
-function thisMacRow(list) {
-  if (!state.devices || list.some((d) => /computer/i.test(d.type || ""))) return "";
+/** The in-app player ("The Run") isn't listed yet: offer this Mac with the engine's state. */
+function renderThisMacRow(list) {
+  const missing = devicesOpen && engine && engine.state === "ready" && state.devices && !list.some(isTheRun);
+  if (!missing) runMissingSince = 0;
+  else if (!runMissingSince) runMissingSince = performance.now();
+  const missingMs = runMissingSince ? performance.now() - runMissingSince : 0;
+  const row = thisMacRow(engine, state.devices && list, thisMacBusy, missingMs);
+  if (!row) return "";
   return (
-    `<button class="device-row" type="button" role="option" data-this-mac="1" tabindex="-1" title="Starts Spotify in the background on this Mac">` +
+    `<button class="device-row" type="button" role="option" data-this-mac="1" tabindex="-1" title="${esc(row.title)}">` +
     `<span class="device-row-dot"></span><span class="device-row-name">This Mac</span>` +
-    `<span class="device-row-type">${thisMacStarting ? "Starting…" : "Opens Spotify"}</span></button>`
+    `<span class="device-row-type">${esc(row.type)}</span></button>`
   );
 }
 
-let thisMacStarting = false;
-const THIS_MAC_WAIT_MS = 20000; // Spotify needs a few seconds after launch to register as a device
+// ---------- the in-app player ("The Run" on this Mac) ----------
 
-/** Start Spotify on this Mac, wait for it to appear as a device, then move playback there. */
-async function playOnThisMac() {
-  if (thisMacStarting) return;
-  thisMacStarting = true;
+let engine = null; // the last engine_status / engine-status payload, null = unknown
+let thisMacBusy = ""; // a click on "This Mac" is working: "login" | "connecting" | ""
+const ENGINE_WAIT_MS = 20000; // for a starting/reconnecting player to be ready
+const THE_RUN_WAIT_MS = 20000; // for a ready player to show up in the device list
+const THE_RUN_POLL_MS = 1500;
+
+/** Tauri events; a no-op where there is no event API. Resolves to an unlisten function. */
+function listenEvent(name, fn) {
+  const ev = window.__TAURI__ && window.__TAURI__.event;
+  if (!ev || !ev.listen) return Promise.resolve(() => {});
+  return ev.listen(name, (e) => fn(e && e.payload)).catch(() => () => {});
+}
+
+function setEngine(st) {
+  if (!st || !st.state) return;
+  const wasReady = engine && engine.state === "ready";
+  engine = st;
+  if (!devicesOpen) return;
   renderDeviceList();
-  const sess = authSession;
+  // ready now: The Run registers with Spotify, so the open list should show it
+  if (st.state === "ready" && !wasReady) refreshDevices();
+}
+
+async function refreshEngine() {
   try {
-    await invoke("launch_local_spotify");
-    const known = new Set((state.devices || []).map((d) => d.id));
-    const until = performance.now() + THIS_MAC_WAIT_MS;
-    while (performance.now() < until) {
-      await new Promise((r) => setTimeout(r, 1500));
-      if (sess !== authSession) return;
-      const list = await fetchOr("list_devices");
-      if (!list) continue;
-      setDevices(list);
-      const mac = list.find((d) => /computer/i.test(d.type || "") && !known.has(d.id));
-      if (mac) return void pickDevice(mac);
-    }
-    toast("Spotify on this Mac didn't show up. Open it once and try again.");
+    setEngine(await invoke("engine_status"));
   } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) return void expire();
-    toast(isCode(e, "SPOTIFY_NOT_INSTALLED") ? "Install Spotify for Mac to play on this computer" : `Couldn't start Spotify: ${reason(e)}`);
-  } finally {
-    if (sess === authSession) {
-      thisMacStarting = false;
-      if (devicesOpen) renderDeviceList();
+    setEngine({ state: "failed", reason: reason(e) });
+  }
+}
+
+/** Logged out or in: the player re-checks its account. Not session-tagged: it belongs to no session. */
+function restartEngine() {
+  window.__TAURI__.core.invoke("engine_restart").catch(() => {});
+}
+
+/**
+ * The engine state once it isn't starting/reconnecting, or null after ms. Subscribes to engine-status
+ * before it reads engine_status, so a change between the two can't be missed.
+ */
+function waitEngine(ms) {
+  return new Promise((resolve) => {
+    let over = false;
+    let unlisten = null;
+    const finish = (st) => {
+      if (over) return;
+      over = true;
+      clearTimeout(timer);
+      if (unlisten) unlisten();
+      resolve(st);
+    };
+    const settle = (st) => st && st.state && !CONNECTING.has(st.state) && finish(st);
+    const timer = setTimeout(() => finish(null), ms);
+    listenEvent("engine-status", settle).then((u) => {
+      if (over) return u();
+      unlisten = u;
+      invoke("engine_status").then(
+        (st) => (setEngine(st), settle(st)),
+        (e) => finish({ state: "failed", reason: reason(e) }),
+      );
+    });
+  });
+}
+
+/** Poll the device list until "The Run" shows up; null after ms. */
+async function findTheRun(ms, sess) {
+  const until = performance.now() + ms;
+  for (;;) {
+    const list = await fetchOr("list_devices");
+    if (sess !== authSession) return null;
+    if (list) {
+      setDevices(list);
+      const run = list.find(isTheRun);
+      if (run) return run;
     }
+    if (performance.now() + THE_RUN_POLL_MS > until) return null;
+    await new Promise((r) => setTimeout(r, THE_RUN_POLL_MS));
+    if (sess !== authSession) return null;
+  }
+}
+
+function setBusy(busy) {
+  thisMacBusy = busy;
+  if (devicesOpen) renderDeviceList();
+}
+
+/** Get the in-app player ready (logging it in if it must), wait for "The Run", then move playback there. */
+async function playOnThisMac() {
+  if (thisMacBusy) return;
+  const sess = authSession;
+  runMissingSince = 0; // a retry gets a fresh 20s before it says "not showing up" again
+  setBusy("connecting");
+  try {
+    const st = await waitEngine(ENGINE_WAIT_MS);
+    if (sess !== authSession) return;
+    if (!st) return void toast("This Mac is still connecting to Spotify. Try again in a moment.");
+    if (NEEDS_LOGIN.has(st.state)) {
+      setBusy("login");
+      await invoke("engine_login"); // resolved = logged in and ready (no event to wait for)
+      if (sess !== authSession) return;
+      setEngine({ ...st, state: "ready", reason: undefined });
+      setBusy("connecting");
+    } else if (st.state !== "ready") {
+      return void toast(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
+    }
+    const run = await findTheRun(THE_RUN_WAIT_MS, sess);
+    if (sess !== authSession) return;
+    if (run) return void pickDevice(run);
+    toast("This Mac didn't show up in Spotify. Try again in a moment.");
+  } catch (e) {
+    if (sess !== authSession) return;
+    if (isCode(e, "AUTH_EXPIRED")) return void expire();
+    if (isCode(e, "LOGIN_IN_PROGRESS")) return void toast("Finish the player login in your browser");
+    toast(`Couldn't log in the player on this Mac: ${reason(e)}`);
+  } finally {
+    if (sess === authSession) setBusy("");
+  }
+}
+
+// ---------- OS media controls: Now Playing + media keys ----------
+
+let lastMedia = null; // the payload Now Playing has, null = cleared
+let lastMediaAt = 0;
+
+/**
+ * Tell Now Playing about a track or play-state change, or a position jump; clear it when idle.
+ * force: a local seek, sent even when it moved less than the jump threshold. Never from frames.
+ */
+function syncMedia(force = false) {
+  const next = mediaPayload({ mode: state.mode, now: state.now, isPlaying: state.isPlaying, positionMs: progress() });
+  const t = performance.now();
+  if (!(force && next) && !mediaChanged(lastMedia, next, t - lastMediaAt)) return;
+  lastMedia = next;
+  lastMediaAt = t;
+  invoke(next ? "media_update" : "media_clear", next || undefined).catch(() => {});
+}
+
+function clearMedia() {
+  lastMedia = null;
+  window.__TAURI__.core.invoke("media_clear").catch(() => {});
+}
+
+/** A media key or Now Playing control: the same functions the buttons use, so their guards apply. */
+function onMediaCommand(cmd) {
+  if ($("stage").hidden) return;
+  const act = mediaAction(cmd, state.isPlaying);
+  if (act === "toggle") togglePlay();
+  else if (act === "next_track" || act === "previous_track") skip(act);
+  else if (act && act.seek !== undefined && state.now && canSeek()) {
+    seekTo(Math.min(act.seek, state.now.duration_ms || act.seek));
   }
 }
 
@@ -1186,6 +1343,7 @@ function showSeek(ms) {
 async function seekTo(ms, gen = trackGen) {
   if (gen !== trackGen || !state.now) return; // the track changed (or is unknown) since this seek was made
   showSeek(ms);
+  syncMedia(true); // Now Playing moves with the seek
   const positionMs = state.progressMs;
   await withDevice(() => (gen === trackGen ? invoke("seek", { positionMs }) : null));
   kick();
@@ -1909,6 +2067,7 @@ function startStage() {
   renderNow();
   renderChrome();
   startPolling();
+  refreshEngine();
 }
 
 async function boot() {
@@ -1978,12 +2137,13 @@ async function boot() {
   $("run").addEventListener("error", onImgError, true);
   // dev harness only: the `artist` scenario opens a page by id
   if (window.__mock) window.__openArtist = (id) => openDetail({ kind: "artist", id, name: "", cover: null, sub: "Artist" });
-  // a hidden window needs no 1s polling; come back with a fresh poll
   document.addEventListener("visibilitychange", () => {
     if ($("stage").hidden) return;
-    if (document.hidden) stopPolling();
-    else startPolling();
+    // hidden keeps polling, slower (pollDelay); visible again restarts with a fresh poll
+    if (!document.hidden) startPolling();
   });
+  listenEvent("engine-status", setEngine);
+  listenEvent("media-command", onMediaCommand);
 
   let status = "login";
   try {

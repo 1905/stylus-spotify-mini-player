@@ -22,6 +22,15 @@ sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 dirs = "5"
+# The in-app Connect speaker "The Run" (plans/2026-10-02-standalone). Not librespot-oauth:
+# its listener blocks with no deadline, so the player login reuses auth.rs (oauth_login).
+librespot-core = "0.8.0"
+librespot-playback = { version = "0.8.0", features = ["rodio-backend"] }
+librespot-connect = "0.8.0"
+# only for AuthenticationType: the session hands back its reusable login as raw fields
+librespot-protocol = "0.8.0"
+# OS media keys + Now Playing (MPRemoteCommandCenter / MPNowPlayingInfoCenter on macOS)
+souvlaki = "0.8.3"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
@@ -31,5 +40,11 @@ custom-protocol = ["tauri/custom-protocol"]
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
+# panic = "unwind" (default): librespot's audio output panics when no output device exists; abort would take the whole app down
 strip = true
+
+# librespot-core 0.8.0, vendored with 2 patches (re-apply when upgrading librespot):
+# 1. session.rs check_catalogue: no exit(1) on a non-Premium account (would kill the app)
+# 2. dealer/mod.rs: a failed dealer-URL/token fetch retries instead of ending the worker
+[patch.crates-io]
+librespot-core = { path = "vendor/librespot-core" }

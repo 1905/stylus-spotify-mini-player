@@ -10,8 +10,9 @@ use std::net::TcpListener;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CLIENT_ID: &str = "9b2bc32ee90c4ef6aa0a25ccc1b076c7";
-pub const REDIRECT_URI: &str = "http://127.0.0.1:1420/callback";
-const CALLBACK_ADDR: &str = "127.0.0.1:1420";
+/// The app login's redirect is `http://127.0.0.1:1420/callback`.
+const CALLBACK_PORT: u16 = 1420;
+const CALLBACK_PATH: &str = "/callback";
 /// Scopes requested at login: every standard Spotify scope, so a new feature
 /// never needs another login (user, 2026-10-02). Partner-only scopes are left
 /// out: Spotify rejects the whole login if an app asks for one.
@@ -50,8 +51,8 @@ pub struct Tokens {
 }
 
 #[derive(Debug, Deserialize)]
-struct TokenResponse {
-    access_token: String,
+pub(crate) struct TokenResponse {
+    pub(crate) access_token: String,
     #[serde(default)]
     refresh_token: Option<String>,
     expires_in: u64,
@@ -96,11 +97,7 @@ fn now() -> u64 {
 // ---- token persistence -----------------------------------------------------
 
 fn token_path() -> std::path::PathBuf {
-    let mut dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    dir.push("rust-spotify");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.push("tokens.json");
-    dir
+    app_dir().join("tokens.json")
 }
 
 pub fn load_tokens() -> Option<Tokens> {
@@ -110,7 +107,26 @@ pub fn load_tokens() -> Option<Tokens> {
 
 fn save_tokens(t: &Tokens) -> Result<(), String> {
     let json = serde_json::to_string_pretty(t).map_err(|e| e.to_string())?;
-    std::fs::write(token_path(), json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
+    write_private(&token_path(), &json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
+}
+
+/// The app's data folder (`~/Library/Application Support/rust-spotify`), created if missing.
+pub(crate) fn app_dir() -> std::path::PathBuf {
+    let mut dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    dir.push("rust-spotify");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Writes a secret file readable by this user only (0600), replacing it atomically.
+pub(crate) fn write_private(path: &std::path::Path, data: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = path.with_extension("tmp");
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    f.write_all(data.as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Moves tokens.json aside to tokens.json.invalid (overwriting) so the next
@@ -141,36 +157,16 @@ fn gen_state() -> String {
 // ---- the flow --------------------------------------------------------------
 
 /// Runs the full interactive login: opens the browser, waits for the callback,
-/// exchanges the code for tokens, and persists them. Blocking.
+/// exchanges the code for tokens, and persists them.
 #[tauri::command]
 pub async fn login() -> Result<(), String> {
-    let verifier = gen_verifier();
-    let state = gen_state();
-    let auth_url = format!(
-        "https://accounts.spotify.com/authorize?response_type=code&client_id={}&scope={}&redirect_uri={}&state={}&code_challenge_method=S256&code_challenge={}",
-        CLIENT_ID,
-        urlencode(&REQUIRED_SCOPES.join(" ")),
-        urlencode(REDIRECT_URI),
-        state,
-        challenge(&verifier),
-    );
-
-    // Start the loopback listener BEFORE opening the browser.
-    let listener = TcpListener::bind(CALLBACK_ADDR)
-        .map_err(|e| format!("cannot bind {CALLBACK_ADDR}: {e}. Is another instance running?"))?;
-
-    // Open the browser (does not block).
-    tauri_plugin_opener::open_url(&auth_url, None::<&str>)
-        .map_err(|e| format!("could not open browser: {e}"))?;
-
-    // Block on the one incoming request. Spawn to a blocking thread so we
-    // don't stall the async runtime.
-    let expected_state = state.clone();
-    let code = tokio::task::spawn_blocking(move || wait_for_code(listener, &expected_state, LOGIN_TIMEOUT))
-        .await
-        .map_err(|e| e.to_string())??;
-
-    let tokens = exchange_code(&code, &verifier).await?;
+    let tr = oauth_login(CLIENT_ID, CALLBACK_PORT, CALLBACK_PATH, REQUIRED_SCOPES, LOGIN_TIMEOUT).await?;
+    let tokens = Tokens {
+        expires_at: expires_at(&tr),
+        access_token: tr.access_token,
+        refresh_token: tr.refresh_token.unwrap_or_default(),
+        scope: tr.scope.unwrap_or_default(),
+    };
     // under the lock: a refresh still in flight must not overwrite or invalidate these
     let mut cached = TOKENS.lock().await;
     save_tokens(&tokens)?;
@@ -178,14 +174,73 @@ pub async fn login() -> Result<(), String> {
     Ok(())
 }
 
+/// The browser URL that starts a PKCE login.
+fn authorize_url(client_id: &str, scopes: &[&str], redirect_uri: &str, state: &str, verifier: &str) -> String {
+    format!(
+        "https://accounts.spotify.com/authorize?response_type=code&client_id={}&scope={}&redirect_uri={}&state={}&code_challenge_method=S256&code_challenge={}",
+        client_id,
+        urlencode(&scopes.join(" ")),
+        urlencode(redirect_uri),
+        state,
+        challenge(verifier),
+    )
+}
+
+/// One interactive Authorization Code + PKCE login for `client_id`: opens the browser,
+/// waits up to `timeout` for the redirect to `http://127.0.0.1:{port}{redirect_path}`, and
+/// exchanges the code. The app login and the player login (player.rs) both use it.
+/// A port in use → Err naming the port.
+pub(crate) async fn oauth_login(
+    client_id: &str,
+    port: u16,
+    redirect_path: &str,
+    scopes: &[&str],
+    timeout: std::time::Duration,
+) -> Result<TokenResponse, String> {
+    let redirect_uri = format!("http://127.0.0.1:{port}{redirect_path}");
+    let verifier = gen_verifier();
+    let state = gen_state();
+    let auth_url = authorize_url(client_id, scopes, &redirect_uri, &state, &verifier);
+
+    // Start the loopback listener BEFORE opening the browser.
+    let listener = TcpListener::bind(("127.0.0.1", port))
+        .map_err(|e| format!("cannot bind 127.0.0.1:{port}: {e}. Is another instance running?"))?;
+
+    // Open the browser (does not block).
+    tauri_plugin_opener::open_url(&auth_url, None::<&str>)
+        .map_err(|e| format!("could not open browser: {e}"))?;
+
+    // Block on the one incoming request. Spawn to a blocking thread so we
+    // don't stall the async runtime.
+    let path = redirect_path.to_string();
+    let code = tokio::task::spawn_blocking(move || wait_for_code(listener, &path, &state, timeout))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    token_request(&[
+        ("grant_type", "authorization_code"),
+        ("code", &code),
+        ("redirect_uri", &redirect_uri),
+        ("client_id", client_id),
+        ("code_verifier", &verifier),
+    ])
+    .await
+    .map_err(|(_, body)| format!("token exchange failed: {body}"))
+}
+
 const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Accepts one connection, parses the `code`/`state` from the GET line,
+/// Accepts connections until one hits `callback_path`, parses its `code`/`state`,
 /// writes a friendly HTML page back, and returns the code.
-/// Gives up after LOGIN_TIMEOUT, so a closed browser tab doesn't leave the app
+/// Gives up after `timeout`, so a closed browser tab doesn't leave the app
 /// waiting forever with the port held.
-fn wait_for_code(listener: TcpListener, expected_state: &str, timeout: std::time::Duration) -> Result<String, String> {
+fn wait_for_code(
+    listener: TcpListener,
+    callback_path: &str,
+    expected_state: &str,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
     let deadline = std::time::Instant::now() + timeout;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     loop {
@@ -210,7 +265,7 @@ fn wait_for_code(listener: TcpListener, expected_state: &str, timeout: std::time
 
         // First line: "GET /callback?code=...&state=... HTTP/1.1"
         let path = req.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("");
-        if !path.starts_with("/callback") {
+        if path.split('?').next() != Some(callback_path) {
             // Ignore favicon etc., keep listening.
             let _ = stream.write_all(http_page("Waiting…").as_bytes());
             continue;
@@ -271,24 +326,6 @@ async fn token_request(params: &[(&str, &str)]) -> Result<TokenResponse, (u16, S
 
 fn expires_at(tr: &TokenResponse) -> u64 {
     now() + tr.expires_in.saturating_sub(60)
-}
-
-async fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, String> {
-    let tr = token_request(&[
-        ("grant_type", "authorization_code"),
-        ("code", code),
-        ("redirect_uri", REDIRECT_URI),
-        ("client_id", CLIENT_ID),
-        ("code_verifier", verifier),
-    ])
-    .await
-    .map_err(|(_, body)| format!("token exchange failed: {body}"))?;
-    Ok(Tokens {
-        expires_at: expires_at(&tr),
-        access_token: tr.access_token,
-        refresh_token: tr.refresh_token.unwrap_or_default(),
-        scope: tr.scope.unwrap_or_default(),
-    })
 }
 
 /// One HTTP client for every Spotify call. Finite deadlines: a stalled request
@@ -420,7 +457,7 @@ mod tests {
     #[test]
     fn wait_for_code_times_out_without_a_callback() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let r = wait_for_code(l, "s", std::time::Duration::from_millis(200));
+        let r = wait_for_code(l, "/callback", "s", std::time::Duration::from_millis(200));
         assert!(r.unwrap_err().contains("no answer"));
     }
 
@@ -437,9 +474,37 @@ mod tests {
             let mut out = String::new();
             let _ = s.read_to_string(&mut out);
         });
-        let r = wait_for_code(l, "s", std::time::Duration::from_secs(5));
+        let r = wait_for_code(l, "/callback", "s", std::time::Duration::from_secs(5));
         client.join().unwrap();
         assert_eq!(r.unwrap(), "abc");
+    }
+
+    #[test]
+    fn wait_for_code_takes_only_its_own_path() {
+        use std::io::{Read, Write};
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            // the app's path and a lookalike are not the player's callback
+            for req in ["GET /callback?code=app&state=s", "GET /loginx?code=no&state=s", "GET /login?code=player&state=s"] {
+                let mut s = std::net::TcpStream::connect(addr).unwrap();
+                s.write_all(format!("{req} HTTP/1.1\r\n\r\n").as_bytes()).unwrap();
+                let mut out = String::new();
+                let _ = s.read_to_string(&mut out);
+            }
+        });
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(5));
+        client.join().unwrap();
+        assert_eq!(r.unwrap(), "player");
+    }
+
+    #[test]
+    fn authorize_url_carries_client_scopes_and_redirect() {
+        let u = authorize_url("cid", &["streaming", "user-read-email"], "http://127.0.0.1:5588/login", "st", "v");
+        assert!(u.contains("client_id=cid&"));
+        assert!(u.contains("scope=streaming%20user-read-email&"));
+        assert!(u.contains("redirect_uri=http%3A%2F%2F127.0.0.1%3A5588%2Flogin&"));
+        assert!(u.contains(&format!("code_challenge={}", challenge("v"))));
     }
     use super::*;
 
