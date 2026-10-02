@@ -6,10 +6,19 @@
 // artist (The xx artist page open), mix-detail (first Spotify mix open),
 // no-volume (the active device has no remote volume),
 // engine-login (the in-app player needs its login; "The Run" shows up after engine_login, picker open),
-// engine-down (the in-app player failed, picker open).
+// engine-down (the in-app player failed, picker open),
+// slow (list commands and plays take 2s more: skeletons, the play spinner, "Starting…"),
+// resume (the in-app player is ready, nothing plays, and a last session is stored: the app loads it paused),
+// search-all (search "the xx", then the Songs "See all" page), library-all (Library, then the Albums "See all" page).
+// search_page pages through a pool built from the fixture (search hits first, then every other known
+// track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
 // The in-app player ("The Run") needs its login by default and isn't listed: engine_login lists it.
-// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, emit, setEngine }.
+// The local_* commands model librespot's Spirc: they act at once, but only while The Run is the active
+// device (an inactive Spirc ignores them); local_load activates it first. ENGINE_NOT_READY before ready.
+// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, calls, cache, emit, setEngine }.
 //   media: recorded media_update / media_clear calls ({cmd, args, at}).
+//   calls: every invoke, oldest first ({cmd, args, at}): local_* vs Web API routing shows here.
+//   cache: the in-memory list cache ("<account>/<key>" → value) behind cache_get.
 //   emit(event, payload): fires listeners from __TAURI__.event.listen (media-command, engine-status).
 //   setEngine(state, reason?): sets the mock engine state and emits engine-status (e.g. "account_mismatch").
 (function () {
@@ -19,6 +28,7 @@
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
+    "slow", "resume", "search-all", "library-all",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -32,6 +42,8 @@
   const fx = JSON.parse(xhr.responseText);
 
   const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
+  const RUN_ID = "dev_the_run"; // the in-app player's stable device id
+  const ME = "dev_user"; // the /me id
 
   // Every known track by uri, so play_on_device can resolve uris.
   const byUri = new Map();
@@ -65,7 +77,7 @@
     isPlaying: scenario !== "paused",
     progressBase: 44000,
     progressAt: Date.now(),
-    active: !["nothing", "nodevice"].includes(scenario),
+    active: !["nothing", "nodevice", "resume"].includes(scenario),
     devices,
     deviceId: firstActive ? firstActive.id : null,
     shuffle: false,
@@ -74,9 +86,10 @@
     userQueued: 0, // user-added tracks at the front of the queue (Spotify plays them first, FIFO)
     saved: new Set(((fx.liked || {}).tracks || []).map((t) => t.id)),
     engine:
-      scenario === "engine-login" ? { state: "needs_login", name: "The Run" }
-      : scenario === "engine-down" ? { state: "failed", name: "The Run", reason: "Spotify changed its protocol (mock)" }
-      : { state: "needs_login", name: "The Run" }, // first run: the player isn't logged in yet
+      scenario === "engine-login" ? { state: "needs_login", name: "The Run", device_id: null }
+      : scenario === "engine-down" ? { state: "failed", name: "The Run", reason: "Spotify changed its protocol (mock)", device_id: null }
+      : scenario === "resume" ? { state: "ready", name: "The Run", device_id: RUN_ID }
+      : { state: "needs_login", name: "The Run", device_id: null }, // first run: the player isn't logged in yet
   };
   const likedBase = state.saved.size;
   if (state.queue.length && state.now && state.queue[0].uri === state.now.uri) state.queue.shift();
@@ -85,7 +98,18 @@
     state.now.artists = "Someone With A Fairly Long Name, Another Featured Artist, And A Third";
     state.now.album = "A Deluxe Remastered Anniversary Edition With Bonus Tracks And Demos";
   }
-  if (scenario === "nothing" || scenario === "nodevice") state.queue = [];
+  if (["nothing", "nodevice", "resume"].includes(scenario)) state.queue = [];
+  if (scenario === "resume") {
+    // what the last run saved: the 3rd song of the first captured playlist, 1:01 in, played from that playlist
+    const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
+    const uris = rows.map((t) => t.uri).slice(0, 200);
+    if (uris.length) {
+      localStorage.setItem("therun.lastSession", JSON.stringify({
+        accountId: ME, contextUri: null, origin: { kind: "playlist", id: plId }, uris,
+        trackUri: uris[Math.min(2, uris.length - 1)], positionMs: 61000, savedAt: Date.now() - 3600e3,
+      }));
+    }
+  }
 
   const iso = () => new Date().toISOString();
   const progress = () => {
@@ -121,16 +145,52 @@
   const media = []; // media_update / media_clear calls, oldest first
   let loginRunning = false;
   const THE_RUN = {
-    id: "dev_the_run", name: "The Run", type: "Computer",
+    id: RUN_ID, name: "The Run", type: "Computer",
     is_active: false, is_restricted: false, supports_volume: true, volume_percent: 50,
   };
   function setEngine(st, reason) {
-    state.engine = reason ? { state: st, name: "The Run", reason } : { state: st, name: "The Run" };
+    const device_id = st === "ready" ? RUN_ID : null; // the stable id, once ready
+    state.engine = reason ? { state: st, name: "The Run", reason, device_id } : { state: st, name: "The Run", device_id };
     emit("engine-status", state.engine);
   }
   function listTheRun() {
     if (!state.devices.some((d) => d.id === THE_RUN.id)) state.devices.push(clone(THE_RUN));
   }
+  if (scenario === "resume") listTheRun(); // ready: Spotify lists it
+
+  // ---- the in-app player's own commands (librespot Spirc) ----
+  const engineReady = () => {
+    if (state.engine.state !== "ready") throw "ENGINE_NOT_READY: the player isn't ready (mock)";
+  };
+  // Spirc ignores everything but load while The Run isn't the active device
+  const runActive = () => state.active && state.deviceId === RUN_ID;
+  const spirc = (fn) => () => {
+    engineReady();
+    if (runActive()) fn();
+    return null;
+  };
+  /** The tracks a context plays: the captured playlist/album rows, else a stable pick from the pool. */
+  function contextTracks(contextUri) {
+    const [, kind, id] = String(contextUri).split(":");
+    const rows = kind === "playlist" ? (fx.playlistTracks || {})[id] : kind === "album" ? (fx.albumTracks || {})[id] : null;
+    if (rows && rows.length) return rows.map(clone);
+    const pool = ((fx.liked || {}).tracks || []).length ? fx.liked.tracks : allTracks();
+    if (!pool.length) throw "mock: no tracks";
+    return rotate(pool, strHash(contextUri) % pool.length).slice(0, 11).map(clone);
+  }
+  /** Start tracks at trackUri (the top when it isn't there, like Spotify), from positionMs. */
+  function loadTracks(tracks, { trackUri, contextUri = null, positionMs = 0, play = true }) {
+    const at = Math.max(0, trackUri ? tracks.findIndex((t) => t.uri === trackUri) : 0);
+    pushHistory(state.now);
+    state.now = tracks[at];
+    state.queue = tracks.slice(at + 1, at + 21);
+    state.userQueued = 0;
+    state.contextUri = contextUri;
+    state.active = true;
+    state.isPlaying = !!play;
+    setProgress(positionMs || 0);
+  }
+  const setVol = (d, percent) => (d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0))));
   const needDevice = () => {
     if (!state.devices.length || !state.active) throw "NO_ACTIVE_DEVICE: no active device (mock)";
   };
@@ -165,12 +225,45 @@
   const RANGES = { short_term: 0, medium_term: 3, long_term: 6 };
   const rotate = (list, n) => list.slice(n % (list.length || 1)).concat(list.slice(0, n % (list.length || 1)));
   const artistTiles = () => [...((fx.top || {}).artists || []), ...(fx.followed || [])];
+  // search_page pools: the captured search hits first, then every other known track / album
+  const TRACK_POOL_MAX = 97; // not a round number of pages: the last page is short
+  const trackPool = () => {
+    const first = ((fx.search || {}).tracks || []);
+    const seen = new Set(first.map((t) => t.uri));
+    return first.concat(allTracks().filter((t) => !seen.has(t.uri))).slice(0, TRACK_POOL_MAX);
+  };
+  const albumPool = () => {
+    const out = [];
+    const seen = new Set();
+    const add = (a, artists) => {
+      if (!a || !a.id || seen.has(a.id)) return;
+      seen.add(a.id);
+      out.push({ id: a.id, name: a.name, artists: a.artists || artists || "", cover: a.cover || null });
+    };
+    ((fx.search || {}).albums || []).forEach((a) => add(a));
+    (fx.savedAlbums || []).forEach((a) => add(a));
+    Object.values(fx.artists || {}).forEach((pg) => (pg.albums || []).forEach((a) => add(a, pg.artist && pg.artist.name)));
+    return repeatTo(out, ALBUM_POOL_MAX);
+  };
+  const ALBUM_POOL_MAX = 46; // the fixture holds ~20 distinct albums: repeated (new ids) to page past 30
+  /** list repeated up to n items; a repeat gets a new id (`<id>_r<k>`) so it isn't a duplicate. */
+  const repeatTo = (list, n) => {
+    const out = [];
+    for (let k = 0; list.length && out.length < n; k++) {
+      for (const a of list) {
+        if (out.length >= n) break;
+        out.push(k ? { ...a, id: `${a.id}_r${k}` } : a);
+      }
+    }
+    return out;
+  };
 
   const handlers = {
     auth_status: () => (scenario === "login" ? "login" : scenario === "reconnect" ? "reconnect" : "ok"),
     login: () => null,
 
-    get_playlists: () => clone(fx.playlists || []),
+    // a snapshot id per playlist, like Spotify's: the playlist cache is keyed by it
+    get_playlists: () => clone(fx.playlists || []).map((p) => ({ snapshot_id: "snap_" + p.id, ...p })),
     get_playlist_tracks: ({ playlistId }) => {
       const pt = fx.playlistTracks || {};
       return clone(pt[playlistId] || Object.values(pt)[0] || []);
@@ -184,6 +277,15 @@
       const s = fx.search || {};
       void query; // fixture holds one captured query; any query returns it
       return { tracks: clone((s.tracks || []).slice(0, 10)), albums: clone((s.albums || []).slice(0, 10)) };
+    },
+    // one page of 10 (Spotify's max on /search); has_more like the backend: a full page under the 1000 cap
+    search_page: ({ query, kind, offset }) => {
+      void query;
+      if (kind !== "track" && kind !== "album") throw "BAD_ARGS: unknown search kind " + kind;
+      if (scenario === "search-empty") return { items: [], has_more: false };
+      const pool = kind === "track" ? trackPool() : albumPool();
+      const items = pool.slice(offset, offset + 10);
+      return { items: clone(items), has_more: items.length === 10 && offset + 10 < 1000 && offset + 10 < pool.length };
     },
     get_queue: () => clone(state.queue),
     get_recently_played: () =>
@@ -209,14 +311,7 @@
       useDevice(deviceId);
       const tracks = (uris || []).map((u) => byUri.get(u)).filter(Boolean).map(clone);
       if (!tracks.length) throw "mock: unknown uris";
-      pushHistory(state.now);
-      state.now = tracks[0];
-      state.queue = tracks.slice(1);
-      state.userQueued = 0;
-      state.contextUri = null;
-      state.active = true;
-      state.isPlaying = true;
-      setProgress(0);
+      loadTracks(tracks, { trackUri: tracks[0].uri });
       return null;
     },
     resume: () => {
@@ -238,6 +333,32 @@
       return null;
     },
     pause: () => { needDevice(); setProgress(progress()); state.isPlaying = false; return null; },
+
+    // ---- snappy: the in-app player directly, the account, the list cache ----
+    local_play: spirc(() => { setProgress(progress()); state.isPlaying = true; }),
+    local_pause: spirc(() => { setProgress(progress()); state.isPlaying = false; }),
+    local_next: spirc(() => advance()),
+    local_prev: spirc(() => back()),
+    local_seek: ({ positionMs }) => spirc(() => setProgress(Math.max(0, Number(positionMs) || 0)))(),
+    local_volume: ({ percent }) => spirc(() => {
+      const d = activeDevice();
+      if (d) setVol(d, percent);
+    })(),
+    // activates The Run, then loads: Ok only means queued (the poll shows the result)
+    local_load: ({ contextUri, uris, trackUri, positionMs, play }) => {
+      engineReady();
+      if (!!contextUri === !!(uris && uris.length)) throw "BAD_ARGS: exactly one of contextUri and uris (mock)";
+      if (uris && uris.length > 200) throw "BAD_ARGS: more than 200 uris (mock)";
+      const tracks = contextUri ? contextTracks(contextUri) : uris.map((u) => byUri.get(u)).filter(Boolean).map(clone);
+      if (!tracks.length) throw "mock: unknown uris";
+      listTheRun();
+      setProgress(progress());
+      state.deviceId = RUN_ID;
+      loadTracks(tracks, { trackUri, contextUri: contextUri || null, positionMs, play });
+      return null;
+    },
+    me_id: () => ME,
+    cache_get: ({ account, key }) => clone(cache.get(`${account}/${key}`) ?? null),
     next_track: () => { needDevice(); advance(); return null; },
     previous_track: () => { needDevice(); back(); return null; },
     seek: ({ positionMs }) => { needDevice(); setProgress(Math.max(0, Number(positionMs) || 0)); return null; },
@@ -255,7 +376,7 @@
       needDevice();
       const d = activeDevice();
       if (!d || !d.supports_volume) throw "Cannot control device volume (mock)";
-      d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+      setVol(d, percent);
       return null;
     },
     set_shuffle: ({ on }) => { needDevice(); state.shuffle = !!on; return null; },
@@ -265,21 +386,11 @@
       state.repeat = mode;
       return null;
     },
-    play_context: ({ deviceId, contextUri }) => {
+    // trackUri: the offset (start there, like {offset: {uri}}); Spotify starts from the top when it isn't in the context
+    play_context: ({ deviceId, contextUri, trackUri }) => {
       useDevice(deviceId);
       if (!contextUri) throw "mock: no context uri";
-      const pool = ((fx.liked || {}).tracks || []).length ? fx.liked.tracks : allTracks();
-      if (!pool.length) throw "mock: no tracks";
-      const start = strHash(contextUri) % pool.length;
-      const run = rotate(pool, start).slice(0, 11).map(clone);
-      pushHistory(state.now);
-      state.now = run[0];
-      state.queue = run.slice(1);
-      state.userQueued = 0;
-      state.contextUri = contextUri;
-      state.active = true;
-      state.isPlaying = true;
-      setProgress(0);
+      loadTracks(contextTracks(contextUri), { trackUri, contextUri });
       return null;
     },
     add_to_queue: ({ deviceId, uri }) => {
@@ -304,7 +415,9 @@
       const tracks = [...added, ...base.filter((t) => state.saved.has(t.id))];
       return { tracks: clone(tracks), total: ((fx.liked || {}).total || base.length) + state.saved.size - likedBase };
     },
-    get_saved_albums: () => clone(fx.savedAlbums || []),
+    // library-all: enough saved albums for "See all" (the fixture has 3), from the search pool
+    get_saved_albums: () =>
+      clone(scenario === "library-all" ? albumPool().slice(0, 26) : fx.savedAlbums || []),
 
     // ---- v2: taste and artists ----
     get_top: ({ kind, range }) => {
@@ -371,16 +484,41 @@
     },
   };
 
-  // local commands (the engine, media controls) don't need the network
-  const LOCAL = /^(auth_status|engine_|media_)/;
+  // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
+  const LOCAL = /^(auth_status|engine_|media_|local_|cache_get$)/;
+  // `slow`: lists and plays take 2s more
+  const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
+
+  // the backend's list cache: what each list command writes (and, for snapshots and albums, reads)
+  const cache = new Map();
+  const CACHE_KEYS = {
+    get_playlists: () => "playlists",
+    get_saved_tracks: () => "liked",
+    get_saved_albums: () => "albums",
+    get_followed_artists: () => "following",
+    get_top: (a) => `top:${a.kind}:${a.range}:${Math.min(50, Math.max(1, a.limit || 20))}`,
+    get_album_tracks: (a) => `album:${a.albumId}`,
+    get_playlist_tracks: (a) => (a.snapshotId ? `playlist:${a.playlistId}:${a.snapshotId}` : null),
+  };
+  const READS_CACHE = new Set(["get_album_tracks", "get_playlist_tracks"]); // a hit makes no request
+
+  const calls = []; // every invoke, oldest first
 
   async function invoke(cmd, args) {
+    args = args || {};
+    calls.push({ cmd, args: clone(args), at: Date.now() });
     await sleep(40); // feel async, like IPC
     const h = handlers[cmd];
     if (!h) return reject(`mock: unknown command ${cmd}`);
+    const key = args.account && CACHE_KEYS[cmd] ? CACHE_KEYS[cmd](args) : null;
+    const slot = key && `${args.account}/${key}`;
+    if (slot && READS_CACHE.has(cmd) && cache.has(slot)) return clone(cache.get(slot));
     if (scenario === "error" && !LOCAL.test(cmd)) return reject("network down");
+    if (scenario === "slow" && SLOW.test(cmd)) await sleep(2000);
     try {
-      return await h(args || {});
+      const out = await h(args);
+      if (slot) cache.set(slot, clone(out));
+      return out;
     } catch (e) {
       return reject(String(e));
     }
@@ -400,7 +538,7 @@
 
   window.__TAURI__ = { core: { invoke }, event: { listen } };
   // handlers: QA swaps one to inject a failure
-  window.__mock = { scenario, state, invoke, advance, handlers, media, emit, setEngine };
+  window.__mock = { scenario, state, invoke, advance, handlers, media, calls, cache, emit, setEngine };
 
   // Overlay scenarios: drive the real UI once it exists (T5/T6 markup).
   const waitFor = (sel, ms = 5000) =>
@@ -431,20 +569,25 @@
     if (scenario === "library" || scenario === "library-detail") {
       (await waitFor("#libraryBtn"))?.click();
       if (scenario === "library-detail") {
-        const row = await waitFor("#libList [data-id], #libList button, #libList > *");
+        const row = await waitFor("#libList .row:not(.is-skeleton)");
         row?.click();
       }
     }
-    if (scenario === "search" || scenario === "search-empty") {
+    if (scenario === "search" || scenario === "search-empty" || scenario === "search-all") {
       (await waitFor("#searchBtn"))?.click();
       const input = await waitFor("#searchInput");
       if (input) {
-        input.value = scenario === "search" ? (fx.search && fx.search.query) || "the xx" : "zzqx nothing";
+        input.value = scenario === "search-empty" ? "zzqx nothing" : (fx.search && fx.search.query) || "the xx";
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
+      if (scenario === "search-all") (await waitFor('#searchResults [data-see="track"]'))?.click();
+    }
+    if (scenario === "library-all") {
+      (await waitFor("#libraryBtn"))?.click();
+      (await waitFor('#libAlbums [data-see="albums"]:not([hidden])'))?.click();
     }
   }
-  const DRIVEN = ["library", "library-detail", "search", "search-empty", "devices", "library-full", "artist", "mix-detail", "engine-login", "engine-down"];
+  const DRIVEN = ["library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-login", "engine-down"];
   if (DRIVEN.includes(scenario)) {
     window.addEventListener("load", () => setTimeout(drive, 300));
   }

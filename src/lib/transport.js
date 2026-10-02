@@ -18,13 +18,13 @@ export function createIntents(lagMs, lagFor = {}) {
       it.pending++;
       return ++it.seq;
     },
-    /** A command for key landed (or failed) at time now. */
-    finish(key, now) {
+    /** A command for key landed (or failed) at time now. lag: this command's own lag (else the key's). */
+    finish(key, now, lag) {
       const it = get(key);
       if (--it.pending <= 0) {
         it.pending = 0;
         // a lag set for "volume" also covers "volume:<device>"
-        it.settleAfter = now + (lagFor[key] ?? lagFor[key.split(":")[0]] ?? lagMs);
+        it.settleAfter = now + (lag ?? lagFor[key] ?? lagFor[key.split(":")[0]] ?? lagMs);
       }
     },
     /** True if seq is the newest command for key: only it may undo the UI. */

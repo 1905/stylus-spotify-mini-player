@@ -26,6 +26,7 @@
   --cap: 52px; /* room under the run for hover captions */
   --axis: calc(50% - var(--now) / 2); /* left edge of the current cover */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --page-max: 1200px; /* full pages (Library, "See all"): content width on wide windows */
 
   color-scheme: dark;
 }
@@ -816,13 +817,19 @@ svg {
   outline: none;
 }
 
+/* the Library: a full page of the app, like the "See all" page */
 .sheet {
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 440px;
-  border-right: 1px solid var(--hair);
-  animation: slide-in 320ms var(--ease) both;
+  inset: 0;
+  box-shadow: none;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.1), transparent 480px),
+    rgb(var(--i));
+  animation: page-in 220ms var(--ease) both;
+}
+
+/* nothing shows through a full page: no blur to pay for */
+.overlay-library .backdrop {
+  display: none;
 }
 
 .sheet-bar {
@@ -830,8 +837,11 @@ svg {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  max-width: calc(var(--page-max) + 2 * var(--gutter));
   height: 72px;
-  padding: 0 14px 0 24px;
+  margin: 0 auto;
+  padding: 0 calc(var(--gutter) - 10px) 0 var(--gutter);
 }
 
 .sheet-title {
@@ -875,17 +885,26 @@ svg {
 }
 
 .sheet-body,
-.palette-results {
+.palette-results,
+.page-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden; /* vertical scroll only, ever */
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--hair) transparent;
 }
 
+/* rows and tiles carry a 12px inset of their own: content lines up with the bar at the gutter */
 .sheet-body {
-  padding: 0 12px 24px;
+  padding: 0 calc(var(--gutter) - 12px) 56px;
+}
+
+#libLevel1,
+#libDetail {
+  max-width: calc(var(--page-max) + 24px);
+  margin: 0 auto;
 }
 
 .status {
@@ -1092,12 +1111,12 @@ svg {
 .detail-head {
   display: flex;
   align-items: flex-end;
-  gap: 20px;
-  padding: 4px 12px 22px;
+  gap: 28px;
+  padding: 8px 12px 28px;
 }
 
 .detail-cover {
-  width: 132px;
+  width: 220px;
   border-radius: 6px;
   box-shadow: 0 24px 50px -24px rgb(0 0 0 / 0.7);
 }
@@ -1121,8 +1140,8 @@ svg {
 }
 
 .detail-cover.is-liked .liked-icon {
-  width: 52px;
-  height: 52px;
+  width: 84px;
+  height: 84px;
 }
 
 /* the cap note under Liked Songs, the "no track list" line under a mix */
@@ -1142,23 +1161,29 @@ svg {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+  overflow-wrap: anywhere;
   padding-bottom: 0.06em;
+  font-size: clamp(32px, 4.4vw, 60px);
+  font-stretch: 80%;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 .detail-sub {
-  margin-top: 6px;
+  margin-top: 10px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--fg-2);
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .btn-play {
-  height: 40px;
-  margin-top: 14px;
-  padding: 0 22px;
-  font-size: 14px;
+  height: 44px;
+  margin-top: 18px;
+  padding: 0 26px;
+  font-size: 15px;
 }
 
 .btn-play:disabled {
@@ -1249,7 +1274,39 @@ svg {
 
 /* Library level 1: Liked Songs, Your top, Playlists, Albums, Following, Spotify mixes */
 #libLevel1 .group {
-  margin-top: 14px;
+  margin-top: 26px;
+}
+
+/* a full page: section heads read as headings */
+.sheet .group-title {
+  padding: 14px 12px 8px;
+  color: var(--fg);
+  font-size: 20px;
+  font-weight: 650;
+  font-stretch: 90%;
+  letter-spacing: -0.01em;
+}
+
+#libLiked {
+  max-width: 480px;
+}
+
+/* playlists: rows in as many columns as fit */
+#libList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  column-gap: 12px;
+}
+
+/* your top songs: two columns, read down, on wide windows */
+@media (min-width: 1000px) {
+  #topTracks {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(5, auto);
+    grid-auto-flow: column;
+    column-gap: 24px;
+  }
 }
 
 .group-head {
@@ -1289,27 +1346,42 @@ svg {
   margin-top: 6px;
 }
 
+/* tiles wrap into a grid and the list scrolls down: never a sideways shelf */
 .albums {
-  display: flex;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 16px 14px;
   padding: 4px 12px 6px;
-  overflow-x: auto;
-  /* a soft right edge says the shelf scrolls */
-  mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
-  scrollbar-width: thin;
-  scrollbar-color: var(--hair) transparent;
+  align-items: start; /* a 2-line title must not push its cover above the row's other covers */
+}
+
+/* the Library's shelves: as many a row as fit, their first rows only (app.js fitShelf; "See all" has the rest) */
+#libLevel1 .albums {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 24px 20px;
+}
+
+/* the search palette: one row of 6 albums */
+.palette .albums {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+
+@media (max-width: 559px) {
+  .palette .albums {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .album {
-  flex: none;
-  width: 96px;
+  min-width: 0;
   padding: 0;
   text-align: left;
   border-radius: 6px;
 }
 
 .album .art {
-  width: 96px;
+  width: 100%;
   margin-bottom: 8px;
   transition: opacity 120ms ease;
 }
@@ -1318,21 +1390,23 @@ svg {
   opacity: 0.8;
 }
 
-.album-name,
-.album-sub {
-  display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
+/* a title gets two lines, then an ellipsis */
 .album-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: 13.5px;
   line-height: 18px;
   font-weight: 500;
 }
 
 .album-sub {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--fg-2);
   font-size: 12.5px;
   line-height: 16px;
@@ -1347,19 +1421,6 @@ svg {
   border-radius: 50%;
 }
 
-/* the artist page: albums and singles in a grid, not a shelf */
-.albums.is-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-  gap: 16px 14px;
-  overflow: visible;
-}
-
-.albums.is-grid .album,
-.albums.is-grid .album .art {
-  width: auto;
-}
-
 .album-kind {
   display: inline-block;
   margin-right: 6px;
@@ -1370,12 +1431,245 @@ svg {
   line-height: 15px;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; }
+/* "See all": at the right end of a group head */
+.see-all {
+  flex: none;
+  height: 28px;
+  margin: 6px 2px 0 0;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
 }
 
-@keyframes slide-in {
-  from { transform: translateX(-100%); }
+.see-all:hover {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+}
+
+/* Your top: a small head over its artists */
+.sub-title {
+  margin: 0;
+  padding: 8px 12px 2px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.group-sub .see-all {
+  margin-top: 4px;
+}
+
+/* ---------- the full page: "See all" results, the whole window, vertical scroll ---------- */
+
+.page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.1), transparent 480px),
+    rgb(var(--i));
+  animation: page-in 220ms var(--ease) both;
+}
+
+.page:focus {
+  outline: none;
+}
+
+.page-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: calc(var(--page-max) + 2 * var(--gutter));
+  height: 64px;
+  margin: 0 auto;
+  padding: 0 calc(var(--gutter) - 10px) 0 var(--gutter);
+}
+
+.page-inner {
+  max-width: calc(var(--page-max) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 4px var(--gutter) 56px;
+}
+
+.page-head {
+  padding-bottom: 22px;
+}
+
+.page-kicker {
+  margin-bottom: 8px;
+  color: var(--fg-2);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.page-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  max-width: 18em;
+  margin: 0;
+  padding-bottom: 0.06em;
+  font-size: clamp(34px, 4.4vw, 60px);
+  font-weight: 700;
+  font-stretch: 80%;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.page-sub {
+  margin-top: 10px;
+  color: var(--fg-2);
+  font-size: 15px;
+}
+
+.page-tabs {
+  margin-bottom: 18px;
+  padding: 0;
+}
+
+.page-tabs .tab {
+  height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+/* songs: full rows, wider art; the row padding hangs into the gutter so art lines up with the title */
+.page-list.rows {
+  max-width: 1004px;
+  margin: 0 -12px;
+}
+
+/* full pages (Library, "See all"): wider art in track rows */
+:is(.page, .sheet) .row-track {
+  gap: 16px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  contain-intrinsic-size: auto 62px;
+}
+
+:is(.page, .sheet) .row-track.has-art {
+  grid-template-columns: 48px minmax(0, 1fr) auto 24px;
+}
+
+:is(.page, .sheet) .row-track.has-num {
+  grid-template-columns: 28px minmax(0, 1fr) auto 24px;
+}
+
+:is(.page, .sheet) .row-track.has-num.has-art {
+  grid-template-columns: 28px 48px minmax(0, 1fr) auto 24px;
+}
+
+:is(.page, .sheet) .row-track .art {
+  width: 48px;
+}
+
+:is(.page, .sheet) .row-track:not(.has-art) {
+  min-height: 62px;
+}
+
+:is(.page, .sheet) .row.is-skeleton {
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 16px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+:is(.page, .sheet) .row.is-skeleton .sk-art {
+  width: 48px;
+}
+
+/* the results page lines skeletons up under the numbered rows */
+.page .row.is-skeleton {
+  padding-left: 56px;
+}
+
+/* albums and artists: big covers, as many columns as fit */
+.page-grid.albums,
+.sheet .albums.is-grid {
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 30px 24px;
+}
+
+.page-grid.albums {
+  padding: 0;
+}
+
+:is(.page, .sheet) .album .art {
+  margin-bottom: 12px;
+  border-radius: 6px;
+  box-shadow: 0 20px 44px -26px rgb(0 0 0 / 0.75);
+}
+
+:is(.page, .sheet) .album.is-artist .art {
+  border-radius: 50%;
+}
+
+:is(.page, .sheet) .album-name {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+:is(.page, .sheet) .album-sub {
+  margin-top: 2px;
+  font-size: 13.5px;
+  line-height: 18px;
+}
+
+.page-status {
+  padding: 18px 0 0;
+}
+
+.page-more {
+  display: flex;
+  height: 40px;
+  margin: 28px auto 0;
+  padding: 0 22px;
+  border: 1px solid var(--hair);
+}
+
+.page-more[aria-disabled="true"] {
+  cursor: default;
+  color: var(--fg-3);
+  background: none;
+}
+
+@media (max-width: 899px) {
+  .page-grid.albums,
+  .sheet .albums.is-grid {
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 24px 18px;
+  }
+
+  #libLevel1 .albums {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 20px 16px;
+  }
+}
+
+/* back to a view already seen: no entry animation */
+.overlay.is-back .backdrop,
+.overlay.is-back .sheet,
+.overlay.is-back .palette,
+.overlay.is-back .page {
+  animation: none;
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
 }
 
 @keyframes pop-in {
@@ -1384,13 +1678,6 @@ svg {
 
 @keyframes drop-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
-}
-
-@media (max-width: 699px) {
-  .sheet {
-    width: 100%;
-    border-right: 0;
-  }
 }
 
 /* ---------- toast ---------- */
@@ -1481,10 +1768,14 @@ svg {
     bottom: 112px;
   }
 
-  .album.is-artist,
-  .album.is-artist .art {
-    width: 72px;
+  .detail-cover {
+    width: 160px;
   }
+
+  .detail-head {
+    gap: 20px;
+  }
+
 }
 
 /* ---------- reduced motion ---------- */
@@ -1507,4 +1798,185 @@ svg {
 .row-track {
   content-visibility: auto;
   contain-intrinsic-size: auto 52px;
+}
+
+/* ---------- loaders: skeletons, pending plays, stale lists ---------- */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* grey blocks shaped like the rows and tiles that are loading (reduced motion: static, no shimmer) */
+.sk {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgb(246 244 248 / 0.06) 0%, rgb(246 244 248 / 0.13) 50%, rgb(246 244 248 / 0.06) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.row.is-skeleton {
+  grid-template-columns: 40px minmax(0, 1fr);
+  padding-top: 6px;
+  padding-bottom: 6px;
+  pointer-events: none;
+}
+
+.sk-art {
+  width: 40px;
+  aspect-ratio: 1;
+}
+
+.sk-text {
+  min-width: 0;
+}
+
+.sk-line {
+  height: 12px;
+  margin: 4px 0;
+}
+
+.sk-sub {
+  height: 10px;
+  margin-top: 8px;
+}
+
+.album.is-skeleton {
+  display: block;
+  pointer-events: none;
+}
+
+.album.is-skeleton .sk-line {
+  width: 80%;
+}
+
+.album.is-skeleton .sk-sub {
+  width: 55%;
+}
+
+/* a cached list on screen while the fresh one loads */
+[aria-busy="true"] > .row:not(.is-skeleton),
+[aria-busy="true"] .albums > .album:not(.is-skeleton) {
+  opacity: 0.8;
+  transition: opacity 200ms ease;
+}
+
+/* a small ring spinner, shared by the play button, a clicked row and the device chip */
+.ctl-play {
+  position: relative;
+}
+
+.ctl-play.is-pending::after,
+.row.is-pending .row-time::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid rgb(246 244 248 / 0.25);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+.ctl-play.is-pending::after {
+  inset: -6px;
+}
+
+/* pending: the button is only the spinner, not a pause icon that looks like it already plays */
+.ctl-play.is-pending svg {
+  visibility: hidden;
+}
+
+/* nothing plays yet, so the button is disabled: keep the spinner readable */
+.ctl-play.is-pending:disabled {
+  opacity: 1;
+}
+
+.row.is-pending {
+  opacity: 0.6;
+}
+
+.row.is-pending .row-time {
+  position: relative;
+  color: transparent;
+}
+
+.row.is-pending .row-time::after {
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+}
+
+.device.is-pending .device-dot {
+  width: 10px;
+  height: 10px;
+  background: none;
+  box-shadow: none;
+  border: 2px solid rgb(246 244 248 / 0.25);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+/* first load and quiet retries: a ring before "Connecting…", not an error */
+.now-title.is-connecting::before {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-right: 0.35em;
+  vertical-align: 0.08em;
+  border-radius: 50%;
+  border: 3px solid rgb(246 244 248 / 0.25);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+/* ---------- play a nearby cover ---------- */
+
+.cover-play {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  color: var(--ink);
+  background: rgb(246 244 248 / 0.92);
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.6);
+  opacity: 0;
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.cover-play svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cover-play:hover {
+  background: #fff;
+}
+
+.cover:hover .cover-play,
+.cover:focus-within .cover-play,
+.cover:focus-within figcaption {
+  opacity: 1;
+}
+
+.cover[data-role="now"] .cover-play {
+  display: none;
+}
+
+/* skeletons take the shape of what they stand in for: artists are round */
+#topArtists .album.is-skeleton .art,
+#libFollowing .album.is-skeleton .art {
+  border-radius: 50%;
 }

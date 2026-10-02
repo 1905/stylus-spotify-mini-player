@@ -1,4 +1,5 @@
 mod auth;
+mod cache;
 mod media;
 mod player;
 mod spotify;
@@ -32,6 +33,7 @@ pub fn run() {
             spotify::get_playlists,
             spotify::get_playlist_tracks,
             spotify::search,
+            spotify::search_page,
             spotify::get_album_tracks,
             spotify::get_queue,
             spotify::get_recently_played,
@@ -55,6 +57,15 @@ pub fn run() {
             spotify::save_track,
             spotify::unsave_track,
             spotify::play_context,
+            spotify::cache_get,
+            spotify::me_id,
+            player::local_play,
+            player::local_pause,
+            player::local_next,
+            player::local_prev,
+            player::local_seek,
+            player::local_volume,
+            player::local_load,
             spotify::mix_info,
             spotify::get_top,
             spotify::get_artist,
@@ -62,12 +73,28 @@ pub fn run() {
             spotify::get_followed_artists,
             spotify::add_to_queue
         ])
+        // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
-    app.run(move |_, event| {
-        if let tauri::RunEvent::Exit = event {
+    app.run(move |app, event| match event {
+        tauri::RunEvent::Exit => {
             // pause and leave Spotify Connect cleanly, so "The Run" doesn't linger as a device
             engine.shutdown();
         }
+        // Dock icon clicked while the window is hidden: bring it back
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { .. } => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+        _ => {}
     });
 }
