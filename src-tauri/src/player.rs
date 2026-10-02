@@ -250,7 +250,7 @@ impl Engine {
     /// nothing. Emits `engine-status` when the state changes.
     fn apply(&self, generation: u64, event: Event) -> State {
         let changed = self.0.state.send_if_modified(|s| {
-            if generation != self.0.generation.load(Ordering::SeqCst) {
+            if !self.is_current(generation) {
                 return false;
             }
             let next = next_state(s, event);
@@ -357,13 +357,7 @@ fn connect_config() -> ConnectConfig {
 /// The Web API account (`/me`), with the app's token. None when the app isn't
 /// logged in or the call fails: the account and Premium checks are then skipped.
 async fn app_account() -> Option<serde_json::Value> {
-    let token = crate::auth::valid_access_token().await.ok()?;
-    let res = crate::auth::http().get("https://api.spotify.com/v1/me").bearer_auth(token).send().await.ok()?;
-    res.error_for_status().ok()?.json().await.ok()
-}
-
-async fn app_user_id() -> Option<String> {
-    app_account().await?["id"].as_str().map(str::to_string)
+    crate::spotify::get("/me").await.ok().filter(|v| !v.is_null())
 }
 
 /// A known non-Premium account. librespot refuses those (upstream even exits the process;
@@ -375,7 +369,10 @@ fn premium_missing(me: &serde_json::Value) -> bool {
 /// The connect loop of one engine generation: Session → Spirc → wait for it to end →
 /// reconnect with backoff. Player and mixer live for the whole loop.
 async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
-    if app_account().await.is_some_and(|me| premium_missing(&me)) {
+    // one /me per run: the app account changes only through login/logout, which start a new run
+    let me = app_account().await;
+    let app_user = me.as_ref().and_then(|m| m["id"].as_str()).map(str::to_string);
+    if me.is_some_and(|me| premium_missing(&me)) {
         engine.apply(generation, Event::Fatal("Spotify Premium is required to play on this Mac".into()));
         return;
     }
@@ -426,7 +423,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 let up_since = Instant::now();
                 creds = keep_reusable(&engine, &session, creds).await;
                 let player_user = session.username();
-                let event = Event::Connected { player: player_user, app: app_user_id().await };
+                let event = Event::Connected { player: player_user, app: app_user.clone() };
                 if let State::AccountMismatch(_) = engine.apply(generation, event) {
                     engine.stop_spirc();
                     spirc_task.await;
@@ -501,10 +498,9 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
     }
     let store = engine.0.store.clone();
     let to_save = reusable.clone();
-    match tokio::task::spawn_blocking(move || store.save(&to_save)).await {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => eprintln!("engine: could not store the player login in the credentials file: {e}"),
-        Err(e) => eprintln!("engine: could not store the player login in the credentials file: {e}"),
+    let saved = tokio::task::spawn_blocking(move || store.save(&to_save)).await.map_err(|e| e.to_string()).and_then(|r| r);
+    if let Err(e) = saved {
+        eprintln!("engine: could not store the player login in the credentials file: {e}");
     }
     reusable
 }

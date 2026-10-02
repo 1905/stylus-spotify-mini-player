@@ -62,7 +62,7 @@ async fn get_opt(path: &str) -> Result<Option<Value>, String> {
     serde_json::from_str(&text).map(Some).map_err(|e| e.to_string())
 }
 
-async fn get(path: &str) -> Result<Value, String> {
+pub(crate) async fn get(path: &str) -> Result<Value, String> {
     Ok(get_opt(path).await?.unwrap_or(Value::Null))
 }
 

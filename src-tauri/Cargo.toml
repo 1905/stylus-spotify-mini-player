@@ -29,7 +29,6 @@ librespot-playback = { version = "0.8.0", features = ["rodio-backend"] }
 librespot-connect = "0.8.0"
 # only for AuthenticationType: the session hands back its reusable login as raw fields
 librespot-protocol = "0.8.0"
-# default `v1` feature = the macOS Keychain store
 # OS media keys + Now Playing (MPRemoteCommandCenter / MPNowPlayingInfoCenter on macOS)
 souvlaki = "0.8.3"
 

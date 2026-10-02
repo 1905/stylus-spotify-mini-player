@@ -139,7 +139,6 @@ function showLogin(kind) {
   $("loginError").hidden = true;
   $("stage").hidden = true;
   $("login").hidden = false;
-  if (loggedOut) restartEngine();
 }
 
 async function onLogin() {
@@ -984,7 +983,7 @@ function openDevices() {
   devicesTimer = setInterval(() => {
     // The Run may be listed any second now; one request at a time, so a slow answer isn't
     // discarded by the next tick's newer generation
-    if (!devicesBusy && !(state.devices || []).some(isTheRun)) refreshDevices();
+    if (!devicesBusy && !thisMacBusy && !(state.devices || []).some(isTheRun)) refreshDevices();
   }, DEVICES_REFRESH_MS);
 }
 
@@ -2138,7 +2137,6 @@ async function boot() {
   $("run").addEventListener("error", onImgError, true);
   // dev harness only: the `artist` scenario opens a page by id
   if (window.__mock) window.__openArtist = (id) => openDetail({ kind: "artist", id, name: "", cover: null, sub: "Artist" });
-  // hidden: stop polling only when nothing plays (else poll() slows to 3s); come back with a fresh poll
   document.addEventListener("visibilitychange", () => {
     if ($("stage").hidden) return;
     // hidden keeps polling, slower (pollDelay); visible again restarts with a fresh poll
