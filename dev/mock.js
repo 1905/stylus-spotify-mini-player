@@ -4,15 +4,21 @@
 // error, library, library-detail, search, search-empty, long-titles, ad,
 // devices (3 devices incl. a restricted one, picker open), library-full (all Library groups),
 // artist (The xx artist page open), mix-detail (first Spotify mix open),
-// no-volume (the active device has no remote volume).
-// QA hook: window.__mock = { scenario, state, invoke, advance, handlers }.
+// no-volume (the active device has no remote volume),
+// engine-login (the in-app player needs its login; "The Run" shows up after engine_login, picker open),
+// engine-down (the in-app player failed, picker open).
+// The in-app player ("The Run") is ready by default but not listed: it is listed only after engine_login.
+// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, emit, setEngine }.
+//   media: recorded media_update / media_clear calls ({cmd, args, at}).
+//   emit(event, payload): fires listeners from __TAURI__.event.listen (media-command, engine-status).
+//   setEngine(state, reason?): sets the mock engine state and emits engine-status (e.g. "account_mismatch").
 (function () {
   "use strict";
 
   const SCENARIOS = [
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
-    "devices", "library-full", "artist", "mix-detail", "no-volume",
+    "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -67,6 +73,10 @@
     contextUri: null,
     userQueued: 0, // user-added tracks at the front of the queue (Spotify plays them first, FIFO)
     saved: new Set(((fx.liked || {}).tracks || []).map((t) => t.id)),
+    engine:
+      scenario === "engine-login" ? { state: "needs_login", name: "The Run" }
+      : scenario === "engine-down" ? { state: "failed", name: "The Run", reason: "Spotify changed its protocol (mock)" }
+      : { state: "ready", name: "The Run" },
   };
   const likedBase = state.saved.size;
   if (state.queue.length && state.now && state.queue[0].uri === state.now.uri) state.queue.shift();
@@ -105,6 +115,22 @@
   }
 
   const reject = (msg) => Promise.reject(msg);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // the in-app player
+  const media = []; // media_update / media_clear calls, oldest first
+  let loginRunning = false;
+  const THE_RUN = {
+    id: "dev_the_run", name: "The Run", type: "Computer",
+    is_active: false, is_restricted: false, supports_volume: true, volume_percent: 50,
+  };
+  function setEngine(st, reason) {
+    state.engine = reason ? { state: st, name: "The Run", reason } : { state: st, name: "The Run" };
+    emit("engine-status", state.engine);
+  }
+  function listTheRun() {
+    if (!state.devices.some((d) => d.id === THE_RUN.id)) state.devices.push(clone(THE_RUN));
+  }
   const needDevice = () => {
     if (!state.devices.length || !state.active) throw "NO_ACTIVE_DEVICE: no active device (mock)";
   };
@@ -199,12 +225,6 @@
       state.active = true;
       setProgress(progress());
       state.isPlaying = true;
-      return null;
-    },
-    // the harness's "Spotify app": registers the MacBook as a device a moment after launch
-    launch_local_spotify: () => {
-      const mac = (fx.devices || []).find((d) => /computer/i.test(d.type));
-      if (mac) setTimeout(() => { if (!state.devices.some((d) => d.id === mac.id)) state.devices.push(clone(mac)); }, 2000);
       return null;
     },
     resume_at: ({ deviceId, uri, positionMs }) => {
@@ -317,6 +337,33 @@
       return [...seen.values()];
     },
     get_followed_artists: () => clone(fx.followed || []),
+    // ---- standalone: the in-app player ("The Run") and OS media controls ----
+    engine_status: () => clone(state.engine),
+    // resolves once logged in and ready; "The Run" registers with Spotify a moment later
+    engine_login: async () => {
+      if (loginRunning) throw "LOGIN_IN_PROGRESS: a player login is already running (mock)";
+      if (state.engine.state === "failed") throw "mock: the player failed: " + state.engine.reason;
+      loginRunning = true;
+      try {
+        setEngine("starting");
+        await sleep(1500); // the browser login
+        setEngine("ready");
+        setTimeout(listTheRun, 1000);
+        return null;
+      } finally {
+        loginRunning = false;
+      }
+    },
+    engine_restart: () => {
+      if (state.engine.state === "ready") {
+        setEngine("starting");
+        setTimeout(() => setEngine("ready"), 800);
+      }
+      return null;
+    },
+    media_update: (args) => { media.push({ cmd: "media_update", args: clone(args), at: Date.now() }); return null; },
+    media_clear: () => { media.push({ cmd: "media_clear", args: null, at: Date.now() }); return null; },
+
     mix_info: ({ playlistId }) => {
       const info = (fx.mixInfo || {})[playlistId];
       if (!info) throw "mock: 404 Not Found (playlist " + playlistId + ")";
@@ -324,20 +371,36 @@
     },
   };
 
+  // local commands (the engine, media controls) don't need the network
+  const LOCAL = /^(auth_status|engine_|media_)/;
+
   async function invoke(cmd, args) {
-    await new Promise((r) => setTimeout(r, 40)); // feel async, like IPC
+    await sleep(40); // feel async, like IPC
     const h = handlers[cmd];
     if (!h) return reject(`mock: unknown command ${cmd}`);
-    if (scenario === "error" && cmd !== "auth_status") return reject("network down");
+    if (scenario === "error" && !LOCAL.test(cmd)) return reject("network down");
     try {
-      return h(args || {});
+      return await h(args || {});
     } catch (e) {
       return reject(String(e));
     }
   }
 
-  window.__TAURI__ = { core: { invoke } };
-  window.__mock = { scenario, state, invoke, advance, handlers }; // handlers: QA swaps one to inject a failure
+  // __TAURI__.event: listen(name, cb) → Promise<unlisten>; cb gets {event, id, payload} like Tauri's Event
+  const listeners = new Map(); // name → Set of callbacks
+  let eventId = 0;
+  function listen(name, cb) {
+    if (!listeners.has(name)) listeners.set(name, new Set());
+    listeners.get(name).add(cb);
+    return Promise.resolve(() => listeners.get(name).delete(cb));
+  }
+  function emit(name, payload) {
+    for (const cb of [...(listeners.get(name) || [])]) cb({ event: name, id: ++eventId, payload: clone(payload) });
+  }
+
+  window.__TAURI__ = { core: { invoke }, event: { listen } };
+  // handlers: QA swaps one to inject a failure
+  window.__mock = { scenario, state, invoke, advance, handlers, media, emit, setEngine };
 
   // Overlay scenarios: drive the real UI once it exists (T5/T6 markup).
   const waitFor = (sel, ms = 5000) =>
@@ -356,7 +419,7 @@
 
   const XX = "3iOvXCl6edW5Um0fXEBRXy";
   async function drive() {
-    if (scenario === "devices") (await waitFor("#deviceBtn"))?.click();
+    if (["devices", "engine-login", "engine-down"].includes(scenario)) (await waitFor("#deviceBtn"))?.click();
     if (["library-full", "artist", "mix-detail"].includes(scenario)) {
       (await waitFor("#libraryBtn"))?.click();
       if (scenario === "artist") {
@@ -381,7 +444,8 @@
       }
     }
   }
-  if (["library", "library-detail", "search", "search-empty", "devices", "library-full", "artist", "mix-detail"].includes(scenario)) {
+  const DRIVEN = ["library", "library-detail", "search", "search-empty", "devices", "library-full", "artist", "mix-detail", "engine-login", "engine-down"];
+  if (DRIVEN.includes(scenario)) {
     window.addEventListener("load", () => setTimeout(drive, 300));
   }
 })();
