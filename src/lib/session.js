@@ -62,11 +62,13 @@ export function playSession(accountId, src, origin, nowMs, members = null) {
   };
 }
 
-/** Does the session's source hold this track (or play this context)? */
+/**
+ * Does the session's source hold this track (or play this context)? A named context decides:
+ * a track shared by two playlists belongs to the one that plays, not to the saved one.
+ */
 function holds(prev, trackUri, contextUri) {
-  if (prev.uris && prev.uris.includes(trackUri)) return true;
-  if (!contextUri) return false;
-  return prev.contextUri === contextUri || originUri(prev.origin) === contextUri;
+  if (contextUri) return prev.contextUri === contextUri || originUri(prev.origin) === contextUri;
+  return Boolean(prev.uris && prev.uris.includes(trackUri));
 }
 
 /**

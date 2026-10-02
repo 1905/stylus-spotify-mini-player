@@ -7,7 +7,7 @@ import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, isTheRun, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
-import { ERROR_POLL_MS, pollDelay } from "./lib/poll.js";
+import { ERROR_POLL_MS, GIVE_UP_FAILURES, gaveUp, pollDelay } from "./lib/poll.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
 import { SESSION_KEY, parseSession, playSession, sessionToSave, resumeSource, originUri } from "./lib/session.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
@@ -190,6 +190,7 @@ let pollTimer = null;
 let inFlight = false;
 let pollAgain = false;
 let tick = 0;
+let failures = 0; // polls failed in a row: retried quietly until gaveUp()
 let pollEpoch = 0; // bumped on every start/stop: a poll from an older epoch must not touch state
 
 function startPolling() {
@@ -200,6 +201,7 @@ function startPolling() {
   inFlight = false;
   pollAgain = false;
   tick = 0;
+  failures = 0;
   state.loaded = false; // full fetch and render: a stopped poll may have skipped one
   state.now = null; // unknown what played during the gap: don't record the old track as played
   state.listenedMs = 0;
@@ -236,18 +238,22 @@ async function poll() {
     await refresh(epoch);
     if (epoch !== pollEpoch) return;
     state.error = null;
+    failures = 0;
   } catch (e) {
     if (epoch !== pollEpoch) return; // stale: the session it belonged to is gone
     inFlight = false;
     if (isCode(e, "AUTH_EXPIRED")) return expire();
-    if (!state.error && state.loaded) toast("Can't reach Spotify. Retrying.");
+    failures++;
     state.error = reason(e);
+    // a blip retries quietly (the last view stays, or a loader before the first load); only a
+    // run of failures is an error worth showing
+    if (failures === GIVE_UP_FAILURES && state.loaded) toast("Can't reach Spotify. Retrying.");
     renderNow();
   }
   inFlight = false;
   if (!polling) return;
   // hidden: 3s while something plays (Now Playing, media keys), 10s when idle; visible again restarts
-  let delay = pollDelay({ hidden: document.hidden, mode: state.mode, error: Boolean(state.error) });
+  let delay = pollDelay({ hidden: document.hidden, mode: state.mode, failures });
   if (pollAgain) {
     pollAgain = false;
     delay = 0;
@@ -505,12 +511,13 @@ async function playCover(item) {
   if (target.uris) target.uris = target.uris.filter((u) => !isLocalFile(u));
   // a jump inside the playing playlist/album keeps where it came from: its origin and its full
   // track list, so the next jump still knows every member (not just the visible covers)
-  const inSaved = last && last.uris && last.uris.includes(target.trackUri);
-  // only a jump inside the same playlist/album keeps the saved origin (a past cover from another one starts its own)
-  const inSameContext = Boolean(target.contextUri) && target.contextUri === ctx && sameAsLast;
-  const origin = inSaved || inSameContext ? last.origin : null;
+  // only a jump inside the same playlist/album keeps the saved origin: a past cover from another
+  // one starts its own, even when that playlist shares the track
+  const sameSource = target.contextUri
+    ? target.contextUri === ctx && Boolean(sameAsLast)
+    : Boolean(last && last.uris && last.uris.includes(target.trackUri));
   // keep the full member list for the next jump (never sent with a context: Spirc takes one source)
-  await startPlay(target, { kind: "cover", origin, members: inSaved || inSameContext ? last.uris : null });
+  await startPlay(target, { kind: "cover", origin: sameSource ? last.origin : null, members: sameSource ? last.uris : null });
 }
 
 // ---------- now block, chrome, progress ----------
@@ -537,6 +544,7 @@ function renderNow() {
   const t = state.now;
   const title = $("nowTitle");
   if (t) {
+    title.classList.remove("is-connecting");
     title.textContent = t.name;
     title.title = t.name;
     setNowArtist(playPending() ? STARTING : artistLinks(t));
@@ -549,7 +557,10 @@ function renderNow() {
   if (state.mode === "other" && state.device) {
     head = `Playing on ${state.device.name}`;
     line = "An ad or a podcast is on. Songs show up here.";
-  } else if (state.error && !state.loaded) {
+  } else if (!state.loaded && !gaveUp(failures)) {
+    head = "Connecting…"; // first load or quiet retries: a loader, not an error
+    line = "";
+  } else if (!state.loaded) {
     head = "Can't reach Spotify";
     line = "Check your connection. Retrying every few seconds.";
   } else if (state.devices && state.devices.length === 0) {
@@ -558,6 +569,7 @@ function renderNow() {
   }
   title.textContent = head;
   title.title = "";
+  title.classList.toggle("is-connecting", !state.loaded && !gaveUp(failures));
   setNowArtist(playPending() ? STARTING : "");
   setText("nowAlbum", "");
   setText("emptyState", line);

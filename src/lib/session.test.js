@@ -60,6 +60,13 @@ describe("playSession", () => {
 });
 
 describe("sessionToSave", () => {
+  it("a track shared by two playlists: the playing playlist wins over the saved one", () => {
+    const prev = { accountId: "me", contextUri: "spotify:playlist:A", origin: { kind: "playlist", id: "A" }, uris: ["spotify:track:T"], trackUri: "spotify:track:T", positionMs: 0, savedAt: 0 };
+    const next = sessionToSave(prev, { accountId: "me", trackUri: "spotify:track:T", contextUri: "spotify:playlist:B", positionMs: 5 }, 1, true);
+    expect(next).toMatchObject({ contextUri: "spotify:playlist:B", origin: null, uris: null });
+    expect(resumeSource(null, next, "me")).toMatchObject({ contextUri: "spotify:playlist:B" });
+  });
+
   const poll = (over = {}) => ({ accountId: ME, trackUri: U(2), contextUri: null, positionMs: 5000, ...over });
 
   it("no song or no account: no write", () => {
