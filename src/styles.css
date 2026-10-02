@@ -1,4 +1,4 @@
-/* The Run — one screen. Played → now → next, colour from the current cover. */
+/* The Run — one screen. Now → next (played off to the left), colour from the current cover. */
 
 @font-face {
   font-family: "Bricolage";
@@ -24,7 +24,7 @@
   --gap: 28px;
   --gutter: 48px;
   --cap: 52px; /* room under the run for hover captions */
-  --axis: calc(50% - var(--now) / 2); /* left edge of the current cover */
+  --axis: calc(50% - var(--now) / 2); /* the login screen's centred cover: its left edge */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --page-max: 1200px; /* full pages (Library, "See all"): content width on wide windows */
 
@@ -82,6 +82,13 @@ button:disabled {
 :focus-visible {
   outline: 2px solid var(--fg);
   outline-offset: 3px;
+}
+
+/* a click or a drag never draws a focus ring, even where WebKit matches :focus-visible on a click
+   (app.js marks the last input on <html>); a key press brings the rings back */
+[data-input="pointer"] :focus-visible,
+[data-input="pointer"] .row:has(.row-play:focus-visible) {
+  outline: none;
 }
 
 svg {
@@ -186,6 +193,28 @@ svg {
 .topbar-tools {
   display: flex;
   gap: 4px;
+  margin-left: 2px; /* the glyph, not its hit area, lines up with the gutter */
+}
+
+/* Library and Search: icons only, big */
+.nav-btn {
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+}
+
+.nav-btn svg {
+  width: 48px;
+  height: 48px;
+}
+
+/* the device chip, then the settings cog */
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
 }
 
 /* ---------- device picker: the chip and its popover ---------- */
@@ -317,23 +346,292 @@ svg {
   margin-top: 6px;
 }
 
+/* ---------- settings: the cog and its popover (the device popover's look) ---------- */
+
+.settings-wrap {
+  position: relative;
+  flex: none;
+  margin-right: 6px; /* the cog, not its hit area, lines up with the gutter */
+}
+
+.settings-wrap .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+
+.settings-wrap .icon-btn[aria-expanded="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+}
+
+.settings-pop {
+  width: 320px;
+  padding: 8px 14px 12px;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+
+.set-group {
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--hair);
+}
+
+.set-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.set-note {
+  margin-top: 8px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+/* an on/off switch: the knob slides right and turns the track green when on */
+.switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(246, 244, 248, 0.18);
+  transition: background-color 160ms ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 160ms var(--ease);
+}
+
+.switch[aria-checked="true"] {
+  background: var(--live);
+}
+
+.switch[aria-checked="true"]::after {
+  transform: translateX(14px);
+}
+
+.switch:focus-visible {
+  outline-offset: 2px;
+}
+
+/* a segmented choice: three options in one rounded strip */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 10px;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(246, 244, 248, 0.07);
+}
+
+.seg-opt {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 7px 4px;
+  border-radius: 8px;
+  color: var(--fg-2);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.seg-opt:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.seg-opt[aria-checked="true"] {
+  color: var(--ink);
+  background: var(--fg);
+}
+
+.seg-opt:disabled {
+  opacity: 0.4;
+}
+
+.seg-opt:focus-visible {
+  outline-offset: 1px;
+}
+
+.seg-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.seg-sub {
+  font-size: 11.5px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+/* ---------- the playlist panel: a popover above its button, solid, scrolls down only ---------- */
+
+.panel-wrap {
+  position: relative;
+}
+
+.panel {
+  position: absolute;
+  z-index: 4;
+  bottom: calc(100% + 10px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 2 * var(--gutter) + 20px);
+  max-height: 60vh;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.07), transparent 160px),
+    rgb(var(--i));
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
+  animation: pop-up 160ms var(--ease) both;
+}
+
+.panel-head {
+  flex: none;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.panel-kicker {
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-title {
+  margin: 2px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.panel-list {
+  min-height: 0;
+  padding: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.panel-label {
+  margin: 10px 10px 4px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-label:first-child {
+  margin-top: 4px;
+}
+
+.panel .row {
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 6px 10px;
+}
+
+.panel .row-art {
+  width: 40px;
+}
+
+.panel .row-title {
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.panel .row-sub {
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+/* played: dimmed; now: highlighted; next: as is */
+.panel .row.is-played {
+  opacity: 0.5;
+}
+
+.panel .row.is-played:hover {
+  opacity: 0.85;
+}
+
+.panel .row.is-now {
+  background: rgba(246, 244, 248, 0.1);
+  cursor: default;
+}
+
+.panel .row.is-now .row-title {
+  color: var(--live);
+}
+
+.panel .row.is-skeleton {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.panel-status {
+  padding: 14px 10px;
+  color: var(--fg-2);
+  font-size: 13.5px;
+}
+
 /* ---------- the run ---------- */
 
+/* At rest the current cover sits at the left content edge, what's next to its right, what played
+   off to the left. A drag or a sideways swipe pans the track (app.js); it clips its own content
+   and never scrolls. The mask hides played covers inside the left gutter and fades the right end. */
 .run {
-  --shift: 0px;
   position: relative;
   display: flex;
   align-items: flex-end;
-  gap: var(--gap);
   min-height: 0;
   padding-bottom: var(--cap);
   overflow-x: clip;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 76%, transparent 99%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 76%, transparent 99%);
+  cursor: grab;
+  touch-action: pan-y;
+  -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--gutter) - 14px), #000 var(--gutter), #000 76%, transparent 99%);
+  mask-image: linear-gradient(90deg, transparent calc(var(--gutter) - 14px), #000 var(--gutter), #000 76%, transparent 99%);
 }
 
-.run > :first-child {
-  margin-left: var(--shift);
+.run.is-dragging {
+  cursor: grabbing;
+}
+
+.run-track {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  gap: var(--gap);
+  will-change: transform;
+}
+
+/* back to rest after a pan (reduced motion: the global rule makes it a jump) */
+.run-track.is-returning {
+  transition: transform 600ms var(--ease);
 }
 
 .cover {
@@ -354,21 +652,14 @@ svg {
     0 42px 90px -36px rgb(0 0 0 / 0.75);
 }
 
+/* the current cover big, every other one small: the same size while panning */
+.cover:not([data-role="now"]) { --s: 0.447; }
+.cover[data-role="next"] .art { opacity: 0.9; }
+
 .cover[data-role="past"] .art {
+  opacity: 0.55;
   filter: saturate(0.6);
 }
-
-.cover[data-offset="-1"] { --s: 0.395; }
-.cover[data-offset="-2"] { --s: 0.326; }
-.cover[data-offset="-3"] { --s: 0.274; }
-.cover[data-offset="-4"] { --s: 0.232; }
-.cover[data-role="next"] { --s: 0.447; }
-
-.cover[data-offset="-1"] .art { opacity: 0.62; }
-.cover[data-offset="-2"] .art { opacity: 0.46; }
-.cover[data-offset="-3"] .art { opacity: 0.34; }
-.cover[data-offset="-4"] .art { opacity: 0.24; }
-.cover[data-role="next"] .art { opacity: 0.9; }
 
 .cover figcaption {
   position: absolute;
@@ -382,14 +673,14 @@ svg {
   pointer-events: none;
 }
 
-.cover:hover figcaption {
+/* every small cover is named; cover-wide, so neighbours never overlap */
+.cover:not([data-role="now"]) figcaption {
+  width: 100%;
   opacity: 1;
 }
 
-/* what plays next is always named; cover-wide, so neighbours never overlap */
-.cover[data-role="next"] figcaption {
-  width: 100%;
-  opacity: 1;
+.cover[data-role="past"] figcaption {
+  opacity: 0.6;
 }
 
 .cover[data-role="now"] figcaption {
@@ -412,10 +703,6 @@ svg {
   color: var(--fg-2);
 }
 
-.cover.is-off {
-  visibility: hidden;
-}
-
 /* the empty "now" slot when nothing plays */
 .slot {
   flex: none;
@@ -431,7 +718,7 @@ svg {
 .now {
   min-width: 0;
   margin-top: calc(48px - var(--cap));
-  padding: 0 var(--gutter) 0 var(--axis);
+  padding: 0 var(--gutter);
 }
 
 .now-title {
@@ -496,9 +783,9 @@ svg {
 
 /* ---------- transport ---------- */
 
-/* one left-aligned column with the now cover: scrub runs from its left edge to the right margin */
+/* the scrub bar runs gutter to gutter; the controls: playlist left, transport centred, heart and volume right */
 .transport {
-  padding: 30px var(--gutter) 28px var(--axis);
+  padding: 30px var(--gutter) 28px;
 }
 
 .scrub-row {
@@ -567,22 +854,34 @@ svg {
 }
 
 .controls {
-  display: flex;
-  flex-wrap: wrap; /* very narrow windows: heart and volume drop under the transport */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 4px 10px;
+  gap: 10px;
   margin-top: 12px;
-  margin-left: -10px; /* the prev icon, not its hit area, lines up with the column */
+}
+
+.controls-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* the playlist button: its icon, not its hit area, lines up with the scrub's start */
+.controls-lead {
+  justify-self: start;
+  margin-left: -10px;
 }
 
 .ctl {
+  position: relative;
   display: grid;
   place-items: center;
   width: 44px;
   height: 44px;
   border-radius: 50%;
   color: var(--fg-2);
-  transition: background-color 160ms ease, color 160ms ease, opacity 160ms ease;
+  transition: background-color 160ms ease, color 160ms ease, opacity 160ms ease, transform 90ms ease;
 }
 
 .ctl svg {
@@ -593,6 +892,17 @@ svg {
 .ctl:hover:not(:disabled) {
   color: var(--fg);
   background: rgba(246, 244, 248, 0.08);
+}
+
+/* pressed: every transport button answers the click at once */
+.ctl:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.ctl:not(.ctl-play):active:not(:disabled),
+.ctl[aria-expanded="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.16);
 }
 
 .ctl-play {
@@ -610,6 +920,10 @@ svg {
 .ctl-play:hover:not(:disabled) {
   color: var(--ink);
   background: #fff;
+}
+
+.ctl-play:active:not(:disabled) {
+  background: rgb(246 244 248 / 0.8);
 }
 
 .ctl-play .i-pause,
@@ -677,8 +991,8 @@ svg {
 .controls-side {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 4px;
-  margin-left: auto;
   margin-right: -10px; /* the icon, not its hit area, lines up with the scrub's end */
 }
 
@@ -703,9 +1017,18 @@ svg {
   touch-action: none; /* a drag moves the volume, not the page */
 }
 
-.vol-slider:hover .scrub-fill::after,
-.vol-slider:focus-visible .scrub-fill::after {
+.vol-slider:hover .scrub-fill::after {
   transform: scale(1);
+}
+
+/* the sliders (seek, volume) never get a box: keyboard focus rings their thumb */
+.scrub:focus-visible {
+  outline: none;
+}
+
+:root:not([data-input="pointer"]) .scrub:focus-visible .scrub-fill::after {
+  transform: scale(1);
+  box-shadow: 0 0 0 4px rgb(246 244 248 / 0.28);
 }
 
 [data-mode="idle"] .transport,
@@ -1682,6 +2005,10 @@ svg {
   from { opacity: 0; transform: translateY(-4px); }
 }
 
+@keyframes pop-up {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
 @keyframes drop-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
 }
@@ -1733,7 +2060,7 @@ svg {
   }
 
   .transport {
-    padding: 20px var(--gutter) 18px var(--axis);
+    padding: 20px var(--gutter) 18px;
   }
 
   .ctl-play {
@@ -1741,7 +2068,8 @@ svg {
     height: 52px;
   }
 
-  .controls {
+  .controls,
+  .controls-main {
     gap: 4px;
   }
 
@@ -1891,6 +2219,36 @@ svg {
   inset: -6px;
 }
 
+/* next / previous: the ring from the click until another song shows (app.js skip) */
+.ctl.is-pending:not(.ctl-play)::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid rgb(246 244 248 / 0.2);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+/* a quality option while the player restarts on it */
+.seg-opt.is-pending .seg-sub {
+  visibility: hidden;
+}
+
+.seg-opt.is-pending::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  border: 2px solid rgb(0 0 0 / 0.2);
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
 /* pending: the button is only the spinner, not a pause icon that looks like it already plays */
 .ctl-play.is-pending svg {
   visibility: hidden;
@@ -1977,7 +2335,8 @@ svg {
   opacity: 1;
 }
 
-.cover[data-role="now"] .cover-play {
+.cover[data-role="now"] .cover-play,
+.run.is-dragging .cover-play {
   display: none;
 }
 

@@ -2,14 +2,16 @@
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
 import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeline.js";
+import { panelRows } from "./lib/playlist.js";
+import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
-import { CONNECTING, NEEDS_LOGIN, isTheRun, thisMacRow, preferredDevice } from "./lib/engine.js";
+import { CONNECTING, NEEDS_LOGIN, HERE, isHere, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { ERROR_POLL_MS, GIVE_UP_FAILURES, gaveUp, pollDelay } from "./lib/poll.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
-import { SESSION_KEY, parseSession, playSession, sessionToSave, resumeSource, originUri } from "./lib/session.js";
+import { SESSION_KEY, parseSession, playSession, sessionToSave, resumeSource, originUri, offsettable } from "./lib/session.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
@@ -34,6 +36,7 @@ const PLAY_LAG_MS = 500; // Spotify can report the old play state this long afte
 const SESSION_MATCH_MS = 2 * 60 * 1000;
 const PLAYED_MS = 30 * 1000; // Spotify counts a play after 30s; a track skipped sooner isn't history
 const small = matchMedia("(max-width: 899px)");
+const RUN_LIMITS = { maxPast: 12, maxNext: 20 }; // more than fit: a pan shows what played and more of the queue
 
 const state = {
   loginKind: "login",
@@ -125,6 +128,7 @@ function showLogin(kind) {
   changesPending = 0;
   settleAfter = 0;
   intents.reset();
+  endSkip();
   heartGen++;
   devicesGen++;
   libraryDenied = false; // the next login may grant the library scopes
@@ -138,13 +142,22 @@ function showLogin(kind) {
   playlists = null;
   listScroll = 0;
   $("libList").innerHTML = "";
-  $("run").replaceChildren();
+  $("runTrack").replaceChildren();
+  runNowUri = null;
+  resetPan();
+  lastList = null;
+  quality = null;
+  qualityBusy = 0;
+  restartHoldUntil = 0;
+  if (loggedOut) resetDockArt(); // the next account's songs set it again
   Object.assign(state, {
     mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null,
     shuffle: false, repeat: "off", volume: null, supportsVolume: false, contextUri: null, saved: null,
   });
   closeDevices();
   closeVolume();
+  closePanel();
+  closeSettings();
   closeOverlay();
   state.loginKind = LOGIN_COPY[kind] ? kind : "login";
   const copy = LOGIN_COPY[state.loginKind];
@@ -266,6 +279,8 @@ async function refresh(epoch) {
   const startedAt = performance.now();
   const s = await invoke("playback_state");
   if (epoch !== pollEpoch) return; // a newer session took over while this one waited
+  // the in-app player restarts for a quality change and plays nothing for a moment: keep the song on screen
+  if (restartHoldUntil > performance.now() && !(s && s.active)) return;
   tick++;
   listen(); // close the old "now"'s listening time before this poll overwrites it
   const active = Boolean(s && s.active);
@@ -311,6 +326,7 @@ async function refresh(epoch) {
   if (changed) state.listenedMs = 0;
   state.now = track;
   if (changed) checkSaved(track);
+  if (skipWait && (changed || (skipWait.landedAt && startedAt >= skipWait.landedAt + SKIP_SETTLE_MS))) endSkip();
   // a play the user started is confirmed by a poll that began after it landed
   if (pending.onPoll({ isPlaying: Boolean(active && s.is_playing), trackUri: track && track.uri, at: startedAt })) clearPending();
   noteSession(false);
@@ -326,6 +342,7 @@ async function refresh(epoch) {
       if (state.loaded) renderRun();
       renderChrome();
       if (track) paint(track.cover);
+      syncDockArt();
     }
     // a song needs its queue; with no song, the device list says who could play
     const [queue, recent, devices] = await Promise.all([
@@ -409,7 +426,7 @@ function setDevices(list, startedAt = performance.now()) {
   const changed = JSON.stringify(list) !== JSON.stringify(state.devices);
   state.devices = list;
   if (state.mode === "idle" && intents.settled("device", startedAt)) {
-    const d = preferredDevice(list);
+    const d = preferredDevice(list, engine);
     state.device = d ? { id: d.id, name: d.name } : null;
   }
   if (changed && devicesOpen) renderDeviceList();
@@ -421,7 +438,7 @@ async function discover() {
   const list = await fetchOr("list_devices");
   if (!list) return null;
   setDevices(list);
-  const d = preferredDevice(list);
+  const d = preferredDevice(list, engine);
   return d ? { id: d.id, name: d.name } : null;
 }
 
@@ -449,15 +466,15 @@ function makeCover(item) {
 const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>';
 
 let runItems = new Map(); // the covers on screen: key → buildRun item
+let runNowUri = null; // the song the run was last built around: a new one returns a pan to rest
 
 function renderRun() {
-  const run = $("run");
-  const prev = measure(run);
-  const limits = small.matches ? { maxPast: 2, maxNext: 4 } : { maxPast: 4, maxNext: 8 };
-  const items = buildRun({ history: history(), now: state.now, queue: state.queue }, limits);
+  const track = $("runTrack");
+  const prev = measure(track);
+  const items = buildRun({ history: history(), now: state.now, queue: state.queue }, RUN_LIMITS);
   runItems = new Map(items.map((it) => [it.key, it]));
 
-  const old = new Map([...run.querySelectorAll(".cover")].map((el) => [el.dataset.key, el]));
+  const old = new Map([...track.querySelectorAll(".cover")].map((el) => [el.dataset.key, el]));
   const els = [];
   for (const it of items) {
     const el = old.get(it.key) || makeCover(it);
@@ -467,32 +484,153 @@ function renderRun() {
   }
   if (!state.now) els.splice(items.filter((i) => i.role === "past").length, 0, slot);
 
-  run.replaceChildren(...els);
-  center();
-  flip(run, prev);
+  track.replaceChildren(...els);
+  // another song: back to rest (FLIP animates the covers there); the same song keeps a pan
+  const nowUri = state.now ? state.now.uri : null;
+  if (nowUri !== runNowUri) resetPan();
+  runNowUri = nowUri;
+  placeRun();
+  flip(track, prev);
+  if (panelOpen) renderPanel();
 }
 
-/** Shift the run so the current cover (or the empty slot) sits in the horizontal centre. */
-function center() {
-  const run = $("run");
-  const anchor = run.querySelector('[data-role="now"], .slot');
-  if (!anchor) return;
-  const cur = parseFloat(run.style.getPropertyValue("--shift")) || 0;
-  const delta = run.clientWidth / 2 - (anchor.offsetLeft + anchor.offsetWidth / 2);
-  run.style.setProperty("--shift", `${cur + delta}px`);
-  // a past cover cut by the window edge reads as a sliver: hide it instead
-  // every cover: a reused element keeps the class when its role changes
-  for (const el of run.querySelectorAll(".cover")) el.classList.toggle("is-off", el.dataset.role === "past" && el.offsetLeft < 0);
+// ---------- the run's pan: drag or swipe sideways, back to rest after a pause ----------
+
+const PAN_RETURN_MS = 2500; // no input this long: the run slides back to rest
+const DRAG_SLOP_PX = 5; // a press that moves less is a click
+let restX = 0; // the track's offset that puts the current cover (or the empty slot) at the left content edge
+let pan = 0; // px from rest; > 0 shows what played
+let panTimer = null;
+let drag = null; // a press on the run: {id, x0, pan0, moved, lastX, lastT, v}
+let dragged = false; // the last press panned: its click must not play a cover
+let glide = 0; // the inertia frame after a release
+
+/** The left content edge, px (the gutter). */
+const gutterPx = () => parseFloat(getComputedStyle($("run")).getPropertyValue("--gutter")) || 48;
+
+/** How far the run may pan: the first played cover to the edge, the last next cover into view. */
+function panBounds() {
+  const track = $("runTrack");
+  const anchor = track.querySelector('[data-role="now"], .slot');
+  const first = track.firstElementChild;
+  const last = track.lastElementChild;
+  if (!anchor || !first) return { min: 0, max: 0 };
+  const max = Math.max(0, anchor.offsetLeft - first.offsetLeft);
+  const end = restX + last.offsetLeft + last.offsetWidth; // the last cover's right edge at rest
+  const min = Math.min(0, $("run").clientWidth * 0.72 - end);
+  return { min, max };
 }
 
-/** A play button on a past or next cover: jump to that song (see coverTarget). */
+/** Put the track at rest + pan; animate: slide there (the return), else jump (a drag follows the pointer). */
+function setPan(x, animate = false) {
+  const { min, max } = panBounds();
+  pan = Math.min(max, Math.max(min, x));
+  const track = $("runTrack");
+  track.classList.toggle("is-returning", animate);
+  track.style.transform = `translateX(${restX + pan}px)`;
+}
+
+/** Measure the rest offset (the window or the covers changed) and apply it with the current pan. */
+function placeRun() {
+  const track = $("runTrack");
+  const anchor = track.querySelector('[data-role="now"], .slot');
+  restX = gutterPx() - (anchor ? anchor.offsetLeft : 0);
+  setPan(pan);
+}
+
+function resetPan() {
+  cancelAnimationFrame(glide);
+  clearTimeout(panTimer);
+  drag = null;
+  pan = 0;
+  $("run").classList.remove("is-dragging");
+}
+
+/** Slide back to rest once input has stopped for PAN_RETURN_MS. */
+function holdPan() {
+  clearTimeout(panTimer);
+  if (pan) panTimer = setTimeout(() => setPan(0, true), PAN_RETURN_MS);
+}
+
+/** Where the track is on screen now, as a pan (mid-return it isn't where `pan` says). */
+function shownPan() {
+  const m = new DOMMatrixReadOnly(getComputedStyle($("runTrack")).transform);
+  return m.m41 - restX;
+}
+
+function runDown(ev) {
+  if (ev.button !== 0) return;
+  cancelAnimationFrame(glide);
+  clearTimeout(panTimer);
+  if ($("runTrack").classList.contains("is-returning")) setPan(shownPan()); // caught mid-return: hold it there
+  dragged = false;
+  drag = { id: ev.pointerId, x0: ev.clientX, pan0: pan, moved: false, lastX: ev.clientX, lastT: ev.timeStamp, v: 0 };
+}
+
+function runMove(ev) {
+  if (!drag || ev.pointerId !== drag.id) return;
+  const dx = ev.clientX - drag.x0;
+  if (!drag.moved) {
+    if (Math.abs(dx) < DRAG_SLOP_PX) return;
+    drag.moved = true;
+    $("run").setPointerCapture(ev.pointerId);
+    $("run").classList.add("is-dragging");
+  }
+  const dt = ev.timeStamp - drag.lastT;
+  if (dt > 0) drag.v = (ev.clientX - drag.lastX) / dt; // px/ms, for the glide after release
+  drag.lastX = ev.clientX;
+  drag.lastT = ev.timeStamp;
+  setPan(drag.pan0 + dx);
+}
+
+function runUp(ev) {
+  if (!drag || ev.pointerId !== drag.id) return;
+  const d = drag;
+  drag = null;
+  $("run").classList.remove("is-dragging");
+  if (!d.moved) return;
+  dragged = true;
+  // a quick flick keeps going for a moment, slowing down; a held stop doesn't
+  let v = ev.timeStamp - d.lastT < 80 ? d.v : 0;
+  let t = performance.now();
+  const step = (now) => {
+    const dt = Math.min(32, now - t);
+    t = now;
+    const before = pan;
+    setPan(pan + v * dt);
+    v *= Math.pow(0.95, dt / 16);
+    if (Math.abs(v) > 0.02 && pan !== before) glide = requestAnimationFrame(step);
+    else holdPan();
+  };
+  if (Math.abs(v) > 0.2 && !matchMedia("(prefers-reduced-motion: reduce)").matches) glide = requestAnimationFrame(step);
+  else holdPan();
+}
+
+/** A trackpad swipe sideways (or Shift + wheel) pans; a plain vertical wheel is left alone. */
+function runWheel(ev) {
+  const sideways = Math.abs(ev.deltaX) > Math.abs(ev.deltaY);
+  const dx = sideways ? ev.deltaX : ev.shiftKey ? ev.deltaY : 0;
+  if (!dx) return;
+  ev.preventDefault();
+  cancelAnimationFrame(glide);
+  if ($("runTrack").classList.contains("is-returning")) setPan(shownPan());
+  setPan(pan - dx * (ev.deltaMode === 1 ? 16 : 1));
+  holdPan();
+}
+
+/** A play button on a past or next cover: jump to that song (see coverTarget). Not after a drag. */
 function onRunClick(e) {
+  if (dragged) {
+    dragged = false;
+    return;
+  }
   const btn = e.target.closest(".cover-play");
   const cover = btn && btn.closest(".cover");
   if (cover) playCover(runItems.get(cover.dataset.key));
 }
 
-async function playCover(item) {
+/** Play a run item ({role, offset, track}) from a cover or a panel row (row: the clicked row, for its spinner). */
+async function playCover(item, row = null) {
   if (!item || item.role === "now" || isLocalFile(item.track.uri)) return;
   const last = readSession();
   // Spotify can report no context for a load we started (uris, or a slow state update):
@@ -508,7 +646,7 @@ async function playCover(item) {
     members: (ctx && knownRows.get(ctx)) || (sameAsLast && last.uris) || null,
     listUris: savedFits && last ? last.uris : null,
     nowUri: state.now && state.now.uri,
-    nextUris: [...runItems.values()].filter((it) => it.role === "next").map((it) => it.track.uri),
+    nextUris: state.queue.map((t) => t.uri), // the next covers are its first ones
     historyContext: item.role === "past" ? (history().find((h) => h.track && h.track.uri === item.track.uri) || {}).context_uri || null : null,
   });
   if (!target) return;
@@ -521,7 +659,7 @@ async function playCover(item) {
     ? target.contextUri === ctx && Boolean(sameAsLast)
     : savedFits && Boolean(last && last.uris && last.uris.includes(target.trackUri));
   // keep the full member list for the next jump (never sent with a context: Spirc takes one source)
-  await startPlay(target, { kind: "cover", origin: sameSource ? last.origin : null, members: sameSource ? last.uris : null });
+  await startPlay(target, { kind: "cover", row, origin: sameSource ? last.origin : null, members: sameSource ? last.uris : null });
 }
 
 // ---------- now block, chrome, progress ----------
@@ -533,6 +671,11 @@ function setText(id, text) {
 function setEl(el, text) {
   el.textContent = text || "";
   el.hidden = !text;
+}
+
+function setHtml(el, html) {
+  el.innerHTML = html || "";
+  el.hidden = !html;
 }
 
 let nowArtistHtml = ""; // rewritten only when it changes: a focused artist link keeps its focus
@@ -558,7 +701,8 @@ function renderNow() {
   let head = "Nothing playing";
   let line = "Pick a playlist from your library to start.";
   if (state.mode === "other" && state.device) {
-    head = `Playing on ${state.device.name}`;
+    const name = labelOf(state.device);
+    head = name === HERE ? "Playing here" : `Playing on ${name}`;
     line = "An ad or a podcast is on. Songs show up here.";
   } else if (!state.loaded && !gaveUp(failures)) {
     head = "Connecting…"; // first load or quiet retries: a loader, not an error
@@ -589,6 +733,9 @@ function renderChrome() {
   else $("playBtn").removeAttribute("aria-busy");
   $("playBtn").disabled = mode === "idle"; // an ad or a podcast can still be paused
   for (const id of ["prevBtn", "nextBtn"]) $(id).disabled = mode !== "track";
+  $("panelBtn").disabled = mode !== "track";
+  if (mode !== "track") closePanel();
+  else if (panelOpen) renderPanel(); // shuffle may have flipped
   $("scrub").tabIndex = mode === "track" ? 0 : -1;
 
   const noDevice = state.devices && state.devices.length === 0 && mode === "idle";
@@ -601,7 +748,8 @@ function renderChrome() {
   dev.classList.toggle("is-pending", Boolean(movingTo));
   if (movingTo) dev.setAttribute("aria-busy", "true");
   else dev.removeAttribute("aria-busy");
-  dev.querySelector(".device-name").textContent = movingTo ? `Moving to ${movingTo.name}…` : state.device ? state.device.name : "No device";
+  const shown = movingTo ? (movingTo.name === HERE ? "Moving here…" : `Moving to ${movingTo.name}…`) : state.device ? labelOf(state.device) : "No device";
+  dev.querySelector(".device-name").textContent = shown;
 
   const song = mode === "track";
   const shuffle = $("shuffleBtn");
@@ -988,7 +1136,7 @@ let resumeTried = false; // once per launch
 let lastPoll = null; // the last playback_state
 
 /**
- * Once the engine is ready and a poll has completed: load the last session on "The Run", paused.
+ * Once the engine is ready and a poll has completed: load the last session on the in-app player, paused.
  * Nothing when something plays, when the user already started a play, or when there is nothing to load.
  */
 async function maybeResume() {
@@ -999,7 +1147,7 @@ async function maybeResume() {
   const runId = engine && engine.device_id;
   if (sess !== authSession || !account || !runId || !lastPoll) return;
   const poll = lastPoll;
-  // (a paused session Spotify still shows on "The Run" is loaded too: the restarted player holds nothing)
+  // (a paused session Spotify still shows on the in-app player is loaded too: the restarted player holds nothing)
   if (poll.is_playing || changesPending || pending.current()) return;
   const src = resumeSource(poll, readSession(), account);
   if (!src || isLocalFile(src.trackUri)) return;
@@ -1029,11 +1177,11 @@ function showDevice(d) {
   state.supportsVolume = Boolean(d.supports_volume);
 }
 
-/** Show "The Run" as the device, like a pick, without a transfer: the load made it active. */
+/** Show the in-app player as the device, like a pick, without a transfer: the load made it active. */
 function selectTheRun(runId) {
   if (state.device && state.device.id === runId) return;
   const d = (state.devices || []).find((x) => x.id === runId);
-  showDevice(d || { id: runId, name: "The Run" });
+  showDevice(d || { id: runId, name: "This Mac" }); // Spotify's name for it; shown as "Here"
   intents.start("device"); // a poll already in flight must not put the old device back
   intents.finish("device", performance.now());
   renderChrome();
@@ -1299,9 +1447,9 @@ async function toggleSaved() {
 let devicesOpen = false;
 let devicesGen = 0; // the latest list_devices request: an older answer is dropped
 let devicesNote = ""; // loading or error line while there is no list to show
-let devicesTimer = null; // refreshes the open menu while "The Run" isn't listed
+let devicesTimer = null; // refreshes the open menu while the in-app player isn't listed
 const DEVICES_REFRESH_MS = 3000;
-let runMissingSince = 0; // menu open, engine ready, The Run not listed: since when (0 = not missing)
+let runMissingSince = 0; // menu open, engine ready, the in-app player not listed: since when (0 = not missing)
 
 function toggleDevices() {
   if (devicesOpen) closeDevices(true);
@@ -1310,6 +1458,8 @@ function toggleDevices() {
 
 function openDevices() {
   closeVolume();
+  closePanel();
+  closeSettings();
   devicesOpen = true;
   $("devicePop").hidden = false;
   $("deviceBtn").setAttribute("aria-expanded", "true");
@@ -1318,9 +1468,9 @@ function openDevices() {
   refreshDevices();
   clearInterval(devicesTimer);
   devicesTimer = setInterval(() => {
-    // The Run may be listed any second now; one request at a time, so a slow answer isn't
-    // discarded by the next tick's newer generation
-    if (!devicesBusy && !thisMacBusy && !(state.devices || []).some(isTheRun)) refreshDevices();
+    // the in-app player may be listed any second now; one request at a time, so a slow answer
+    // isn't discarded by the next tick's newer generation
+    if (!devicesBusy && !thisMacBusy && !(state.devices || []).some((d) => isHere(d, engine))) refreshDevices();
   }, DEVICES_REFRESH_MS);
 }
 
@@ -1381,7 +1531,7 @@ function renderDeviceList() {
       return (
         `<button class="device-row${active ? " is-active" : ""}" type="button" role="option" data-i="${i}" data-device="${esc(d.id)}"` +
         ` aria-selected="${active}"${tip ? ` title="${esc(tip)}"` : ""}${d.is_restricted ? ' aria-disabled="true"' : ""} tabindex="-1">` +
-        `<span class="device-row-dot"></span><span class="device-row-name">${esc(d.name)}</span>` +
+        `<span class="device-row-dot"></span><span class="device-row-name">${esc(labelOf(d))}</span>` +
         `<span class="device-row-type">${esc(d.type || "")}</span></button>`
       );
     })
@@ -1393,9 +1543,9 @@ function renderDeviceList() {
   if (focused) $("deviceList").querySelector(`[data-device="${CSS.escape(focused)}"]`)?.focus();
 }
 
-/** The in-app player ("The Run") isn't listed yet: offer this Mac with the engine's state. */
+/** The in-app player isn't listed yet: offer it ("Here") with the engine's state. */
 function renderThisMacRow(list) {
-  const missing = devicesOpen && engine && engine.state === "ready" && state.devices && !list.some(isTheRun);
+  const missing = devicesOpen && engine && engine.state === "ready" && state.devices && !list.some((d) => isHere(d, engine));
   if (!missing) runMissingSince = 0;
   else if (!runMissingSince) runMissingSince = performance.now();
   const missingMs = runMissingSince ? performance.now() - runMissingSince : 0;
@@ -1403,17 +1553,21 @@ function renderThisMacRow(list) {
   if (!row) return "";
   return (
     `<button class="device-row" type="button" role="option" data-this-mac="1" tabindex="-1" title="${esc(row.title)}">` +
-    `<span class="device-row-dot"></span><span class="device-row-name">This Mac</span>` +
+    `<span class="device-row-dot"></span><span class="device-row-name">${HERE}</span>` +
     `<span class="device-row-type">${esc(row.type)}</span></button>`
   );
 }
 
-// ---------- the in-app player ("The Run" on this Mac) ----------
+// ---------- the in-app player (Spotify lists it as "This Mac"; our UI says "Here") ----------
 
 let engine = null; // the last engine_status / engine-status payload, null = unknown
+let hereId = null; // the player's last known device id: a restart (no id for a moment) still shows "Here"
+
+/** A device's name in the UI: "Here" for the in-app player, else Spotify's. */
+const labelOf = (d) => deviceLabel(d, { device_id: (engine && engine.device_id) || hereId });
 let thisMacBusy = ""; // a click on "This Mac" is working: "login" | "connecting" | ""
 const ENGINE_WAIT_MS = 20000; // for a starting/reconnecting player to be ready
-const THE_RUN_WAIT_MS = 20000; // for a ready player to show up in the device list
+const THE_RUN_WAIT_MS = 20000; // for a ready player to show up in the device list (by its device id)
 const THE_RUN_POLL_MS = 1500;
 
 /** Tauri events; a no-op where there is no event API. Resolves to an unlisten function. */
@@ -1426,12 +1580,16 @@ function listenEvent(name, fn) {
 function setEngine(st) {
   if (!st || !st.state) return;
   const wasReady = engine && engine.state === "ready";
+  const wasId = engine && engine.device_id;
   engine = st;
+  if (st.device_id) hereId = st.device_id;
   if (st.state === "account_mismatch") clearSession(); // the player is on another account
   if (st.state === "ready") maybeResume();
+  if (settingsOpen) renderSettings(); // quality needs a ready player
+  if (st.device_id !== wasId && !$("stage").hidden) renderChrome(); // the chip may be the player: "Here"
   if (!devicesOpen) return;
   renderDeviceList();
-  // ready now: The Run registers with Spotify, so the open list should show it
+  // ready now: the player registers with Spotify, so the open list should show it
   if (st.state === "ready" && !wasReady) refreshDevices();
 }
 
@@ -1476,7 +1634,7 @@ function waitEngine(ms) {
   });
 }
 
-/** Poll the device list until "The Run" shows up; null after ms. */
+/** Poll the device list until the in-app player shows up (by the engine's device id); null after ms. */
 async function findTheRun(ms, sess) {
   const until = performance.now() + ms;
   for (;;) {
@@ -1484,7 +1642,7 @@ async function findTheRun(ms, sess) {
     if (sess !== authSession) return null;
     if (list) {
       setDevices(list);
-      const run = list.find(isTheRun);
+      const run = list.find((d) => isHere(d, engine));
       if (run) return run;
     }
     if (performance.now() + THE_RUN_POLL_MS > until) return null;
@@ -1498,7 +1656,7 @@ function setBusy(busy) {
   if (devicesOpen) renderDeviceList();
 }
 
-/** Get the in-app player ready (logging it in if it must), wait for "The Run", then move playback there. */
+/** Get the in-app player ready (logging it in if it must), wait for Spotify to list it, then move playback there. */
 async function playOnThisMac() {
   if (thisMacBusy) return;
   const sess = authSession;
@@ -1513,7 +1671,8 @@ async function playOnThisMac() {
       await invoke("engine_login"); // resolved = logged in and ready (no event to wait for)
       if (sess !== authSession) return;
       setEngine({ ...st, state: "ready", reason: undefined });
-      refreshEngine(); // its device id
+      await refreshEngine(); // its device id: how the list shows it
+      if (sess !== authSession) return;
       setBusy("connecting");
     } else if (st.state !== "ready") {
       return void toast(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
@@ -1603,7 +1762,7 @@ async function pickDevice(d) {
   const before = state.device;
   showDevice(d);
   const seq = intents.start("device");
-  movingTo = { seq, name: d.name };
+  movingTo = { seq, name: labelOf(d) };
   renderChrome();
   const sess = authSession;
   let failed = null;
@@ -1638,13 +1797,44 @@ async function pickDevice(d) {
 function onOutside(ev) {
   if (devicesOpen && !ev.target.closest(".device-wrap")) closeDevices();
   if (volumeOpen && !ev.target.closest("#volume")) closeVolume();
+  if (panelOpen && !ev.target.closest(".panel-wrap")) closePanel();
+  if (settingsOpen && !ev.target.closest(".settings-wrap")) closeSettings();
+}
+
+// next / previous: a ring on the pressed button from the click until a poll shows another song,
+// a poll that began SKIP_SETTLE_MS after the command landed (previous may restart the same song),
+// or SKIP_MS, whichever comes first
+const SKIP_MS = 5000;
+const SKIP_SETTLE_MS = 1500;
+let skipWait = null; // {btn, landedAt, timer}
+
+function startSkip(btn) {
+  endSkip();
+  const wait = { btn, landedAt: 0, timer: setTimeout(endSkip, SKIP_MS) };
+  btn.classList.add("is-pending");
+  btn.setAttribute("aria-busy", "true");
+  skipWait = wait;
+  return wait;
+}
+
+function endSkip() {
+  if (!skipWait) return;
+  clearTimeout(skipWait.timer);
+  skipWait.btn.classList.remove("is-pending");
+  skipWait.btn.removeAttribute("aria-busy");
+  skipWait = null;
 }
 
 async function skip(cmd) {
   if (!state.now) return;
   const dev = state.device && state.device.id; // the device this click is for
   const local = cmd === "next_track" ? "local_next" : "local_prev";
-  await changeTrack(() => routed(dev, () => invoke(local), () => invoke(cmd)));
+  const wait = startSkip($(cmd === "next_track" ? "nextBtn" : "prevBtn"));
+  const ok = await changeTrack(() => routed(dev, () => invoke(local), () => invoke(cmd)));
+  if (skipWait === wait) {
+    if (ok) wait.landedAt = performance.now();
+    else endSkip();
+  }
   kick();
 }
 
@@ -1692,6 +1882,468 @@ async function seekTo(ms, gen = trackGen) {
   kick();
 }
 
+// ---------- the playlist panel: the playing list around the current song ----------
+
+let panelOpen = false;
+// the source the current song plays from: {key, ctx, origin, name, tracks (null = loading or none), loading}
+let panelSrc = null;
+let panelGen = 0; // the latest source load: an older one's answer is dropped
+let panelShown = ""; // the rows on screen, as a signature: an unchanged render keeps scroll, focus and a spinner
+let panelView = { mode: "queue", rows: [] };
+let panelNowKey = null; // the current song's row on screen: when it moves, the panel scrolls to it
+let lastList = null; // the list the last list play here started from: {tracks, name, origin}
+
+function togglePanel() {
+  if (panelOpen) closePanel(true);
+  else openPanel();
+}
+
+function openPanel() {
+  if (state.mode !== "track") return;
+  closeDevices();
+  closeVolume();
+  closeSettings();
+  panelOpen = true;
+  panelShown = "";
+  panelNowKey = null;
+  $("panel").hidden = false;
+  $("panelBtn").setAttribute("aria-expanded", "true");
+  renderPanel();
+}
+
+function closePanel(refocus = false) {
+  if (!panelOpen) return;
+  panelOpen = false;
+  panelGen++; // a list still loading must not land in a closed panel
+  panelSrc = null; // the next open asks again (the list cache makes it quick)
+  $("panel").hidden = true;
+  $("panelBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("panelBtn").focus();
+}
+
+/** A playback context as the panel lists it, or null when Spotify won't list it (artist, radio…). */
+function contextSource(ctx, origin = null) {
+  const [, kind, id] = String(ctx).split(":");
+  if (kind === "playlist" && id) {
+    return {
+      key: ctx,
+      ctx,
+      origin: origin || { kind: "playlist", id },
+      name: null,
+      fetch: async (shown, named) => {
+        // the name and the snapshot id (it keys the disk copy): the loaded playlists, their disk copy, or a fetch
+        const find = (list) => (Array.isArray(list) ? list : []).find((x) => x && x.id === id) || null;
+        let p = find(playlists) || find(await diskGet("playlists"));
+        if (!p && !playlists) p = find(await listInvoke("get_playlists").catch(() => null));
+        if (p) named(p.name);
+        else mixInfoFor(id).then((info) => info && named(info.name)); // a Spotify mix: not in the playlists
+        const snap = (p && p.snapshot_id) || null;
+        const key = snap ? `playlist:${id}:${snap}` : `playlist:${id}`;
+        if (snap && !lib.has(key)) diskGet(key).then((v) => v && shown(listTracks(v)));
+        return listTracks(await libGet(key, "get_playlist_tracks", { playlistId: id, snapshotId: snap }));
+      },
+    };
+  }
+  if (kind === "album" && id) {
+    const key = `album:${id}`;
+    return {
+      key: ctx,
+      ctx,
+      origin: origin || { kind: "album", id },
+      name: state.now && state.now.album, // the song plays from its own album
+      fetch: async (shown) => {
+        if (!lib.has(key)) diskGet(key).then((v) => v && shown(listTracks(v)));
+        return listTracks(await libGet(key, "get_album_tracks", { albumId: id }));
+      },
+    };
+  }
+  if (/:collection$/.test(ctx)) {
+    return {
+      key: ctx,
+      ctx,
+      origin: null,
+      name: "Liked Songs",
+      fetch: async (shown) => {
+        if (!lib.has("liked")) diskGet("liked").then((v) => v && shown(listTracks(v)));
+        return listTracks(await libGet("liked", "get_saved_tracks"));
+      },
+    };
+  }
+  return null;
+}
+
+/** What the current song plays from: the context, else the list a play here started from, else the saved origin. */
+function panelSource() {
+  const t = state.now;
+  if (!t) return null;
+  if (state.contextUri) return contextSource(state.contextUri);
+  // a play by uris: Spotify names no context
+  if (lastList && lastList.tracks.some((x) => x.uri === t.uri)) {
+    const l = lastList;
+    return { key: l, ctx: null, origin: l.origin, name: l.name, fetch: async () => l.tracks };
+  }
+  const last = readSession();
+  const ctx = last && originUri(last.origin);
+  if (ctx && (last.trackUri === t.uri || (last.uris && last.uris.includes(t.uri)))) return contextSource(ctx, last.origin);
+  return null; // the queue view: recent plays, now, Spotify's queue
+}
+
+/** Start loading src's tracks; each answer (disk copy, then fresh) re-renders the open panel. */
+function loadPanelSource(src) {
+  const gen = ++panelGen;
+  panelSrc = src ? { ...src, tracks: null, loading: true } : null;
+  if (!src) return;
+  const cur = panelSrc;
+  const live = () => gen === panelGen && panelOpen;
+  const named = (name) => {
+    if (!live() || !name || cur.name) return;
+    cur.name = name;
+    renderPanel();
+  };
+  const shown = (tracks) => {
+    if (!live() || !cur.loading) return; // the fresh list already landed
+    cur.tracks = tracks;
+    renderPanel();
+  };
+  src.fetch(shown, named).then(
+    (tracks) => {
+      if (!live()) return;
+      cur.loading = false;
+      cur.tracks = (tracks || []).filter((x) => x && x.uri);
+      if (cur.ctx && offsettable(cur.ctx)) knownRows.set(cur.ctx, cur.tracks.map((x) => x.uri)); // for cover clicks
+      renderPanel();
+    },
+    (e) => {
+      if (!live()) return;
+      if (isCode(e, "AUTH_EXPIRED")) return void expire();
+      cur.loading = false; // the queue view instead (a mix, a list Spotify won't give, a network blip)
+      renderPanel();
+    },
+  );
+}
+
+function renderPanel() {
+  if (!panelOpen || !state.now) return;
+  const src = panelSource();
+  if ((src && src.key) !== (panelSrc && panelSrc.key)) loadPanelSource(src);
+  const name = panelSrc && panelSrc.name;
+  $("panelTitle").textContent = name || "Now playing";
+  $("panel").querySelector(".panel-kicker").hidden = !name;
+  const list = $("panelList");
+  // shuffle off: the list is on its way; skeletons, not a queue view that jumps to the list
+  if (panelSrc && panelSrc.loading && !panelSrc.tracks && !state.shuffle) {
+    if (panelShown !== "loading") {
+      list.innerHTML = skeletonRows(6);
+      list.setAttribute("aria-busy", "true");
+      panelShown = "loading";
+    }
+    return;
+  }
+  list.removeAttribute("aria-busy");
+  const view = panelRows({ list: panelSrc && panelSrc.tracks, now: state.now, history: history(), queue: state.queue, shuffle: state.shuffle });
+  const sig = `${view.mode}#${view.rows.map((r) => `${r.key}:${r.role}:${r.track.uri}`).join("|")}`;
+  if (sig === panelShown) return;
+  panelShown = sig;
+  panelView = view;
+  list.innerHTML = panelHtml(view);
+  // a play clicked in the panel keeps its spinner across a re-render
+  if (pendingRow && !pendingRow.isConnected && pendingRow.dataset.key) {
+    const row = list.querySelector(`[data-key="${CSS.escape(pendingRow.dataset.key)}"]`);
+    if (row) {
+      pendingRow = row;
+      row.classList.add("is-pending");
+    }
+  }
+  const nowRow = view.rows.find((r) => r.role === "now");
+  const nowKey = nowRow ? nowRow.key : null;
+  if (nowKey !== panelNowKey) {
+    panelNowKey = nowKey;
+    centerPanelNow();
+  }
+}
+
+/** Played rows (with a heading in the queue view), the current one, what's next. */
+function panelHtml(view) {
+  let html = "";
+  let role = "";
+  view.rows.forEach((r, n) => {
+    if (view.mode === "queue" && r.role !== role && r.role !== "now") {
+      html += `<p class="panel-label">${r.role === "played" ? "Played" : "Up next"}</p>`;
+    }
+    role = r.role;
+    const t = r.track;
+    const local = isLocalFile(t.uri);
+    html +=
+      `<button class="row is-${r.role}${local ? " is-local" : ""}" type="button" data-n="${n}" data-key="${r.key}"` +
+      `${r.role === "now" ? ' aria-current="true"' : ""}${local ? " disabled" : ""}>` +
+      `<span class="art row-art">${artHtml(t.cover, t.name)}</span>` +
+      `<span class="row-text"><span class="row-title">${esc(t.name)}</span><span class="row-sub">${esc(t.artists)}</span></span>` +
+      `<span class="row-time">${fmtTime(t.duration_ms)}</span></button>`;
+  });
+  return html;
+}
+
+/** Scroll the panel's list (only it) so the current row sits in the middle. */
+function centerPanelNow() {
+  const list = $("panelList");
+  const row = list.querySelector('[aria-current="true"]');
+  if (row) list.scrollTop = row.offsetTop - list.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
+}
+
+function onPanelClick(e) {
+  const el = e.target.closest(".row[data-n]");
+  const r = el && panelView.rows[Number(el.dataset.n)];
+  if (!r || r.role === "now" || isLocalFile(r.track.uri)) return;
+  if (panelView.mode === "list") return void playPanelRow(r, el);
+  // the queue view: a played or a queued song, as its cover in the run would play it
+  playCover({ role: r.role === "played" ? "past" : "next", offset: r.role === "next" ? r.i + 1 : -1, track: r.track }, el);
+}
+
+/** A row of the playing list: the context from that song, else the list from that row on (like the Library). */
+function playPanelRow(r, el) {
+  const src = panelSrc;
+  if (!src || !src.tracks) return;
+  if (src.ctx && offsettable(src.ctx)) {
+    startPlay({ contextUri: src.ctx, trackUri: r.track.uri }, { kind: "panel", row: el, origin: src.origin });
+    return;
+  }
+  const uris = src.tracks.slice(r.i).map((t) => t.uri).filter((u) => !isLocalFile(u)).slice(0, PLAY_URIS_MAX);
+  if (!uris.length) return;
+  // Spotify names no context for a uris play: the panel keeps showing this list
+  lastList = { tracks: src.tracks, name: src.name, origin: src.origin };
+  startPlay({ uris, trackUri: uris[0] }, { kind: "panel", row: el, origin: src.origin });
+}
+
+// ---------- settings: album art as the app icon, the in-app player's audio quality ----------
+
+let settings = null; // parseSettings of localStorage "therun.settings", read once
+let settingsOpen = false;
+let quality = null; // the in-app player's bitrate (96 | 160 | 320), null = unknown
+let qualityBusy = 0; // the kbps being applied while the player restarts, 0 = none
+let restartHoldUntil = 0; // until then (or the reload), polls that see nothing playing are ignored
+const RESTART_SEEN_MS = 2500; // after engine_set_quality: a restart that hasn't shown up by now isn't coming
+
+function getSettings() {
+  if (!settings) {
+    try {
+      settings = parseSettings(localStorage.getItem(SETTINGS_KEY));
+    } catch {
+      settings = parseSettings(null); // storage blocked: the defaults, for this run
+    }
+  }
+  return settings;
+}
+
+function saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(getSettings()));
+  } catch {
+    /* kept in memory for this run */
+  }
+}
+
+function toggleSettings() {
+  if (settingsOpen) closeSettings(true);
+  else openSettings();
+}
+
+function openSettings() {
+  closeDevices();
+  closeVolume();
+  closePanel();
+  settingsOpen = true;
+  $("settingsPop").hidden = false;
+  $("settingsBtn").setAttribute("aria-expanded", "true");
+  renderSettings();
+  $("dockArtSwitch").focus();
+  loadQuality();
+}
+
+function closeSettings(refocus = false) {
+  if (!settingsOpen) return;
+  settingsOpen = false;
+  $("settingsPop").hidden = true;
+  $("settingsBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("settingsBtn").focus();
+}
+
+const engineReady = () => Boolean(engine && engine.state === "ready");
+
+function renderSettings() {
+  $("dockArtSwitch").setAttribute("aria-checked", String(getSettings().dockArt));
+  const ready = engineReady();
+  for (const b of $("qualityOpts").querySelectorAll("[data-kbps]")) {
+    const kbps = Number(b.dataset.kbps);
+    const on = qualityBusy ? kbps === qualityBusy : kbps === quality;
+    b.setAttribute("aria-checked", String(on));
+    b.tabIndex = on || (!quality && !qualityBusy && kbps === 160) ? 0 : -1;
+    b.disabled = !ready || Boolean(qualityBusy);
+    b.classList.toggle("is-pending", kbps === qualityBusy);
+    if (kbps === qualityBusy) b.setAttribute("aria-busy", "true");
+    else b.removeAttribute("aria-busy");
+  }
+  $("qualityNote").textContent = qualityBusy
+    ? "Restarting the player…"
+    : ready
+      ? "Changing restarts the player for a moment."
+      : "Available once the player here is ready.";
+}
+
+async function loadQuality() {
+  try {
+    const q = await invoke("engine_get_quality");
+    if (isQuality(q) && !qualityBusy) quality = q;
+  } catch {
+    /* unknown: no option marked */
+  }
+  if (settingsOpen) renderSettings();
+}
+
+function toggleDockArt() {
+  const s = getSettings();
+  s.dockArt = !s.dockArt;
+  saveSettings();
+  renderSettings();
+  if (s.dockArt) syncDockArt();
+  else resetDockArt();
+}
+
+let dockUrl = null; // the cover set as the app icon, null = the app's own icon
+
+/** The current song's cover as the app icon (when on), once per cover. Errors are logged in Rust. */
+function syncDockArt() {
+  if (!getSettings().dockArt || !state.now) return;
+  const url = state.now.cover || null;
+  if (url === dockUrl) return;
+  dockUrl = url;
+  invoke("set_dock_art", { url }).catch(() => {});
+}
+
+/** Back to the app's own icon. Not session-tagged: a logout resets it after the session is gone. */
+function resetDockArt() {
+  dockUrl = null;
+  window.__TAURI__.core.invoke("set_dock_art", { url: null }).catch(() => {});
+}
+
+/**
+ * Watch engine-status across a player restart. done: the state once the player is back (a starting or
+ * reconnecting, then anything else), or null after ms. arm(): the restart command returned; when no
+ * restart shows up within RESTART_SEEN_MS, the engine's current state counts. stop(): give up.
+ */
+function watchRestart(ms) {
+  let over = false;
+  let saw = false;
+  let unlisten = null;
+  let quiet = null;
+  let resolve;
+  const done = new Promise((r) => (resolve = r));
+  const finish = (st) => {
+    if (over) return;
+    over = true;
+    clearTimeout(timer);
+    clearTimeout(quiet);
+    if (unlisten) unlisten();
+    resolve(st);
+  };
+  const timer = setTimeout(() => finish(null), ms);
+  const ready = listenEvent("engine-status", (st) => {
+    if (!st || !st.state) return;
+    if (CONNECTING.has(st.state)) {
+      saw = true;
+      clearTimeout(quiet);
+    } else if (saw) finish(st);
+  }).then((u) => (over ? u() : (unlisten = u)));
+  const arm = () => {
+    if (!saw) quiet = setTimeout(() => !saw && waitEngine(ms).then(finish), RESTART_SEEN_MS);
+  };
+  return { ready, done, arm, stop: () => finish(null) };
+}
+
+/** The current song's source for a reload on the in-app player: like a resume, where it is now. */
+function sourceNow() {
+  const t = state.now;
+  const last = readSession();
+  if (state.contextUri) return { contextUri: state.contextUri, trackUri: t.uri };
+  if (last && last.uris && last.uris.includes(t.uri)) return { uris: last.uris, trackUri: t.uri };
+  return { uris: [t.uri], trackUri: t.uri };
+}
+
+/**
+ * Pick a bitrate: the player restarts on it. When it was playing (or holding) the current song,
+ * that song is loaded again where it was, playing or paused as before.
+ */
+async function setQuality(kbps) {
+  if (qualityBusy || kbps === quality || !engineReady() || !isQuality(kbps)) return;
+  const sess = authSession;
+  const t = state.now;
+  const here = Boolean(t && !isLocalFile(t.uri) && state.device && isLocal(engine, state.device.id, activeId));
+  const back = here ? { ...sourceNow(), positionMs: Math.round(progress()), play: state.isPlaying } : null;
+  qualityBusy = kbps;
+  renderSettings();
+  if (back) restartHoldUntil = performance.now() + ENGINE_WAIT_MS + RESTART_SEEN_MS;
+  try {
+    await restartOnQuality(kbps, sess, back);
+  } finally {
+    if (sess === authSession) restartHoldUntil = 0;
+  }
+}
+
+/** setQuality's restart: the command, the wait for the player to be back, the reload of back (or nothing). */
+async function restartOnQuality(kbps, sess, back) {
+  const watch = watchRestart(ENGINE_WAIT_MS);
+  await watch.ready;
+  try {
+    await invoke("engine_set_quality", { kbps });
+  } catch (e) {
+    watch.stop();
+    if (sess !== authSession) return;
+    qualityBusy = 0;
+    renderSettings();
+    if (isCode(e, "AUTH_EXPIRED")) return void expire();
+    toast(`Couldn't change the quality: ${reason(e)}`);
+    return;
+  }
+  if (sess !== authSession) return void watch.stop();
+  quality = kbps;
+  watch.arm();
+  const st = await watch.done;
+  if (sess !== authSession) return;
+  qualityBusy = 0;
+  renderSettings();
+  if (!st || st.state !== "ready") return void toast("The player here is still restarting. Try again in a moment.");
+  // the user started something else meanwhile: that wins
+  if (!back || changesPending || pending.current()) return;
+  const runId = st.device_id || (engine && engine.device_id);
+  const token = startPending("resume", back.trackUri, null, back.play);
+  let failed = false;
+  await changeTrack(() =>
+    invoke("local_load", { ...back, shuffle: state.shuffle, repeat: state.repeat }).catch((e) => {
+      if (isCode(e, "AUTH_EXPIRED")) throw e;
+      failed = true;
+    }),
+  );
+  if (sess !== authSession) return;
+  settlePending(token, !failed);
+  if (failed) return void toast("Couldn't load the song again here");
+  if (runId) selectTheRun(runId);
+  kick();
+}
+
+function onQualityClick(e) {
+  const b = e.target.closest("[data-kbps]");
+  if (b && !b.disabled) setQuality(Number(b.dataset.kbps));
+}
+
+/** Arrows move the choice inside the radio group, like the page tabs. */
+function onQualityKey(e) {
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (!step) return;
+  e.preventDefault();
+  const opts = [...$("qualityOpts").querySelectorAll("[data-kbps]")];
+  const at = Math.max(0, opts.indexOf(document.activeElement));
+  opts[(at + step + opts.length) % opts.length].focus();
+}
+
 // ---------- overlays: one open at a time ----------
 
 let returnFocus = null;
@@ -1704,6 +2356,8 @@ function openOverlay(name, back = false) {
   $(name).classList.toggle("is-back", back);
   closeDevices(); // popovers belong to the stage, which goes inert
   closeVolume();
+  closePanel();
+  closeSettings();
   overlayRev++;
   if (state.overlay) $(state.overlay).hidden = true;
   else returnFocus = document.activeElement;
@@ -1861,7 +2515,8 @@ function showList() {
 
 function goBack() {
   const prev = navStack.pop();
-  if (prev === PAGE_ENTRY) returnToPage();
+  if (prev === STAGE_ENTRY) closeOverlay(); // opened from the main screen: back to it
+  else if (prev === PAGE_ENTRY) returnToPage();
   else if (prev) openDetail(prev, false);
   else showList();
 }
@@ -2315,17 +2970,18 @@ const openMix = (m) => m && openDetail({ kind: "mix", id: m.id, name: m.name, co
 async function openDetail(src, push = true) {
   if (state.overlay !== "library") {
     const fromPage = state.overlay === "browse";
+    const fromStage = !state.overlay;
     if (fromPage) page.scroll = $("pageBody").scrollTop;
     openOverlay("library");
     $("sheet").focus();
-    // from the stage or Search: Back shows the list; from a full page: Back returns there
-    navStack = fromPage ? [PAGE_ENTRY] : [];
+    // from the main screen: Back returns there; from a full page: Back returns to it; from Search: the list
+    navStack = fromPage ? [PAGE_ENTRY] : fromStage ? [STAGE_ENTRY] : [];
     if (!curDetail && !fromPage) listScroll = $("sheetBody").scrollTop;
     loadGroups(); // so Back has a list to show
   } else if (push && curDetail) {
     navStack.push(curDetail);
-    // the oldest detail goes; the full page under them all stays
-    if (navStack.length > NAV_MAX) navStack.splice(navStack[0] === PAGE_ENTRY ? 1 : 0, 1);
+    // the oldest detail goes; the full page or the main screen under them all stays
+    if (navStack.length > NAV_MAX) navStack.splice(navStack[0] === PAGE_ENTRY || navStack[0] === STAGE_ENTRY ? 1 : 0, 1);
   } else if (push) {
     listScroll = $("sheetBody").scrollTop;
     navStack = [];
@@ -2426,10 +3082,22 @@ function showDetail(src, data) {
     setText("detailSub", plural(total, "song", "songs"));
     setText("detailNote", total > n ? `Showing your newest ${n} of ${total}` : "");
   }
+  if (src.kind === "album") setHtml($("detailSub"), albumArtistsHtml(src.sub, detailTracks));
   const empty = { album: "This album is empty.", liked: "No liked songs yet." }[src.kind] || "This playlist is empty.";
   setText("detailStatus", n ? "" : empty);
   $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album" })).join("");
   $("detailPlay").disabled = !detailTracks.some((t) => !isLocalFile(t.uri));
+}
+
+/**
+ * An album head's artists as links: the names in sub ("A, B"), each with its id from the tracks'
+ * artist lists (the album itself has only the joined names); a name with no known id stays text.
+ */
+function albumArtistsHtml(sub, tracks) {
+  const ids = new Map();
+  for (const t of tracks) for (const a of t.artist_list || []) if (a && a.id && a.name && !ids.has(a.name)) ids.set(a.name, a.id);
+  const names = sub ? String(sub).split(", ") : ((tracks[0] && tracks[0].artist_list) || []).map((a) => a && a.name).filter(Boolean);
+  return names.map((n) => (ids.has(n) ? `<button class="artist-link" type="button" data-artist="${esc(ids.get(n))}">${esc(n)}</button>` : esc(n))).join(", ");
 }
 
 /** A detail view as a play's origin: playlists and albums only. */
@@ -2526,16 +3194,21 @@ function onDetailPlay() {
 /** Play tracks from row i on; the overlay closes only if the user is still on that view. */
 const PLAY_URIS_MAX = 200;
 
-/** opts: {origin, row} — the detail view it came from and the clicked row (see startPlay). */
-async function playFrom(tracks, i, opts = {}) {
+/**
+ * opts: {origin, row} — the detail view it came from and the clicked row (see startPlay);
+ * name: the list's name, for the playlist panel (Spotify names no context for a uris play).
+ */
+async function playFrom(tracks, i, { name = null, ...opts } = {}) {
   // Spotify lists local files in playlists but rejects them in play requests
   // capped: Liked Songs can hold 1000 rows, and Spotify's limit for one play request is unknown
   const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocalFile(u)).slice(0, PLAY_URIS_MAX);
+  // the whole list, so the panel shows what came before the clicked song too (one song is no list)
+  if (uris.length && tracks.length > 1) lastList = { tracks: tracks.filter((t) => t && t.uri), name, origin: opts.origin || null };
   const rev = overlayRev;
   if ((await playUris(uris, opts)) && rev === overlayRev) closeOverlay();
 }
 
-const playDetailFrom = (i, row = null) => playFrom(detailTracks, i, { origin: originOf(curDetail), row });
+const playDetailFrom = (i, row = null) => playFrom(detailTracks, i, { origin: originOf(curDetail), row, name: curDetail && curDetail.name });
 
 // ---------- search: songs + albums, debounced, last request wins ----------
 
@@ -2636,6 +3309,7 @@ function onSearchClick(e) {
 
 const FIRST_PAGES = 3; // 30 results up front, then 10 per "Load more"
 const PAGE_ENTRY = { kind: "page" }; // in the detail Back stack: Back returns to the full page
+const STAGE_ENTRY = { kind: "stage" }; // in the detail Back stack: Back closes the Library, back to the main screen
 const RANGE_LABEL = { short_term: "Last 4 weeks", medium_term: "Last 6 months", long_term: "All time" };
 
 const page = {
@@ -2888,10 +3562,12 @@ const typing = (t) => t && t.closest && t.closest("input, textarea, select, [con
 
 function onKey(e) {
   // Esc closes the innermost thing: a popover first, then a full page (back), then the overlay
-  if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || state.overlay)) {
+  if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || panelOpen || settingsOpen || state.overlay)) {
     e.preventDefault();
     if (devicesOpen) closeDevices(true);
     else if (volumeOpen) closeVolume(true);
+    else if (panelOpen) closePanel(true);
+    else if (settingsOpen) closeSettings(true);
     else if (state.overlay === "browse") pageBack(); // a full page returns to where it came from
     else closeOverlay();
     return;
@@ -2935,7 +3611,17 @@ async function boot() {
   $("deviceBtn").addEventListener("click", toggleDevices);
   document.querySelector(".device-wrap").addEventListener("keydown", onDeviceKey);
   $("deviceList").addEventListener("click", onDeviceClick);
+  $("settingsBtn").addEventListener("click", toggleSettings);
+  $("dockArtSwitch").addEventListener("click", toggleDockArt);
+  $("qualityOpts").addEventListener("click", onQualityClick);
+  $("qualityOpts").addEventListener("keydown", onQualityKey);
+  $("panelBtn").addEventListener("click", togglePanel);
+  $("panelList").addEventListener("click", onPanelClick);
+  $("panel").addEventListener("error", onImgError, true);
   document.addEventListener("pointerdown", onOutside);
+  // focus rings only for the keyboard: a click must not leave a ring (WebKit can match :focus-visible on one)
+  document.addEventListener("pointerdown", () => (document.documentElement.dataset.input = "pointer"), true);
+  document.addEventListener("keydown", () => (document.documentElement.dataset.input = "key"), true);
 
   $("libraryBtn").addEventListener("click", openLibrary);
   $("searchBtn").addEventListener("click", openSearch);
@@ -2954,7 +3640,7 @@ async function boot() {
   });
   $("libLiked").addEventListener("click", () => openDetail({ kind: "liked", id: "liked", name: "Liked Songs", cover: null, sub: "" }));
   $("topTabs").addEventListener("click", onTopTab);
-  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row) => playFrom(topTrackList, i, { row })));
+  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row) => playFrom(topTrackList, i, { row, name: "Your top songs" })));
   $("topArtists").addEventListener("click", (e) => openArtistTile(tileAt(e, topArtistList)));
   $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, followed)));
   $("libAlbums").addEventListener("click", (e) => {
@@ -2978,6 +3664,10 @@ async function boot() {
     new IntersectionObserver(onMoreSeen, { root: $("pageBody"), rootMargin: "0px 0px 240px 0px" }).observe($("pageMore"));
   }
   $("detailRows").addEventListener("click", onDetailClick);
+  $("detailSub").addEventListener("click", (e) => {
+    const link = e.target.closest(".artist-link");
+    if (link) openArtist(link);
+  });
   $("detailPlay").addEventListener("click", onDetailPlay);
   $("nowArtist").addEventListener("click", (e) => {
     const link = e.target.closest(".artist-link");
@@ -2987,7 +3677,7 @@ async function boot() {
   $("searchResults").addEventListener("click", onSearchClick);
   document.addEventListener("keydown", onKey);
   document.addEventListener("keyup", onKey);
-  addEventListener("resize", center);
+  addEventListener("resize", placeRun);
   let fitFrame = 0; // a window drag fires resize ~60/s: refit once per frame
   addEventListener("resize", () => {
     cancelAnimationFrame(fitFrame);
@@ -2996,10 +3686,14 @@ async function boot() {
   small.addEventListener("change", () => {
     closeVolume(); // the slider popover exists only on narrow screens
     renderVolume();
-    if (state.loaded) renderRun();
   });
   $("run").addEventListener("error", onImgError, true);
   $("run").addEventListener("click", onRunClick);
+  $("run").addEventListener("pointerdown", runDown);
+  $("run").addEventListener("pointermove", runMove);
+  $("run").addEventListener("pointerup", runUp);
+  $("run").addEventListener("pointercancel", runUp);
+  $("run").addEventListener("wheel", runWheel, { passive: false });
   // quitting mid-song: the next launch starts here
   addEventListener("beforeunload", () => !$("stage").hidden && noteSession(true));
   // dev harness only: the `artist` scenario opens a page by id

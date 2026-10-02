@@ -34,28 +34,48 @@
     <main id="stage" class="stage" hidden>
       <header class="topbar">
         <div class="topbar-tools">
-          <button id="libraryBtn" class="btn btn-ghost" type="button">
+          <button id="libraryBtn" class="btn btn-ghost nav-btn" type="button" aria-label="Library">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h3v15H4zM9.5 4.5h3v15h-3zM15.2 5.3l2.9-.8 3.9 14.5-2.9.8z" /></svg>
-            Library
           </button>
-          <button id="searchBtn" class="btn btn-ghost" type="button">
+          <button id="searchBtn" class="btn btn-ghost nav-btn" type="button" aria-label="Search">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
-            Search
           </button>
         </div>
-        <div class="device-wrap">
-          <button id="deviceBtn" class="device" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="devicePop" hidden>
-            <span class="device-dot"></span><span class="device-name"></span>
-            <svg class="device-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 8.6 5.6 5.6 5.6-5.6L19 10l-7 7-7-7z" /></svg>
-          </button>
-          <div id="devicePop" class="device-pop" hidden>
-            <div id="deviceList" class="device-list" role="listbox" aria-label="Spotify devices"></div>
-            <p class="device-note" role="status" hidden></p>
+        <div class="topbar-end">
+          <div class="device-wrap">
+            <button id="deviceBtn" class="device" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="devicePop" hidden>
+              <span class="device-dot"></span><span class="device-name"></span>
+              <svg class="device-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 8.6 5.6 5.6 5.6-5.6L19 10l-7 7-7-7z" /></svg>
+            </button>
+            <div id="devicePop" class="device-pop" hidden>
+              <div id="deviceList" class="device-list" role="listbox" aria-label="Spotify devices"></div>
+              <p class="device-note" role="status" hidden></p>
+            </div>
+          </div>
+          <div class="settings-wrap">
+            <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPop">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M10.3 2.5h3.4l.5 2.6c.6.2 1.2.6 1.7 1l2.5-.9 1.7 3-2 1.7a7 7 0 0 1 0 2.1l2 1.7-1.7 3-2.5-.9c-.5.4-1.1.8-1.7 1l-.5 2.7h-3.4l-.5-2.7c-.6-.2-1.2-.6-1.7-1l-2.5.9-1.7-3 2-1.7a7 7 0 0 1 0-2.1l-2-1.7 1.7-3 2.5.9c.5-.4 1.1-.8 1.7-1zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" /></svg>
+            </button>
+            <div id="settingsPop" class="device-pop settings-pop" role="dialog" aria-label="Settings" hidden>
+              <div class="set-row">
+                <span id="dockArtLabel" class="set-label">Album art as app icon</span>
+                <button id="dockArtSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="dockArtLabel"></button>
+              </div>
+              <div class="set-group">
+                <span id="qualityLabel" class="set-label">Audio quality</span>
+                <div id="qualityOpts" class="seg" role="radiogroup" aria-labelledby="qualityLabel">
+                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="96"><span class="seg-name">Normal</span><span class="seg-sub">96 kbps</span></button>
+                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="160"><span class="seg-name">High</span><span class="seg-sub">160 kbps</span></button>
+                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="320"><span class="seg-name">Very high</span><span class="seg-sub">320 kbps</span></button>
+                </div>
+                <p id="qualityNote" class="set-note">Changing restarts the player for a moment.</p>
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
-      <div id="run" class="run" aria-label="Played, now playing, and up next"></div>
+      <div id="run" class="run" aria-label="Played, now playing, and up next"><div id="runTrack" class="run-track"></div></div>
 
       <section class="now" aria-live="polite">
         <h1 id="nowTitle" class="now-title"></h1>
@@ -73,22 +93,36 @@
           <span id="durTime" class="time">0:00</span>
         </div>
         <div class="controls">
-          <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h3c2 0 3.2 1 4.2 2.6l2.4 3.8c1 1.6 2.2 2.6 4.2 2.6H20M4 17h3c1.3 0 2.3-.4 3.1-1.2M13.7 8.2C14.5 7.4 15.5 7 16.8 7H20M17.6 4.6 20 7l-2.4 2.4M17.6 14.6 20 17l-2.4 2.4" /></svg>
-          </button>
-          <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.6v12.8c0 .8-.9 1.3-1.6.8L8.6 12.8a1 1 0 0 1 0-1.6l8.8-6.4c.7-.5 1.6 0 1.6.8z" /></svg>
-          </button>
-          <button id="playBtn" class="ctl ctl-play" type="button" aria-label="Play">
-            <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>
-            <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>
-          </button>
-          <button id="nextBtn" class="ctl" type="button" aria-label="Next">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5h-2.2v14H18zM5 5.6v12.8c0 .8.9 1.3 1.6.8l8.8-6.4a1 1 0 0 0 0-1.6L6.6 4.8C5.9 4.3 5 4.8 5 5.6z" /></svg>
-          </button>
-          <button id="repeatBtn" class="ctl ctl-toggle" type="button" aria-label="Repeat" title="Repeat" data-mode="off">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4.5 11.5V10A3 3 0 0 1 7.5 7H19M16.6 4.6 19 7l-2.4 2.4M19.5 12.5V14a3 3 0 0 1-3 3H5M7.4 19.4 5 17l2.4-2.4" /></svg>
-          </button>
+          <div class="controls-lead panel-wrap">
+            <button id="panelBtn" class="ctl" type="button" aria-label="Playlist" title="Playlist" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h12v2H4zM4 11h12v2H4zM4 16h7v2H4zM15 14.5v-0.1c0-.6.6-1 1.2-.8l4.3 2.2c.6.3.6 1.1 0 1.4l-4.3 2.2c-.6.3-1.2-.1-1.2-.8z" /></svg>
+            </button>
+            <div id="panel" class="panel" role="dialog" aria-labelledby="panelTitle" hidden>
+              <header class="panel-head">
+                <p class="panel-kicker">Playing from</p>
+                <h2 id="panelTitle" class="panel-title"></h2>
+              </header>
+              <div id="panelList" class="panel-list"></div>
+            </div>
+          </div>
+          <div class="controls-main">
+            <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h3c2 0 3.2 1 4.2 2.6l2.4 3.8c1 1.6 2.2 2.6 4.2 2.6H20M4 17h3c1.3 0 2.3-.4 3.1-1.2M13.7 8.2C14.5 7.4 15.5 7 16.8 7H20M17.6 4.6 20 7l-2.4 2.4M17.6 14.6 20 17l-2.4 2.4" /></svg>
+            </button>
+            <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.6v12.8c0 .8-.9 1.3-1.6.8L8.6 12.8a1 1 0 0 1 0-1.6l8.8-6.4c.7-.5 1.6 0 1.6.8z" /></svg>
+            </button>
+            <button id="playBtn" class="ctl ctl-play" type="button" aria-label="Play">
+              <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>
+              <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>
+            </button>
+            <button id="nextBtn" class="ctl" type="button" aria-label="Next">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5h-2.2v14H18zM5 5.6v12.8c0 .8.9 1.3 1.6.8l8.8-6.4a1 1 0 0 0 0-1.6L6.6 4.8C5.9 4.3 5 4.8 5 5.6z" /></svg>
+            </button>
+            <button id="repeatBtn" class="ctl ctl-toggle" type="button" aria-label="Repeat" title="Repeat" data-mode="off">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4.5 11.5V10A3 3 0 0 1 7.5 7H19M16.6 4.6 19 7l-2.4 2.4M19.5 12.5V14a3 3 0 0 1-3 3H5M7.4 19.4 5 17l2.4-2.4" /></svg>
+            </button>
+          </div>
           <div class="controls-side">
             <button id="heartBtn" class="ctl ctl-toggle" type="button" aria-label="Save to Liked Songs" title="Save to Liked Songs" aria-pressed="false" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path class="heart" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" d="M12 19.5S4.5 15 4.5 9.6A4 4 0 0 1 12 7.7a4 4 0 0 1 7.5 1.9c0 5.4-7.5 9.9-7.5 9.9z" /></svg>

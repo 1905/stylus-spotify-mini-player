@@ -5,18 +5,22 @@
 // devices (3 devices incl. a restricted one, picker open), library-full (all Library groups),
 // artist (The xx artist page open), mix-detail (first Spotify mix open),
 // no-volume (the active device has no remote volume),
-// engine-login (the in-app player needs its login; "The Run" shows up after engine_login, picker open),
+// engine-login (the in-app player needs its login; "This Mac" (shown as "Here") shows up after engine_login, picker open),
 // engine-down (the in-app player failed, picker open),
 // slow (list commands and plays take 2s more: skeletons, the play spinner, "Starting…"),
 // resume (the in-app player is ready, nothing plays, and a last session is stored: the app loads it paused),
-// search-all (search "the xx", then the Songs "See all" page), library-all (Library, then the Albums "See all" page).
+// search-all (search "the xx", then the Songs "See all" page), library-all (Library, then the Albums "See all" page),
+// playlist (playing the 5th song of the first captured playlist, as its context: the playlist panel lists it),
+// here (the in-app player is ready and plays the playlist: device "Here", quality changes restart it).
 // search_page pages through a pool built from the fixture (search hits first, then every other known
 // track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
-// The in-app player ("The Run") needs its login by default and isn't listed: engine_login lists it.
-// The local_* commands model librespot's Spirc: they act at once, but only while The Run is the active
-// device (an inactive Spirc ignores them); local_load activates it first. ENGINE_NOT_READY before ready.
-// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, calls, cache, emit, setEngine }.
+// The in-app player (Spotify Connect name "This Mac", shown as "Here") needs its login by default and
+// isn't listed: engine_login lists it. The local_* commands model librespot's Spirc: they act at once, but
+// only while the player is the active device (an inactive Spirc ignores them); local_load activates it
+// first. ENGINE_NOT_READY before ready. engine_set_quality restarts it (starting → ready, playback dropped).
+// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, emit, setEngine }.
 //   media: recorded media_update / media_clear calls ({cmd, args, at}).
+//   dockArt: recorded set_dock_art urls (null = the app's own icon), oldest first.
 //   calls: every invoke, oldest first ({cmd, args, at}): local_* vs Web API routing shows here.
 //   cache: the in-memory list cache ("<account>/<key>" → value) behind cache_get.
 //   emit(event, payload): fires listeners from __TAURI__.event.listen (media-command, engine-status).
@@ -29,7 +33,7 @@
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
-    "slow", "resume", "search-all", "library-all",
+    "slow", "resume", "search-all", "library-all", "playlist", "here",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -44,6 +48,7 @@
 
   const clone = (v) => (v == null ? v : JSON.parse(JSON.stringify(v)));
   const RUN_ID = "dev_the_run"; // the in-app player's stable device id
+  const RUN_NAME = "This Mac"; // its Spotify Connect name (the app shows it as "Here")
   const ME = "dev_user"; // the /me id
 
   // Every known track by uri, so play_on_device can resolve uris.
@@ -87,10 +92,11 @@
     userQueued: 0, // user-added tracks at the front of the queue (Spotify plays them first, FIFO)
     saved: new Set(((fx.liked || {}).tracks || []).map((t) => t.id)),
     engine:
-      scenario === "engine-login" ? { state: "needs_login", name: "The Run", device_id: null }
-      : scenario === "engine-down" ? { state: "failed", name: "The Run", reason: "Spotify changed its protocol (mock)", device_id: null }
-      : scenario === "resume" ? { state: "ready", name: "The Run", device_id: RUN_ID }
-      : { state: "needs_login", name: "The Run", device_id: null }, // first run: the player isn't logged in yet
+      scenario === "engine-login" ? { state: "needs_login", name: RUN_NAME, device_id: null }
+      : scenario === "engine-down" ? { state: "failed", name: RUN_NAME, reason: "Spotify changed its protocol (mock)", device_id: null }
+      : scenario === "resume" || scenario === "here" ? { state: "ready", name: RUN_NAME, device_id: RUN_ID }
+      : { state: "needs_login", name: RUN_NAME, device_id: null }, // first run: the player isn't logged in yet
+    quality: 160, // the in-app player's bitrate, kbps
   };
   const likedBase = state.saved.size;
   if (state.queue.length && state.now && state.queue[0].uri === state.now.uri) state.queue.shift();
@@ -100,6 +106,17 @@
     state.now.album = "A Deluxe Remastered Anniversary Edition With Bonus Tracks And Demos";
   }
   if (["nothing", "nodevice", "resume"].includes(scenario)) state.queue = [];
+  if (scenario === "playlist" || scenario === "here") {
+    // the 5th song of the first captured playlist, played as that playlist (context)
+    const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
+    if (rows.length) {
+      const at = Math.min(4, rows.length - 1);
+      state.now = clone(rows[at]);
+      state.queue = clone(rows.slice(at + 1));
+      state.contextUri = "spotify:playlist:" + plId;
+      state.history = rows.slice(0, at).reverse().map((t, i) => ({ track: clone(t), played_at: new Date(Date.now() - (i + 1) * 200e3).toISOString(), context_uri: state.contextUri })).concat(state.history);
+    }
+  }
   if (scenario === "resume") {
     // what the last run saved: the 3rd song of the first captured playlist, 1:01 in, played from that playlist
     const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
@@ -146,24 +163,26 @@
   const media = []; // media_update / media_clear calls, oldest first
   let loginRunning = false;
   const THE_RUN = {
-    id: RUN_ID, name: "The Run", type: "Computer",
+    id: RUN_ID, name: RUN_NAME, type: "Computer",
     is_active: false, is_restricted: false, supports_volume: true, volume_percent: 50,
   };
+  const dockArt = []; // set_dock_art urls, oldest first
   function setEngine(st, reason) {
     const device_id = st === "ready" ? RUN_ID : null; // the stable id, once ready
-    state.engine = reason ? { state: st, name: "The Run", reason, device_id } : { state: st, name: "The Run", device_id };
+    state.engine = reason ? { state: st, name: RUN_NAME, reason, device_id } : { state: st, name: RUN_NAME, device_id };
     emit("engine-status", state.engine);
   }
   function listTheRun() {
     if (!state.devices.some((d) => d.id === THE_RUN.id)) state.devices.push(clone(THE_RUN));
   }
-  if (scenario === "resume") listTheRun(); // ready: Spotify lists it
+  if (scenario === "resume" || scenario === "here") listTheRun(); // ready: Spotify lists it
+  if (scenario === "here") state.deviceId = RUN_ID; // and plays on it
 
   // ---- the in-app player's own commands (librespot Spirc) ----
   const engineReady = () => {
     if (state.engine.state !== "ready") throw "ENGINE_NOT_READY: the player isn't ready (mock)";
   };
-  // Spirc ignores everything but load while The Run isn't the active device
+  // Spirc ignores everything but load while the player isn't the active device
   const runActive = () => state.active && state.deviceId === RUN_ID;
   const spirc = (fn) => () => {
     engineReady();
@@ -347,7 +366,7 @@
       const d = activeDevice();
       if (d) setVol(d, percent);
     })(),
-    // activates The Run, then loads: Ok only means queued (the poll shows the result)
+    // activates the player, then loads: Ok only means queued (the poll shows the result)
     local_load: ({ contextUri, uris, trackUri, positionMs, play }) => {
       engineReady();
       if (!!contextUri === !!(uris && uris.length)) throw "BAD_ARGS: exactly one of contextUri and uris (mock)";
@@ -453,9 +472,9 @@
       return [...seen.values()];
     },
     get_followed_artists: () => clone(fx.followed || []),
-    // ---- standalone: the in-app player ("The Run") and OS media controls ----
+    // ---- standalone: the in-app player ("This Mac", shown as "Here") and OS media controls ----
     engine_status: () => clone(state.engine),
-    // resolves once logged in and ready; "The Run" registers with Spotify a moment later
+    // resolves once logged in and ready; it registers with Spotify a moment later
     engine_login: async () => {
       if (loginRunning) throw "LOGIN_IN_PROGRESS: a player login is already running (mock)";
       if (state.engine.state === "failed") throw "mock: the player failed: " + state.engine.reason;
@@ -477,6 +496,21 @@
       }
       return null;
     },
+    // the bitrate restarts the player: starting → ready a moment later; whatever it played stops
+    engine_get_quality: () => state.quality,
+    engine_set_quality: ({ kbps }) => {
+      if (![96, 160, 320].includes(kbps)) throw "BAD_ARGS: kbps must be 96, 160 or 320 (mock)";
+      state.quality = kbps;
+      if (state.engine.state === "ready") {
+        setTimeout(() => {
+          setEngine("starting");
+          if (state.deviceId === RUN_ID) { setProgress(progress()); state.active = false; state.isPlaying = false; }
+          setTimeout(() => setEngine("ready"), 1200);
+        }, 30);
+      }
+      return null;
+    },
+    set_dock_art: ({ url }) => { dockArt.push(url == null ? null : String(url)); return null; },
     media_update: (args) => { media.push({ cmd: "media_update", args: clone(args), at: Date.now() }); return null; },
     media_clear: () => { media.push({ cmd: "media_clear", args: null, at: Date.now() }); return null; },
 
@@ -488,7 +522,7 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|engine_|media_|local_|cache_get$)/;
+  const LOCAL = /^(auth_status|engine_|media_|local_|cache_get$|set_dock_art$)/;
   // `slow`: lists and plays take 2s more
   const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
 
@@ -543,7 +577,7 @@
 
   window.__TAURI__ = { core: { invoke }, event: { listen } };
   // handlers: QA swaps one to inject a failure
-  window.__mock = { scenario, state, invoke, advance, handlers, media, calls, cache, emit, setEngine };
+  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, emit, setEngine };
 
   // Overlay scenarios: drive the real UI once it exists (T5/T6 markup).
   const waitFor = (sel, ms = 5000) =>

@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { thisMacRow, isTheRun, THE_RUN, THE_RUN_MISSING_MS, preferredDevice } from "./engine.js";
+import { thisMacRow, isHere, deviceLabel, HERE, THE_RUN_MISSING_MS, preferredDevice } from "./engine.js";
 
-const RUN = { id: "r", name: THE_RUN, type: "Computer" };
+// the in-app player: Spotify lists it as "This Mac"; the engine's device id says it's ours
+const RUN = { id: "r", name: "This Mac", type: "Computer" };
+const READY = { state: "ready", device_id: "r" };
 const MARANTZ = { id: "m", name: "Marantz", type: "AVR" };
 const MACBOOK = { id: "b", name: "MacBook Pro", type: "Computer" };
 
@@ -10,11 +12,16 @@ describe("thisMacRow", () => {
     expect(thisMacRow({ state: "needs_login" }, null)).toBeNull();
   });
 
-  it("has no row once The Run is listed, whatever the engine says", () => {
+  it("has no row once the player is listed, whatever the engine says", () => {
     for (const state of ["needs_login", "starting", "failed", "account_mismatch"]) {
-      expect(thisMacRow({ state }, [MARANTZ, RUN])).toBeNull();
+      expect(thisMacRow({ state, device_id: "r" }, [MARANTZ, RUN])).toBeNull();
     }
-    expect(thisMacRow({ state: "needs_login" }, [RUN], "login")).toBeNull();
+    expect(thisMacRow({ state: "needs_login", device_id: "r" }, [RUN], "login")).toBeNull();
+  });
+
+  it("a device named like the player isn't it: only the engine's device id counts", () => {
+    expect(thisMacRow({ state: "needs_login", device_id: null }, [RUN]).type).toBe("Log in to play here");
+    expect(thisMacRow({ ...READY, device_id: "other" }, [RUN]).type).toBe("Connecting…");
   });
 
   it("ready but not listed yet: connecting, then a retry after 20s", () => {
@@ -61,20 +68,37 @@ describe("thisMacRow", () => {
   });
 });
 
-describe("isTheRun", () => {
-  it("matches by name", () => {
-    expect(isTheRun(RUN)).toBe(true);
-    expect(isTheRun(MACBOOK)).toBe(false);
-    expect(isTheRun(null)).toBe(false);
+describe("isHere", () => {
+  it("matches by the engine's device id, never by name", () => {
+    expect(isHere(RUN, READY)).toBe(true);
+    expect(isHere(MACBOOK, READY)).toBe(false);
+    expect(isHere({ id: "x", name: "The Run" }, READY)).toBe(false);
+    expect(isHere({ id: "x", name: "This Mac" }, READY)).toBe(false);
+    expect(isHere(RUN, { state: "starting", device_id: null })).toBe(false);
+    expect(isHere(RUN, null)).toBe(false);
+    expect(isHere(null, READY)).toBe(false);
+  });
+});
+
+describe("deviceLabel", () => {
+  it("the in-app player is Here, others keep their name", () => {
+    expect(deviceLabel(RUN, READY)).toBe(HERE);
+    expect(HERE).toBe("Here");
+    expect(deviceLabel(MARANTZ, READY)).toBe("Marantz");
+    expect(deviceLabel(RUN, null)).toBe("This Mac"); // engine unknown: Spotify's name
+    expect(deviceLabel(null, READY)).toBe("");
   });
 });
 
 describe("preferredDevice", () => {
   const marantz = { id: "m", name: "Marantz STEREO 70s", type: "AVR", is_active: true };
-  const run = { id: "r", name: "The Run", type: "Computer", is_active: false };
+  const run = { id: "r", name: "This Mac", type: "Computer", is_active: false };
   const mac = { id: "c", name: "MacBook Pro", type: "Computer", is_active: false };
-  it("prefers The Run over an active network player", () => {
-    expect(preferredDevice([marantz, run, mac]).id).toBe("r");
+  it("prefers the in-app player over an active network player", () => {
+    expect(preferredDevice([marantz, mac, run], READY).id).toBe("r");
+  });
+  it("engine unknown: the player is just a computer", () => {
+    expect(preferredDevice([marantz, mac, run]).id).toBe("c");
   });
   it("then any computer, then the active one, then the first", () => {
     expect(preferredDevice([marantz, mac]).id).toBe("c");
@@ -83,6 +107,6 @@ describe("preferredDevice", () => {
     expect(preferredDevice([])).toBe(null);
   });
   it("never picks a restricted device", () => {
-    expect(preferredDevice([{ ...run, is_restricted: true }, marantz]).id).toBe("m");
+    expect(preferredDevice([{ ...run, is_restricted: true }, marantz], READY).id).toBe("m");
   });
 });
