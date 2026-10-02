@@ -60,6 +60,14 @@ describe("playSession", () => {
 });
 
 describe("sessionToSave", () => {
+  it("paused on the same song: no write, even when forced", () => {
+    const prev = { accountId: "me", contextUri: "spotify:playlist:A", origin: null, uris: null, trackUri: "spotify:track:T", positionMs: 5000, savedAt: 0 };
+    const same = { accountId: "me", trackUri: "spotify:track:T", contextUri: "spotify:playlist:A", positionMs: 5000 };
+    expect(sessionToSave(prev, same, 60000)).toBeNull();
+    expect(sessionToSave(prev, same, 60000, true)).toBeNull();
+    expect(sessionToSave(prev, { ...same, positionMs: 6000 }, 60000)).not.toBeNull();
+  });
+
   it("a track shared by two playlists: the playing playlist wins over the saved one", () => {
     const prev = { accountId: "me", contextUri: "spotify:playlist:A", origin: { kind: "playlist", id: "A" }, uris: ["spotify:track:T"], trackUri: "spotify:track:T", positionMs: 0, savedAt: 0 };
     const next = sessionToSave(prev, { accountId: "me", trackUri: "spotify:track:T", contextUri: "spotify:playlist:B", positionMs: 5 }, 1, true);

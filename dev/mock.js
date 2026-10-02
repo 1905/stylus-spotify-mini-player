@@ -190,6 +190,7 @@
     state.isPlaying = !!play;
     setProgress(positionMs || 0);
   }
+  const setVol = (d, percent) => (d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0))));
   const needDevice = () => {
     if (!state.devices.length || !state.active) throw "NO_ACTIVE_DEVICE: no active device (mock)";
   };
@@ -310,14 +311,7 @@
       useDevice(deviceId);
       const tracks = (uris || []).map((u) => byUri.get(u)).filter(Boolean).map(clone);
       if (!tracks.length) throw "mock: unknown uris";
-      pushHistory(state.now);
-      state.now = tracks[0];
-      state.queue = tracks.slice(1);
-      state.userQueued = 0;
-      state.contextUri = null;
-      state.active = true;
-      state.isPlaying = true;
-      setProgress(0);
+      loadTracks(tracks, { trackUri: tracks[0].uri });
       return null;
     },
     resume: () => {
@@ -348,7 +342,7 @@
     local_seek: ({ positionMs }) => spirc(() => setProgress(Math.max(0, Number(positionMs) || 0)))(),
     local_volume: ({ percent }) => spirc(() => {
       const d = activeDevice();
-      if (d) d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+      if (d) setVol(d, percent);
     })(),
     // activates The Run, then loads: Ok only means queued (the poll shows the result)
     local_load: ({ contextUri, uris, trackUri, positionMs, play }) => {
@@ -382,7 +376,7 @@
       needDevice();
       const d = activeDevice();
       if (!d || !d.supports_volume) throw "Cannot control device volume (mock)";
-      d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+      setVol(d, percent);
       return null;
     },
     set_shuffle: ({ on }) => { needDevice(); state.shuffle = !!on; return null; },

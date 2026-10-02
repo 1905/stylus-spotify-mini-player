@@ -354,12 +354,12 @@ fn search_items(raw: &Value, kind: &str) -> Vec<Value> {
     if kind == "track" {
         items.map(simplify_track).collect()
     } else {
-        items.map(simplify_search_album).collect()
+        items.map(simplify_album).collect()
     }
 }
 
 /// Spotify album object → `{id, name, artists, cover}`.
-fn simplify_search_album(a: &Value) -> Value {
+fn simplify_album(a: &Value) -> Value {
     json!({
         "id": a["id"],
         "name": a["name"],
@@ -653,13 +653,9 @@ fn parse_saved_albums(v: &Value) -> Vec<Value> {
         .map(|row| &row["album"])
         .filter(|a| !a.is_null())
         .map(|a| {
-            json!({
-                "id": a["id"],
-                "name": a["name"],
-                "artists": join_artists(&a["artists"]),
-                "cover": first_image(&a["images"]),
-                "total_tracks": a["total_tracks"],
-            })
+            let mut album = simplify_album(a);
+            album["total_tracks"] = a["total_tracks"].clone();
+            album
         })
         .collect()
 }

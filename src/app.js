@@ -829,8 +829,7 @@ async function routed(deviceId, local, remote) {
 async function playSource(deviceId, src) {
   if (isEngineDevice(engine, deviceId)) {
     try {
-      const args = src.contextUri ? { contextUri: src.contextUri, trackUri: src.trackUri } : { uris: src.uris, trackUri: src.trackUri };
-      return await invoke("local_load", { ...args, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat });
+      return await invoke("local_load", { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat });
     } catch (e) {
       if (!isCode(e, "ENGINE_NOT_READY")) throw e;
     }
@@ -1015,19 +1014,22 @@ async function maybeResume() {
   kick();
 }
 
-/** Show "The Run" as the device, like a pick, without a transfer: the load made it active. */
-function selectTheRun(runId) {
-  if (state.device && state.device.id === runId) return;
+/** Make d the shown device. A volume burst on the old device goes out now, to that device. */
+function showDevice(d) {
   if (volTimer) {
     clearTimeout(volTimer);
     sendVolume();
   }
+  state.device = { id: d.id, name: d.name };
+  state.volume = d.volume_percent ?? null;
+  state.supportsVolume = Boolean(d.supports_volume);
+}
+
+/** Show "The Run" as the device, like a pick, without a transfer: the load made it active. */
+function selectTheRun(runId) {
+  if (state.device && state.device.id === runId) return;
   const d = (state.devices || []).find((x) => x.id === runId);
-  state.device = { id: runId, name: d ? d.name : "The Run" };
-  if (d) {
-    state.volume = d.volume_percent ?? null;
-    state.supportsVolume = Boolean(d.supports_volume);
-  }
+  showDevice(d || { id: runId, name: "The Run" });
   intents.start("device"); // a poll already in flight must not put the old device back
   intents.finish("device", performance.now());
   renderChrome();
@@ -1595,14 +1597,7 @@ async function pickDevice(d) {
   closeDevices(true);
   if (state.device && state.device.id === d.id) return;
   const before = state.device;
-  // a volume burst on the old device goes out now, to that device; the new one starts fresh
-  if (volTimer) {
-    clearTimeout(volTimer);
-    sendVolume();
-  }
-  state.device = { id: d.id, name: d.name };
-  state.volume = d.volume_percent ?? null;
-  state.supportsVolume = Boolean(d.supports_volume);
+  showDevice(d);
   const seq = intents.start("device");
   movingTo = { seq, name: d.name };
   renderChrome();
@@ -1940,7 +1935,7 @@ async function fillGroup(group, load, render, what, key = null, skeleton = null)
     if (!live()) return;
     const status = group.querySelector(".status");
     if (status) setEl(status, "");
-    if (JSON.stringify(data) !== shown) render(data);
+    if (shown === null || JSON.stringify(data) !== shown) render(data);
   } catch (e) {
     fresh = true;
     if (!live() || overlayFailed(e)) return;
@@ -2273,7 +2268,7 @@ async function loadPlaylists() {
     const next = (await listInvoke("get_playlists")) || [];
     fresh = true;
     playlistsStale = false;
-    if (JSON.stringify(next) !== shown) {
+    if (shown === null || JSON.stringify(next) !== shown) {
       playlists = next;
       renderPlaylists();
     }
@@ -2845,8 +2840,7 @@ async function loadPages(tab, n) {
 }
 
 function loadMore() {
-  const list = page.kind === "search" && page.lists[page.tab];
-  if (list) loadPages(page.tab, 1);
+  loadPages(page.tab, 1); // a shelf page has no list for the tab: loadPages returns
 }
 
 /** The Load more button scrolled into view: load the next page (not after an error: the button retries). */
@@ -2996,7 +2990,11 @@ async function boot() {
   document.addEventListener("keydown", onKey);
   document.addEventListener("keyup", onKey);
   addEventListener("resize", center);
-  addEventListener("resize", fitShelves);
+  let fitFrame = 0; // a window drag fires resize ~60/s: refit once per frame
+  addEventListener("resize", () => {
+    cancelAnimationFrame(fitFrame);
+    fitFrame = requestAnimationFrame(fitShelves);
+  });
   small.addEventListener("change", () => {
     closeVolume(); // the slider popover exists only on narrow screens
     renderVolume();

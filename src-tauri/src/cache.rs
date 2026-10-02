@@ -59,7 +59,7 @@ impl Cache {
         if let Err(e) = std::fs::create_dir_all(&self.dir) {
             return eprintln!("cache: could not create {}: {e}", self.dir.display());
         }
-        let body = json!({ "key": full, "saved_at": now(), "value": value });
+        let body = json!({ "key": full, "saved_at": crate::auth::now(), "value": value });
         let path = self.path(&full);
         if let Err(e) = crate::auth::write_private(&path, &body.to_string()) {
             return eprintln!("cache: could not write {}: {e}", path.display());
@@ -109,10 +109,6 @@ fn hash_hex(key: &str) -> String {
     Sha256::digest(key.as_bytes())[..20].iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,7 +116,7 @@ mod tests {
 
     /// A fresh, empty dir under the system temp dir.
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("rust-spotify-cache-{name}-{}-{}", std::process::id(), now()));
+        let dir = std::env::temp_dir().join(format!("rust-spotify-cache-{name}-{}-{}", std::process::id(), crate::auth::now()));
         let _ = std::fs::create_dir_all(&dir);
         dir
     }

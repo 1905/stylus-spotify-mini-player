@@ -186,13 +186,9 @@ fn load_or_create_device_id(path: &std::path::Path) -> String {
     id
 }
 
-/// A random UUID v4, hyphenated lowercase, the format librespot uses by default.
+/// A random UUID v4, hyphenated lowercase: librespot's own default device id.
 fn new_device_id() -> String {
-    let mut b: [u8; 16] = rand::random();
-    b[6] = (b[6] & 0x0f) | 0x40; // version 4
-    b[8] = (b[8] & 0x3f) | 0x80; // RFC 4122 variant
-    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
-    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+    SessionConfig::default().device_id
 }
 
 // ---- credential storage ----------------------------------------------------

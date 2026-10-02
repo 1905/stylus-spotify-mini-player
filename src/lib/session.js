@@ -75,6 +75,7 @@ function holds(prev, trackUri, contextUri) {
  * The session to write after a poll, or null for no write.
  * poll: {accountId, trackUri, contextUri, positionMs}. force: a pause or a quit (no throttle).
  * - At most every SESSION_THROTTLE_MS, and only while a song is current and the account is known.
+ * - No write when nothing moved (same song, same position, same context): a paused song stays put.
  * - Another account's session is replaced, never merged.
  * - Provenance: a track outside the saved source replaces the source with the poll's context,
  *   or with that one track when there is none.
@@ -84,6 +85,8 @@ export function sessionToSave(prev, poll, nowMs, force = false) {
   const mine = prev && prev.accountId === poll.accountId ? prev : null;
   if (mine && !force && nowMs - (mine.savedAt || 0) < SESSION_THROTTLE_MS) return null;
   const positionMs = Math.max(0, Math.round(Number(poll.positionMs) || 0));
+  // paused on the same song: nothing to write
+  if (mine && mine.trackUri === poll.trackUri && mine.positionMs === positionMs && (mine.contextUri || null) === (poll.contextUri || mine.contextUri || null)) return null;
   const base = { accountId: poll.accountId, trackUri: poll.trackUri, positionMs, savedAt: nowMs };
   if (mine && holds(mine, poll.trackUri, poll.contextUri)) {
     return { ...base, contextUri: poll.contextUri || mine.contextUri, origin: mine.origin, uris: mine.uris };

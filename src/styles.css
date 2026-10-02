@@ -1976,7 +1976,6 @@ svg {
 }
 
 /* skeletons take the shape of what they stand in for: artists are round */
-.is-round-grid .album.is-skeleton .art,
 #topArtists .album.is-skeleton .art,
 #libFollowing .album.is-skeleton .art {
   border-radius: 50%;
