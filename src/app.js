@@ -736,6 +736,17 @@ async function sendIntent(key, fn, revert, seq = intents.start(key)) {
   return ok;
 }
 
+/** Resume; when Spotify refuses because the session expired, start the same song where it was. */
+async function resumeOrRestart(deviceId) {
+  try {
+    await invoke("resume", { deviceId });
+  } catch (e) {
+    const t = state.now;
+    if (!t || !t.uri || isLocal(t.uri) || !(/\b40[34]\b/.test(String(e)) || isCode(e, "NO_ACTIVE_DEVICE"))) throw e;
+    await invoke("resume_at", { deviceId, contextUri: state.contextUri, uri: t.uri, positionMs: Math.round(progress()) });
+  }
+}
+
 /** Flip play/pause at once in the UI; the command joins the player chain in click order. */
 async function togglePlay() {
   if (state.mode === "idle") return;
@@ -746,7 +757,7 @@ async function togglePlay() {
   renderChrome();
   await sendIntent(
     "play",
-    async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")),
+    async (id) => (want ? resumeOrRestart(await needDevice(id)) : invoke("pause")),
     () => (state.isPlaying = !want), // the device still has the state before this click
   );
   kick();

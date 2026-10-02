@@ -162,6 +162,24 @@ pub async fn play_on_device(device_id: String, uris: Vec<String>) -> Result<(), 
 pub async fn resume(device_id: String) -> Result<(), String> {
     command(Method::PUT, &format!("/me/player/play?device_id={device_id}"), None).await
 }
+
+/// Start `uri` at `position_ms` on a device: the way back when a plain resume is refused
+/// because the session it would resume has expired (403 "Player command failed", or
+/// "Device not found"). Inside its album/playlist context when there is one, so what
+/// plays next stays the same; a context that won't take the offset falls back to the song.
+#[tauri::command]
+pub async fn resume_at(device_id: String, context_uri: Option<String>, uri: String, position_ms: u64) -> Result<(), String> {
+    let path = format!("/me/player/play?device_id={}", urlencode(&device_id));
+    let offsettable = |c: &str| c.starts_with("spotify:playlist:") || c.starts_with("spotify:album:");
+    if let Some(ctx) = context_uri.filter(|c| offsettable(c)) {
+        let body = json!({ "context_uri": ctx, "offset": { "uri": uri }, "position_ms": position_ms });
+        match command(Method::PUT, &path, Some(body)).await {
+            Err(e) if !e.starts_with("AUTH_EXPIRED") && !e.starts_with("NO_ACTIVE_DEVICE") => {}
+            done => return done,
+        }
+    }
+    command(Method::PUT, &path, Some(json!({ "uris": [uri], "position_ms": position_ms }))).await
+}
 #[tauri::command]
 pub async fn pause() -> Result<(), String> {
     command(Method::PUT, "/me/player/pause", None).await
