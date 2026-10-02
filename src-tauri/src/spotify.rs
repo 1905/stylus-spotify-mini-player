@@ -733,11 +733,16 @@ fn playlist_items_path(playlist_id: &str, offset: usize) -> String {
 /// Paginated playlist tracks. This account's API uses `/items` (the `/tracks`
 /// endpoint 403s) and may nest each track under `item` instead of `track`.
 /// We request both field spellings and read whichever the response provides.
-/// With `snapshot_id` and `account`, the list is cached under
-/// `playlist:<id>:<snapshot_id>`: a hit makes no request (a snapshot never changes).
+/// With `account`, the list is cached under `playlist:<id>:<snapshot_id>` (a snapshot never
+/// changes). The current snapshot is asked first (one tiny request), so a playlist edited in
+/// another app misses the cache; the caller's `snapshot_id` is the fallback when that fails.
 #[tauri::command]
 pub async fn get_playlist_tracks(playlist_id: String, snapshot_id: Option<String>, account: Option<String>) -> Result<Value, String> {
-    let key = snapshot_id.map(|s| format!("playlist:{playlist_id}:{s}"));
+    let current = get(&format!("/playlists/{playlist_id}?fields=snapshot_id"))
+        .await
+        .ok()
+        .and_then(|v| v["snapshot_id"].as_str().map(String::from));
+    let key = current.or(snapshot_id).map(|s| format!("playlist:{playlist_id}:{s}"));
     if let Some(key) = &key {
         if let Some(hit) = cached(&account, key).await {
             return Ok(hit);

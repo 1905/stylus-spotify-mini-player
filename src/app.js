@@ -134,7 +134,6 @@ function showLogin(kind) {
   page.lists = {};
   // the next login may be another account: drop everything that belonged to this one
   playlists = null;
-  playlistsStale = false;
   listScroll = 0;
   $("libList").innerHTML = "";
   $("run").replaceChildren();
@@ -499,10 +498,13 @@ async function playCover(item) {
   const ctx = state.contextUri || (last && (last.contextUri || originUri(last.origin))) || null;
   // what's known to be in the playing context: its loaded rows, or the list the saved play used
   const sameAsLast = last && ctx && (originUri(last.origin) === ctx || last.contextUri === ctx);
+  // the saved list only describes what plays when nothing else is named: another client may
+  // have started a different playlist since the last save
+  const savedFits = !state.contextUri || Boolean(sameAsLast);
   const target = coverTarget(item, {
     contextUri: ctx,
     members: (ctx && knownRows.get(ctx)) || (sameAsLast && last.uris) || null,
-    listUris: last && last.uris,
+    listUris: savedFits && last ? last.uris : null,
     nowUri: state.now && state.now.uri,
     nextUris: [...runItems.values()].filter((it) => it.role === "next").map((it) => it.track.uri),
     historyContext: item.role === "past" ? (history().find((h) => h.track && h.track.uri === item.track.uri) || {}).context_uri || null : null,
@@ -515,7 +517,7 @@ async function playCover(item) {
   // one starts its own, even when that playlist shares the track
   const sameSource = target.contextUri
     ? target.contextUri === ctx && Boolean(sameAsLast)
-    : Boolean(last && last.uris && last.uris.includes(target.trackUri));
+    : savedFits && Boolean(last && last.uris && last.uris.includes(target.trackUri));
   // keep the full member list for the next jump (never sent with a context: Spirc takes one source)
   await startPlay(target, { kind: "cover", origin: sameSource ? last.origin : null, members: sameSource ? last.uris : null });
 }
@@ -1899,7 +1901,7 @@ function libGet(key, cmd, args) {
 
 function loadGroups() {
   libOpened = true;
-  if (!playlists || playlistsStale) loadPlaylists();
+  loadPlaylists(); // every open: the list on screen stays, and redraws only if a playlist changed
   fillLiked();
   fillTop();
   fillAlbums();
@@ -2244,7 +2246,6 @@ function resetLibrary() {
   setEl($("libLiked").querySelector(".row-sub"), "");
 }
 
-let playlistsStale = false; // showing the disk copy after a failed refresh: the next open retries
 
 /** The playlists: the disk copy at once (marked stale) or a skeleton, then the fresh list if it differs. */
 async function loadPlaylists() {
@@ -2267,7 +2268,6 @@ async function loadPlaylists() {
   try {
     const next = (await listInvoke("get_playlists")) || [];
     fresh = true;
-    playlistsStale = false;
     if (shown === null || JSON.stringify(next) !== shown) {
       playlists = next;
       renderPlaylists();
@@ -2275,8 +2275,7 @@ async function loadPlaylists() {
   } catch (e) {
     fresh = true;
     if (overlayFailed(e)) return;
-    if (shown !== null) playlistsStale = true; // keep the cached copy
-    else {
+    if (shown === null) {
       list.innerHTML = "";
       setText("listStatus", `Couldn't load your playlists — ${reason(e)}`);
     }
