@@ -2,6 +2,7 @@
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
 import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
+import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
 
@@ -1626,14 +1627,25 @@ async function openDetail(src, push = true) {
 
 const kindLabel = (k) => (k ? k[0].toUpperCase() + k.slice(1) : "Album");
 
-/** The artist page: photo and name (best effort), then albums and singles. */
+const TOP_RANGES = ["short_term", "medium_term", "long_term"];
+
+/** Your own top tracks (50 per range) and Liked Songs, best first; any that fails is just skipped. */
+function favoriteSources(optional) {
+  return Promise.all([
+    ...TOP_RANGES.map((range) => libGet(`top50:tracks:${range}`, "get_top", { kind: "tracks", range, limit: 50 }).catch(optional)),
+    libGet("liked", "get_saved_tracks").then((r) => (r && r.tracks) || null).catch(optional),
+  ]);
+}
+
+/** The artist page: photo and name (best effort), your favorites by them, then albums and singles. */
 async function loadArtist(src, gen) {
-  const optional = (e) => (isCode(e, "AUTH_EXPIRED") ? Promise.reject(e) : null); // the page works without the photo
-  let info, albums;
+  const optional = (e) => (isCode(e, "AUTH_EXPIRED") ? Promise.reject(e) : null); // the page works without these
+  let info, albums, sources;
   try {
-    [info, albums] = await Promise.all([
+    [info, albums, sources] = await Promise.all([
       invoke("get_artist", { artistId: src.id }).catch(optional),
       invoke("get_artist_albums", { artistId: src.id }),
+      favoriteSources(optional),
     ]);
   } catch (e) {
     if (gen !== state.gen.detail) return;
@@ -1650,8 +1662,17 @@ async function loadArtist(src, gen) {
     $("detailName").title = src.name;
   }
   detailAlbums = (albums || []).filter((a) => a && a.id);
-  setText("detailStatus", detailAlbums.length ? "" : "No albums or singles.");
+  // Spotify no longer gives an artist's top tracks or play counts: rank from your own listening
+  detailTracks = favoritesBy(src.id, sources || []);
+  $("detailPlay").hidden = !detailTracks.length;
+  $("detailPlay").disabled = !detailTracks.length;
+  setText("detailStatus", detailAlbums.length || detailTracks.length ? "" : "No albums or singles.");
+  const favorites = detailTracks.length
+    ? `<h3 class="group-title">Your favorites</h3><div class="rows">${detailTracks.map((t, i) => trackRow(t, i, { num: true, art: true })).join("")}</div>` +
+      (detailAlbums.length ? `<h3 class="group-title">Albums and singles</h3>` : "")
+    : "";
   $("detailRows").innerHTML =
+    favorites +
     `<div class="albums is-grid">` +
     detailAlbums.map((a, i) => tile(a, i, { sub: `<span class="album-kind">${esc(kindLabel(a.kind))}</span>${esc(a.year || "")}` })).join("") +
     `</div>`;

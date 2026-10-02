@@ -308,7 +308,7 @@ pub async fn unsave_track(track_id: String) -> Result<(), String> {
 /// Top tracks (`[Track]`) or artists (`[{id,name,image}]`), at most 20.
 /// `kind`: "tracks"|"artists"; `range`: "short_term"|"medium_term"|"long_term".
 #[tauri::command]
-pub async fn get_top(kind: String, range: String) -> Result<Value, String> {
+pub async fn get_top(kind: String, range: String, limit: Option<u8>) -> Result<Value, String> {
     let simplify: fn(&Value) -> Value = match kind.as_str() {
         "tracks" => simplify_track,
         "artists" => simplify_artist,
@@ -317,7 +317,9 @@ pub async fn get_top(kind: String, range: String) -> Result<Value, String> {
     if !matches!(range.as_str(), "short_term" | "medium_term" | "long_term") {
         return Err(format!("bad top range: {range}"));
     }
-    let raw = get(&format!("/me/top/{kind}?time_range={range}&limit=20")).await?;
+    // 20 for the Library group; the artist page asks for 50, Spotify's max (51 → 400)
+    let limit = limit.unwrap_or(20).clamp(1, 50);
+    let raw = get(&format!("/me/top/{kind}?time_range={range}&limit={limit}")).await?;
     let items = raw["items"].as_array().into_iter().flatten().filter(|x| !x.is_null()).map(simplify).collect();
     Ok(Value::Array(items))
 }
