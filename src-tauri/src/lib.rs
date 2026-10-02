@@ -18,6 +18,7 @@ pub fn run() {
             spotify::playback_state,
             spotify::play_on_device,
             spotify::resume,
+            spotify::resume_at,
             spotify::pause,
             spotify::next_track,
             spotify::previous_track,

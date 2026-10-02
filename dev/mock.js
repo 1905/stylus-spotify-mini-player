@@ -201,6 +201,16 @@
       state.isPlaying = true;
       return null;
     },
+    resume_at: ({ deviceId, uri, positionMs }) => {
+      useDevice(deviceId);
+      const t = allTracks().find((x) => x.uri === uri) || state.now;
+      if (!t) throw "mock: unknown track";
+      state.active = true;
+      state.now = clone(t);
+      setProgress(positionMs || 0);
+      state.isPlaying = true;
+      return null;
+    },
     pause: () => { needDevice(); setProgress(progress()); state.isPlaying = false; return null; },
     next_track: () => { needDevice(); advance(); return null; },
     previous_track: () => { needDevice(); back(); return null; },
