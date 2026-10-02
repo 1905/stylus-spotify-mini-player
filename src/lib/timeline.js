@@ -1,5 +1,5 @@
 // The run: played → now → next. Pure builder + FLIP helpers.
-import { offsettable } from "./session.js";
+import { offsettable } from "./source.js";
 
 /**
  * Build the display list, left → right.

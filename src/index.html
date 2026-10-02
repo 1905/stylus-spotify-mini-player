@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Player</title>
+    <title>Needle</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="styles.css" />
     <script type="module" src="app.js"></script>
@@ -61,6 +61,10 @@
                 <span id="dockArtLabel" class="set-label">Album art as app icon</span>
                 <button id="dockArtSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="dockArtLabel"></button>
               </div>
+              <div class="set-row">
+                <span id="coverRowLabel" class="set-label">Show cover row</span>
+                <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
+              </div>
               <div class="set-group">
                 <span id="qualityLabel" class="set-label">Audio quality</span>
                 <div id="qualityOpts" class="seg" role="radiogroup" aria-labelledby="qualityLabel">
@@ -93,17 +97,10 @@
           <span id="durTime" class="time">0:00</span>
         </div>
         <div class="controls">
-          <div class="controls-lead panel-wrap">
+          <div class="controls-lead">
             <button id="panelBtn" class="ctl" type="button" aria-label="Playlist" title="Playlist" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel" disabled>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h12v2H4zM4 11h12v2H4zM4 16h7v2H4zM15 14.5v-0.1c0-.6.6-1 1.2-.8l4.3 2.2c.6.3.6 1.1 0 1.4l-4.3 2.2c-.6.3-1.2-.1-1.2-.8z" /></svg>
             </button>
-            <div id="panel" class="panel" role="dialog" aria-labelledby="panelTitle" hidden>
-              <header class="panel-head">
-                <p class="panel-kicker">Playing from</p>
-                <h2 id="panelTitle" class="panel-title"></h2>
-              </header>
-              <div id="panelList" class="panel-list"></div>
-            </div>
           </div>
           <div class="controls-main">
             <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
@@ -143,6 +140,22 @@
       </footer>
     </main>
 
+    <div id="panelLayer" class="overlay overlay-panel" hidden>
+      <div class="backdrop" data-close></div>
+      <aside id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="panelTitle" tabindex="-1">
+        <header class="panel-head">
+          <div class="panel-heading">
+            <p class="panel-kicker">Playing from</p>
+            <h2 id="panelTitle" class="panel-title"></h2>
+          </div>
+          <button class="icon-btn" type="button" data-close aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+          </button>
+        </header>
+        <div id="panelList" class="panel-list"></div>
+      </aside>
+    </div>
+
     <div id="library" class="overlay overlay-library" hidden>
       <div class="backdrop" data-close></div>
       <aside id="sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Library" tabindex="-1">
@@ -156,55 +169,46 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
           </button>
         </header>
+        <div id="libTabs" class="lib-tabs" role="tablist" aria-label="Library">
+          <button id="libTab-playlists" class="lib-tab" type="button" role="tab" data-tab="playlists" aria-controls="libPlaylists" aria-selected="true">Playlists</button>
+          <button id="libTab-liked" class="lib-tab" type="button" role="tab" data-tab="liked" aria-controls="libLiked" aria-selected="false" tabindex="-1" hidden>Liked Songs</button>
+          <button id="libTab-albums" class="lib-tab" type="button" role="tab" data-tab="albums" aria-controls="libAlbums" aria-selected="false" tabindex="-1" hidden>Albums</button>
+          <button id="libTab-following" class="lib-tab" type="button" role="tab" data-tab="following" aria-controls="libFollowing" aria-selected="false" tabindex="-1" hidden>Artists</button>
+          <button id="libTab-top" class="lib-tab" type="button" role="tab" data-tab="top" aria-controls="libTop" aria-selected="false" tabindex="-1" hidden>Your top</button>
+          <button id="libTab-mixes" class="lib-tab" type="button" role="tab" data-tab="mixes" aria-controls="libMixes" aria-selected="false" tabindex="-1" hidden>Mixes</button>
+        </div>
         <div id="sheetBody" class="sheet-body">
           <div id="libLevel1">
-            <button id="libLiked" class="row row-playlist row-liked" type="button" hidden>
-              <span class="art row-art liked-art"><svg class="liked-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3S3.8 15.5 3.8 9.4A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 8.2 2.2c0 6.1-8.2 10.9-8.2 10.9z" /></svg></span>
-              <span class="row-text"><span class="row-title">Liked Songs</span><span class="row-sub"></span></span>
-            </button>
-            <section id="libTop" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Your top</h3>
-                <div id="topTabs" class="tabs" role="tablist" aria-label="Time range">
-                  <button class="tab" type="button" role="tab" data-range="short_term" aria-selected="true">4 weeks</button>
-                  <button class="tab" type="button" role="tab" data-range="medium_term" aria-selected="false">6 months</button>
-                  <button class="tab" type="button" role="tab" data-range="long_term" aria-selected="false">All time</button>
-                </div>
-              </div>
-              <p class="status" role="status" hidden></p>
-              <div id="topArtistsHead" class="group-head group-sub" hidden>
-                <h4 class="sub-title">Artists</h4>
-                <button class="see-all" type="button" data-see="topArtists" aria-label="See all your top artists" hidden>See all</button>
-              </div>
-              <div id="topArtists" class="albums"></div>
-              <div id="topTracks" class="rows"></div>
-            </section>
-            <section class="group">
-              <h3 class="group-title">Playlists</h3>
+            <section id="libPlaylists" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-playlists">
               <p id="listStatus" class="status" role="status" hidden></p>
               <div id="libList" class="rows"></div>
             </section>
-            <section id="libAlbums" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Albums</h3>
-                <button class="see-all" type="button" data-see="albums" aria-label="See all your albums" hidden>See all</button>
-              </div>
+            <section id="libLiked" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-liked" hidden>
+              <p class="status" role="status" hidden></p>
+              <p id="likedNote" class="detail-note" hidden></p>
+              <div id="likedRows" class="rows"></div>
+            </section>
+            <section id="libAlbums" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-albums" hidden>
               <p class="status" role="status" hidden></p>
               <div class="albums"></div>
             </section>
-            <section id="libFollowing" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Following</h3>
-                <button class="see-all" type="button" data-see="following" aria-label="See all the artists you follow" hidden>See all</button>
-              </div>
+            <section id="libFollowing" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-following" hidden>
               <p class="status" role="status" hidden></p>
               <div class="albums"></div>
             </section>
-            <section id="libMixes" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Spotify mixes</h3>
-                <button class="see-all" type="button" data-see="mixes" aria-label="See all Spotify mixes" hidden>See all</button>
+            <section id="libTop" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-top" hidden>
+              <div id="topTabs" class="tabs" role="tablist" aria-label="Time range">
+                <button class="tab" type="button" role="tab" data-range="short_term" aria-selected="true">4 weeks</button>
+                <button class="tab" type="button" role="tab" data-range="medium_term" aria-selected="false">6 months</button>
+                <button class="tab" type="button" role="tab" data-range="long_term" aria-selected="false">All time</button>
               </div>
+              <p class="status" role="status" hidden></p>
+              <h4 id="topArtistsHead" class="sub-title" hidden>Artists</h4>
+              <div id="topArtists" class="albums"></div>
+              <h4 id="topTracksHead" class="sub-title" hidden>Songs</h4>
+              <div id="topTracks" class="rows"></div>
+            </section>
+            <section id="libMixes" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-mixes" hidden>
               <div class="albums"></div>
             </section>
           </div>

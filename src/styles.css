@@ -1,4 +1,4 @@
-/* The Run — one screen. Now → next (played off to the left), colour from the current cover. */
+/* Needle — one screen. Now → next (played off to the left), colour from the current cover. */
 
 @font-face {
   font-family: "Bricolage";
@@ -481,35 +481,41 @@ svg {
   white-space: nowrap;
 }
 
-/* ---------- the playlist panel: a popover above its button, solid, scrolls down only ---------- */
-
-.panel-wrap {
-  position: relative;
-}
+/* ---------- the playlist panel: a full-height sheet from the left, the app blurred behind it ---------- */
 
 .panel {
   position: absolute;
-  z-index: 4;
-  bottom: calc(100% + 10px);
+  top: 0;
+  bottom: 0;
   left: 0;
   display: flex;
   flex-direction: column;
-  width: 380px;
-  max-width: calc(100vw - 2 * var(--gutter) + 20px);
-  max-height: 60vh;
-  border: 1px solid var(--hair);
-  border-radius: 12px;
+  width: min(440px, calc(100vw - 32px));
+  border-right: 1px solid var(--hair);
   background:
-    linear-gradient(180deg, rgb(var(--v) / 0.07), transparent 160px),
+    linear-gradient(180deg, rgb(var(--v) / 0.08), transparent 320px),
     rgb(var(--i));
   box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
-  animation: pop-up 160ms var(--ease) both;
+  animation: slide-in 320ms var(--ease) both;
+}
+
+.panel:focus {
+  outline: none;
 }
 
 .panel-head {
   flex: none;
-  padding: 12px 16px 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 84px;
+  padding: 16px 14px 14px 24px;
   border-bottom: 1px solid var(--hair);
+}
+
+.panel-heading {
+  flex: 1;
+  min-width: 0;
 }
 
 .panel-kicker {
@@ -525,14 +531,18 @@ svg {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 600;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  font-stretch: 85%;
 }
 
 .panel-list {
+  flex: 1;
   min-height: 0;
-  padding: 6px;
+  padding: 8px 12px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair) transparent;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -621,17 +631,22 @@ svg {
   cursor: grabbing;
 }
 
+/* every cover centred on the current one's middle */
 .run-track {
   display: flex;
   flex: none;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--gap);
   will-change: transform;
 }
 
-/* back to rest after a pan (reduced motion: the global rule makes it a jump) */
+/* back to rest after a pan; back from past an end, quicker (reduced motion: the global rule makes both a jump) */
 .run-track.is-returning {
   transition: transform 600ms var(--ease);
+}
+
+.run-track.is-springing {
+  transition: transform 350ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .cover {
@@ -652,8 +667,8 @@ svg {
     0 42px 90px -36px rgb(0 0 0 / 0.75);
 }
 
-/* the current cover big, every other one small: the same size while panning */
-.cover:not([data-role="now"]) { --s: 0.447; }
+/* the current cover big, every other one smaller: the same size while panning */
+.cover:not([data-role="now"]) { --s: 0.536; }
 .cover[data-role="next"] .art { opacity: 0.9; }
 
 .cover[data-role="past"] .art {
@@ -711,6 +726,21 @@ svg {
   border-radius: 6px;
   border: 1px solid var(--hair);
   background: linear-gradient(160deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 60%);
+}
+
+/* the cover row off: the current cover alone, centred, its title under it */
+.stage.is-solo .run {
+  cursor: default;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.stage.is-solo .now {
+  text-align: center;
+}
+
+.stage.is-solo :is(.now-title, .now-artist, .now-album) {
+  margin-inline: auto;
 }
 
 /* ---------- now block ---------- */
@@ -1034,6 +1064,11 @@ svg {
 [data-mode="idle"] .transport,
 [data-mode="other"] .scrub-row {
   visibility: hidden;
+}
+
+/* a play (or the restore) on its way: the transport shows its loaders, even before a song is known */
+.stage:is(.is-loading, .is-starting)[data-mode="idle"] .transport {
+  visibility: visible;
 }
 
 /* ---------- login ---------- */
@@ -1603,7 +1638,48 @@ svg {
 
 /* Library level 1: Liked Songs, Your top, Playlists, Albums, Following, Spotify mixes */
 #libLevel1 .group {
-  margin-top: 26px;
+  margin-top: 12px;
+}
+
+/* the Library's tabs: one group at a time, under the bar, outside the scrolling list */
+.lib-tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  max-width: calc(var(--page-max) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 0 var(--gutter) 14px calc(var(--gutter) - 16px);
+}
+
+.lib-tab {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-size: 15px;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.lib-tab:hover {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.06);
+}
+
+.lib-tab[aria-selected="true"] {
+  color: var(--ink);
+  background: var(--fg);
+}
+
+.lib-panel:not(.is-current) {
+  display: none;
+}
+
+#libTop > .tabs {
+  padding: 0 12px 6px;
 }
 
 /* a full page: section heads read as headings */
@@ -1616,9 +1692,6 @@ svg {
   letter-spacing: -0.01em;
 }
 
-#libLiked {
-  max-width: 480px;
-}
 
 /* playlists: rows in as many columns as fit */
 #libList {
@@ -1632,7 +1705,7 @@ svg {
   #topTracks {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(5, auto);
+    grid-template-rows: repeat(var(--rows, 5), auto);
     grid-auto-flow: column;
     column-gap: 24px;
   }
@@ -2005,8 +2078,8 @@ svg {
   from { opacity: 0; transform: translateY(-4px); }
 }
 
-@keyframes pop-up {
-  from { opacity: 0; transform: translateY(4px); }
+@keyframes slide-in {
+  from { transform: translateX(-100%); }
 }
 
 @keyframes drop-in {
@@ -2153,15 +2226,15 @@ svg {
 }
 
 /* the seek line runs a bar instead of a position */
-.stage:is(.is-loading, .is-starting) .scrub {
+.stage:is(.is-loading, .is-starting, .is-skipping) .scrub {
   overflow: hidden;
 }
 
-.stage:is(.is-loading, .is-starting) .scrub-fill {
+.stage:is(.is-loading, .is-starting, .is-skipping) .scrub-fill {
   opacity: 0;
 }
 
-.stage:is(.is-loading, .is-starting) .scrub::after {
+.stage:is(.is-loading, .is-starting, .is-skipping) .scrub::after {
   content: "";
   position: absolute;
   top: 50%;

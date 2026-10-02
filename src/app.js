@@ -1,4 +1,4 @@
-// The Run — stage UI: boot, sequential poll loop, the run of covers, transport.
+// Needle — stage UI: boot, sequential poll loop, the run of covers, transport.
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
 import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeline.js";
@@ -11,7 +11,8 @@ import { CONNECTING, NEEDS_LOGIN, HERE, isHere, deviceLabel, thisMacRow, preferr
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { ERROR_POLL_MS, GIVE_UP_FAILURES, gaveUp, pollDelay } from "./lib/poll.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
-import { SESSION_KEY, parseSession, playSession, sessionToSave, resumeSource, originUri, offsettable } from "./lib/session.js";
+import { originUri, offsettable } from "./lib/source.js";
+import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
@@ -69,9 +70,45 @@ const state = {
 // ---------- errors ----------
 
 const isCode = (e, code) => String(e).startsWith(code);
-/** A line in the app log file (<app dir>/logs/the-run.log). Never throws. */
+/** A line in the app log file (<app dir>/logs/needle.log). Never throws. */
 const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
 const reason = (e) => String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
+
+/** Run a player command and log one line: what, the path (local or remote, the device), ok or the error. */
+async function logged(what, fn) {
+  try {
+    const v = await fn();
+    applog("info", `${what}: ok`);
+    return v;
+  } catch (e) {
+    applog("warn", `${what}: ${e}`);
+    throw e;
+  }
+}
+
+// ---------- the store: Rust's state.json, read once at startup, written through ----------
+
+let stored = {}; // every stored key → value (store_all), kept in step with each write
+
+/** Read the whole store once, before anything reads a key. A failure leaves it empty: the defaults. */
+async function loadStore() {
+  try {
+    const all = await window.__TAURI__.core.invoke("store_all");
+    stored = all && typeof all === "object" ? all : {};
+  } catch (e) {
+    stored = {};
+    applog("warn", `store_all failed: ${e}`);
+  }
+}
+
+const storeGet = (key) => (Object.prototype.hasOwnProperty.call(stored, key) ? stored[key] : null);
+
+/** Store value under key (null removes it): in memory now, on disk in the background. Not session-tagged. */
+function storeSet(key, value) {
+  if (value == null) delete stored[key];
+  else stored[key] = value;
+  window.__TAURI__.core.invoke("store_set", { key, value: value ?? null }).catch((e) => applog("warn", `store_set ${key} failed: ${e}`));
+}
 
 // ---------- toast ----------
 
@@ -115,7 +152,10 @@ function showLogin(kind) {
   accountP = null; // the next login may be another account: ask /me again
   accountNow = null;
   activeId = null;
-  lastPoll = null;
+  lastSrc = null;
+  seenDevice = null;
+  restoring = null;
+  clearTimeout(restoreTimer);
   movingTo = null;
   pending.reset(); // the stage re-renders its loaders on the next start
   renderPending(false);
@@ -206,6 +246,7 @@ let pollAgain = false;
 let tick = 0;
 let failures = 0; // polls failed in a row: retried quietly until gaveUp()
 let pollEpoch = 0; // bumped on every start/stop: a poll from an older epoch must not touch state
+let seenDevice = null; // the active device the last poll saw (for the log: switches only)
 
 function startPolling() {
   pollEpoch++;
@@ -252,6 +293,7 @@ async function poll() {
     await refresh(epoch);
     if (epoch !== pollEpoch) return;
     state.error = null;
+    if (gaveUp(failures)) applog("info", `poll: back after ${failures} failures`);
     failures = 0;
   } catch (e) {
     if (epoch !== pollEpoch) return; // stale: the session it belonged to is gone
@@ -259,6 +301,7 @@ async function poll() {
     if (isCode(e, "AUTH_EXPIRED")) return expire();
     failures++;
     state.error = reason(e);
+    if (failures === GIVE_UP_FAILURES) applog("warn", `poll: ${failures} failures in a row, last: ${e}`);
     // a blip retries quietly (the last view stays, or a loader before the first load); only a
     // run of failures is an error worth showing
     if (failures === GIVE_UP_FAILURES && state.loaded) toast("Can't reach Spotify. Retrying.");
@@ -285,7 +328,6 @@ async function refresh(epoch) {
   listen(); // close the old "now"'s listening time before this poll overwrites it
   const active = Boolean(s && s.active);
   const track = active && s.track && s.track.uri ? s.track : null;
-  lastPoll = s || { active: false };
   activeId = active ? s.device_id || null : null; // routes player commands (isLocal)
   const mode = track ? "track" : active ? "other" : "idle";
   const modeChanged = mode !== state.mode;
@@ -321,6 +363,15 @@ async function refresh(epoch) {
 
   const changed = (state.now && state.now.uri) !== (track && track.uri);
   if (changed) trackGen++;
+  if (changed) {
+    const where = active ? devName(s.device_id) : "no device";
+    applog("info", `now: ${(state.now && state.now.uri) || "nothing"} → ${track ? `${track.uri} "${track.name}"` : mode} from ${state.contextUri || "no context"} on ${where}, ${active && s.is_playing ? "playing" : "paused"}`);
+  }
+  const deviceNow = active ? s.device_id || null : null;
+  if (deviceNow !== seenDevice) {
+    applog("info", `device: ${devName(seenDevice)} → ${devName(deviceNow)}`);
+    seenDevice = deviceNow;
+  }
   if (changesPending === 0 && settleAfter && startedAt >= settleAfter) settleAfter = 0;
   if (changed && state.now) observe(state.now, state.listenedMs);
   if (changed) state.listenedMs = 0;
@@ -329,7 +380,7 @@ async function refresh(epoch) {
   if (skipWait && (changed || (skipWait.landedAt && startedAt >= skipWait.landedAt + SKIP_SETTLE_MS))) endSkip();
   // a play the user started is confirmed by a poll that began after it landed
   if (pending.onPoll({ isPlaying: Boolean(active && s.is_playing), trackUri: track && track.uri, at: startedAt })) clearPending();
-  noteSession(false);
+  if (restoring && (track || mode === "other")) endRestoring(track && track.uri === restoring.trackUri ? "" : `replaced by ${track ? track.uri : "an ad or a podcast"}`);
 
   if (changed || modeChanged || !state.loaded) {
     // show the new track now: what's on screen is what a seek or a skip acts on.
@@ -383,7 +434,6 @@ async function refresh(epoch) {
     }
   }
   renderChrome();
-  maybeResume();
 }
 
 const LISTEN_STEP_CAP_MS = ERROR_POLL_MS + 1000; // a longer step is a stall, not listening
@@ -473,7 +523,9 @@ function renderRun() {
   const prev = measure(track);
   // while a play loads, its preview is the big cover and the old queue is gone
   const loading = isLoading();
-  const items = buildRun({ history: history(), now: shownTrack(), queue: loading ? [] : state.queue }, RUN_LIMITS);
+  const all = buildRun({ history: history(), now: shownTrack(), queue: loading ? [] : state.queue }, RUN_LIMITS);
+  // the cover row off in settings: the current cover alone
+  const items = soloRun() ? all.filter((it) => it.role === "now") : all;
   runItems = new Map(items.map((it) => [it.key, it]));
 
   const old = new Map([...track.querySelectorAll(".cover")].map((el) => [el.dataset.key, el]));
@@ -484,7 +536,7 @@ function renderRun() {
     el.dataset.offset = String(it.offset);
     els.push(el);
   }
-  if (!state.now) els.splice(items.filter((i) => i.role === "past").length, 0, slot);
+  if (!shownTrack()) els.splice(items.filter((i) => i.role === "past").length, 0, slot);
 
   track.replaceChildren(...els);
   // another song: back to rest (FLIP animates the covers there); the same song keeps a pan
@@ -496,16 +548,23 @@ function renderRun() {
   if (panelOpen) renderPanel();
 }
 
-// ---------- the run's pan: drag or swipe sideways, back to rest after a pause ----------
+// ---------- the run's pan: drag or swipe sideways, rubber band past the ends, back to rest after a pause ----------
 
 const PAN_RETURN_MS = 2500; // no input this long: the run slides back to rest
-const DRAG_SLOP_PX = 5; // a press that moves less is a click
-let restX = 0; // the track's offset that puts the current cover (or the empty slot) at the left content edge
-let pan = 0; // px from rest; > 0 shows what played
+const DRAG_SLOP_PX = 6; // a press that moves less is a click; the drag starts from there (no jump)
+const WHEEL_END_MS = 140; // no wheel event this long: the swipe (and the trackpad's own momentum) ended
+let restX = 0; // the track's offset that puts the current cover (or the empty slot) at its rest place
+let pan = 0; // px from rest, as shown (past an end: rubber-banded); > 0 shows what played
+let panRaw = 0; // the input behind pan: rubberBand(panRaw) = pan
 let panTimer = null;
-let drag = null; // a press on the run: {id, x0, pan0, moved, lastX, lastT, v}
+let wheelTimer = null;
+let drag = null; // a press on the run: {id, x0, raw0, moved, lastX, lastT, v}
 let dragged = false; // the last press panned: its click must not play a cover
 let glide = 0; // the inertia frame after a release
+
+const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** The cover row is off in settings: the current cover alone, centred, no pan. */
+const soloRun = () => !getSettings().coverRow;
 
 /** The left content edge, px (the gutter). */
 const gutterPx = () => parseFloat(getComputedStyle($("run")).getPropertyValue("--gutter")) || 48;
@@ -516,65 +575,96 @@ function panBounds() {
   const anchor = track.querySelector('[data-role="now"], .slot');
   const first = track.firstElementChild;
   const last = track.lastElementChild;
-  if (!anchor || !first) return { min: 0, max: 0 };
+  if (!anchor || !first || soloRun()) return { min: 0, max: 0 };
   const max = Math.max(0, anchor.offsetLeft - first.offsetLeft);
   const end = restX + last.offsetLeft + last.offsetWidth; // the last cover's right edge at rest
   const min = Math.min(0, $("run").clientWidth * 0.72 - end);
   return { min, max };
 }
 
-/** Put the track at rest + pan; animate: slide there (the return), else jump (a drag follows the pointer). */
-function setPan(x, animate = false) {
+/**
+ * Put the track at rest + rubberBand(raw). motion: "return" slides back to rest, "spring" snaps
+ * back from past an end, null jumps (a drag or a swipe follows the input).
+ */
+function setPan(raw, motion = null) {
   const { min, max } = panBounds();
-  pan = Math.min(max, Math.max(min, x));
+  panRaw = raw;
+  pan = rubberBand(raw, min, max);
   const track = $("runTrack");
-  track.classList.toggle("is-returning", animate);
+  track.classList.toggle("is-returning", motion === "return");
+  track.classList.toggle("is-springing", motion === "spring");
   track.style.transform = `translateX(${restX + pan}px)`;
 }
 
-/** Measure the rest offset (the window or the covers changed) and apply it with the current pan. */
+/** Past an end: the nearest end, else null. */
+function panEnd() {
+  const { min, max } = panBounds();
+  return panRaw > max ? max : panRaw < min ? min : null;
+}
+
+/** Input stopped: spring back from past an end, then wait for the return to rest. */
+function settlePan() {
+  const end = panEnd();
+  if (end !== null) setPan(end, "spring");
+  holdPan();
+}
+
+/** Measure the rest offset (the window or the covers changed) and apply it with the current pan, inside the limits. */
 function placeRun() {
   const track = $("runTrack");
   const anchor = track.querySelector('[data-role="now"], .slot');
-  restX = gutterPx() - (anchor ? anchor.offsetLeft : 0);
-  setPan(pan);
+  const at = anchor ? anchor.offsetLeft : 0;
+  // solo: the cover centred in the stage; else at the left content edge
+  restX = soloRun() && anchor ? ($("run").clientWidth - anchor.offsetWidth) / 2 - at : gutterPx() - at;
+  const { min, max } = panBounds();
+  setPan(Math.min(max, Math.max(min, pan)));
 }
 
 function resetPan() {
   cancelAnimationFrame(glide);
   clearTimeout(panTimer);
+  clearTimeout(wheelTimer);
   drag = null;
   pan = 0;
+  panRaw = 0;
   $("run").classList.remove("is-dragging");
 }
 
 /** Slide back to rest once input has stopped for PAN_RETURN_MS. */
 function holdPan() {
   clearTimeout(panTimer);
-  if (pan) panTimer = setTimeout(() => setPan(0, true), PAN_RETURN_MS);
+  if (pan) panTimer = setTimeout(() => setPan(0, "return"), PAN_RETURN_MS);
 }
 
-/** Where the track is on screen now, as a pan (mid-return it isn't where `pan` says). */
-function shownPan() {
+/** Where the track is on screen now, as an input offset (mid-slide it isn't where `pan` says). */
+function shownRaw() {
   const m = new DOMMatrixReadOnly(getComputedStyle($("runTrack")).transform);
-  return m.m41 - restX;
+  const { min, max } = panBounds();
+  return rubberRaw(m.m41 - restX, min, max);
+}
+
+/** Input caught the track mid-slide: hold it where it is. */
+function catchPan() {
+  cancelAnimationFrame(glide);
+  clearTimeout(panTimer);
+  const track = $("runTrack");
+  if (track.classList.contains("is-returning") || track.classList.contains("is-springing")) setPan(shownRaw());
 }
 
 function runDown(ev) {
-  if (ev.button !== 0) return;
-  cancelAnimationFrame(glide);
-  clearTimeout(panTimer);
-  if ($("runTrack").classList.contains("is-returning")) setPan(shownPan()); // caught mid-return: hold it there
+  if (ev.button !== 0 || soloRun()) return;
+  catchPan();
   dragged = false;
-  drag = { id: ev.pointerId, x0: ev.clientX, pan0: pan, moved: false, lastX: ev.clientX, lastT: ev.timeStamp, v: 0 };
+  drag = { id: ev.pointerId, x0: ev.clientX, raw0: panRaw, moved: false, lastX: ev.clientX, lastT: ev.timeStamp, v: 0 };
 }
 
 function runMove(ev) {
   if (!drag || ev.pointerId !== drag.id) return;
-  const dx = ev.clientX - drag.x0;
   if (!drag.moved) {
+    const dx = ev.clientX - drag.x0;
     if (Math.abs(dx) < DRAG_SLOP_PX) return;
     drag.moved = true;
+    drag.x0 += Math.sign(dx) * DRAG_SLOP_PX; // 1:1 from the dead zone's edge: the row doesn't jump by the slop
     $("run").setPointerCapture(ev.pointerId);
     $("run").classList.add("is-dragging");
   }
@@ -582,7 +672,7 @@ function runMove(ev) {
   if (dt > 0) drag.v = (ev.clientX - drag.lastX) / dt; // px/ms, for the glide after release
   drag.lastX = ev.clientX;
   drag.lastT = ev.timeStamp;
-  setPan(drag.pan0 + dx);
+  setPan(drag.raw0 + ev.clientX - drag.x0);
 }
 
 function runUp(ev) {
@@ -592,32 +682,33 @@ function runUp(ev) {
   $("run").classList.remove("is-dragging");
   if (!d.moved) return;
   dragged = true;
-  // a quick flick keeps going for a moment, slowing down; a held stop doesn't
-  let v = ev.timeStamp - d.lastT < 80 ? d.v : 0;
+  // a quick flick keeps going for a short moment; a held stop or a release past an end doesn't
+  let v = ev.timeStamp - d.lastT < 80 ? d.v * 0.8 : 0;
+  if (Math.abs(v) < 0.2 || panEnd() !== null || reducedMotion()) return void settlePan();
   let t = performance.now();
   const step = (now) => {
     const dt = Math.min(32, now - t);
     t = now;
-    const before = pan;
-    setPan(pan + v * dt);
-    v *= Math.pow(0.95, dt / 16);
-    if (Math.abs(v) > 0.02 && pan !== before) glide = requestAnimationFrame(step);
-    else holdPan();
+    setPan(panRaw + v * dt);
+    // past an end the row brakes hard, then springs back
+    v *= Math.pow(panEnd() === null ? 0.92 : 0.6, dt / 16);
+    if (Math.abs(v) > 0.03) glide = requestAnimationFrame(step);
+    else settlePan();
   };
-  if (Math.abs(v) > 0.2 && !matchMedia("(prefers-reduced-motion: reduce)").matches) glide = requestAnimationFrame(step);
-  else holdPan();
+  glide = requestAnimationFrame(step);
 }
 
-/** A trackpad swipe sideways (or Shift + wheel) pans; a plain vertical wheel is left alone. */
+/** A trackpad swipe sideways (or Shift + wheel) pans, scaled down; a plain vertical wheel is left alone. */
 function runWheel(ev) {
+  if (soloRun()) return;
   const sideways = Math.abs(ev.deltaX) > Math.abs(ev.deltaY);
   const dx = sideways ? ev.deltaX : ev.shiftKey ? ev.deltaY : 0;
   if (!dx) return;
   ev.preventDefault();
-  cancelAnimationFrame(glide);
-  if ($("runTrack").classList.contains("is-returning")) setPan(shownPan());
-  setPan(pan - dx * (ev.deltaMode === 1 ? 16 : 1));
-  holdPan();
+  catchPan();
+  setPan(panRaw - dx * WHEEL_SCALE * (ev.deltaMode === 1 ? 16 : 1));
+  clearTimeout(wheelTimer);
+  wheelTimer = setTimeout(settlePan, WHEEL_END_MS);
 }
 
 /** A play button on a past or next cover: jump to that song (see coverTarget). Not after a drag. */
@@ -634,34 +725,28 @@ function onRunClick(e) {
 /** Play a run item ({role, offset, track}) from a cover or a panel row (row: the clicked row, for its spinner). */
 async function playCover(item, row = null) {
   if (!item || item.role === "now" || isLocalFile(item.track.uri)) return;
-  const last = readSession();
-  // Spotify can report no context for a load we started (uris, or a slow state update):
-  // the saved origin playlist/album is then the context
-  const ctx = state.contextUri || (last && (last.contextUri || originUri(last.origin))) || null;
-  // what's known to be in the playing context: its loaded rows, or the list the saved play used
-  const sameAsLast = last && ctx && (originUri(last.origin) === ctx || last.contextUri === ctx);
-  // the saved list only describes what plays when nothing else is named: another client may
-  // have started a different playlist since the last save
-  const savedFits = !state.contextUri || Boolean(sameAsLast);
+  const last = lastSrc;
+  // Spotify can report no context for a load we started (a slow state update): the last one is then the context
+  const ctx = state.contextUri || (last && last.contextUri) || null;
+  const sameAsLast = Boolean(last && ctx && last.contextUri === ctx);
+  // the last list only describes what plays when nothing else is named: another client may
+  // have started a different playlist since
+  const lastFits = !state.contextUri || sameAsLast;
   const target = coverTarget(item, {
     contextUri: ctx,
+    // what's known to be in the playing context: its loaded rows, or the members the last play knew
     members: (ctx && knownRows.get(ctx)) || (sameAsLast && last.uris) || null,
-    listUris: savedFits && last ? last.uris : null,
+    listUris: lastFits && last ? last.uris : null,
     nowUri: state.now && state.now.uri,
     nextUris: state.queue.map((t) => t.uri), // the next covers are its first ones
     historyContext: item.role === "past" ? (history().find((h) => h.track && h.track.uri === item.track.uri) || {}).context_uri || null : null,
   });
   if (!target) return;
   if (target.uris) target.uris = target.uris.filter((u) => !isLocalFile(u));
-  // a jump inside the playing playlist/album keeps where it came from: its origin and its full
-  // track list, so the next jump still knows every member (not just the visible covers)
-  // only a jump inside the same playlist/album keeps the saved origin: a past cover from another
-  // one starts its own, even when that playlist shares the track
-  const sameSource = target.contextUri
-    ? target.contextUri === ctx && Boolean(sameAsLast)
-    : savedFits && Boolean(last && last.uris && last.uris.includes(target.trackUri));
-  // keep the full member list for the next jump (never sent with a context: Spirc takes one source)
-  await startPlay(target, { kind: "cover", row, origin: sameSource ? last.origin : null, members: sameSource ? last.uris : null });
+  // a jump inside the playing playlist/album keeps its full member list, so the next jump still
+  // knows every member (not just the visible covers); never sent with a context: Spirc takes one source
+  const sameSource = target.contextUri ? target.contextUri === ctx && sameAsLast : false;
+  await startPlay(target, { kind: "cover", row, members: sameSource ? last.uris : null });
 }
 
 // ---------- now block, chrome, progress ----------
@@ -692,7 +777,7 @@ function setNowArtist(html) {
 function renderNow() {
   const t = shownTrack();
   $("stage").classList.toggle("is-loading", isLoading());
-  $("stage").classList.toggle("is-starting", playPending() && !shownTrack());
+  $("stage").classList.toggle("is-starting", (playPending() || restoringNow()) && !shownTrack());
   const title = $("nowTitle");
   if (t) {
     title.classList.remove("is-connecting");
@@ -704,7 +789,8 @@ function renderNow() {
   }
   let head = "Nothing playing";
   let line = "Pick a playlist from your library to start.";
-  const starting = playPending() && !state.now; // a play of an unknown track: a loader, never "Nothing playing"
+  // a play of an unknown track, or the restore of one: a loader, never "Nothing playing"
+  const starting = (playPending() && !t) || restoringNow();
   if (starting) {
     head = "Loading…";
     line = "";
@@ -724,8 +810,9 @@ function renderNow() {
   }
   title.textContent = head;
   title.classList.toggle("is-connecting", starting || (!state.loaded && !gaveUp(failures)));
-  setNowArtist("");
-  setText("nowAlbum", "");
+  // starting: blank artist and album lines hold the song's layout, so nothing jumps when it shows
+  setNowArtist(starting ? "&nbsp;" : "");
+  setText("nowAlbum", starting ? "\u00a0" : "");
   setText("emptyState", line);
 }
 
@@ -747,7 +834,7 @@ function renderChrome() {
   $("scrub").tabIndex = mode === "track" ? 0 : -1;
 
   const noDevice = state.devices && state.devices.length === 0 && mode === "idle";
-  $("libraryBtn").classList.toggle("is-primary", mode === "idle" && !noDevice && state.loaded);
+  $("libraryBtn").classList.toggle("is-primary", mode === "idle" && !noDevice && state.loaded && !starting && !restoringNow());
 
   // hidden only until the first poll: with no device the button still opens the (empty) list
   const dev = $("deviceBtn");
@@ -818,8 +905,13 @@ function progress() {
 
 let lastShown = "";
 function renderProgress() {
-  const dur = state.now ? state.now.duration_ms || 0 : 0;
-  const p = progress();
+  // next / previous or a play on its way: the bar stops at once and runs the loading line until the
+  // new song shows (a known song's length shows already)
+  const loading = isLoading();
+  const frozen = Boolean(skipWait) || loading;
+  const t = loading ? shownTrack() : state.now;
+  const dur = t && !skipWait ? t.duration_ms || 0 : 0;
+  const p = frozen ? 0 : progress();
   const pct = dur ? Math.min(100, (p / dur) * 100) : 0;
   $("scrubFill").style.width = `${pct}%`;
   const shown = `${fmtTime(p)}|${fmtTime(dur)}`;
@@ -969,15 +1061,21 @@ let activeId = null; // the device the last poll showed active, null = none
  * A play/pause/seek/next/prev/volume for deviceId (the device it was made for): local() when that's
  * the in-app player and it's active, else remote(). A local call that finds no engine retries once remotely.
  */
-async function routed(deviceId, local, remote) {
+async function routed(deviceId, local, remote, what = "command") {
   if (isLocal(engine, deviceId, activeId)) {
     try {
-      return await local();
+      return await logged(`${what} local`, local);
     } catch (e) {
       if (!isCode(e, "ENGINE_NOT_READY")) throw e;
     }
   }
-  return remote();
+  return logged(`${what} remote on ${devName(deviceId)}`, remote);
+}
+
+/** A device id as the log names it: its label and id. */
+function devName(id) {
+  const d = (state.devices || []).find((x) => x.id === id) || (state.device && state.device.id === id ? state.device : null);
+  return d ? `"${labelOf(d)}" (${id})` : String(id || "no device");
 }
 
 /**
@@ -999,14 +1097,14 @@ async function playSource(deviceId, src) {
 }
 
 /**
- * A play the user started: loaders from the click until a poll shows it playing, the last session
- * written once it lands. origin: the detail view it came from ({kind, id}) or null; row: the clicked
- * row; refused(e): true for an error the caller handles itself (the play then counts as failed).
+ * A play the user started: loaders from the click until a poll shows it playing; once it lands it is
+ * the last source (cover jumps, the panel). row: the clicked row; refused(e): true for an error the
+ * caller handles itself (the play then counts as failed); members: the context's known track uris.
  */
-async function startPlay(src, { kind, origin = null, row = null, refused = null, members = null } = {}) {
+async function startPlay(src, { kind, row = null, refused = null, members = null } = {}) {
   preview = kind === "resume" ? null : previewOf(src);
   const token = startPending(kind, src.trackUri || null, row);
-  applog("info", `play ${kind}: ${JSON.stringify({ ...src, uris: src.uris && src.uris.length })} on ${state.device && state.device.name}`);
+  applog("info", `play ${kind}: ${JSON.stringify({ ...src, uris: src.uris && src.uris.length })} on ${state.device ? devName(state.device.id) : "no device yet"}`);
   let handled = false;
   const sent = await changeTrack(async (id) => {
     const deviceId = await needDevice(id);
@@ -1020,7 +1118,7 @@ async function startPlay(src, { kind, origin = null, row = null, refused = null,
   });
   const ok = sent && !handled;
   settlePending(token, ok);
-  if (ok) writeSession(playSession(accountNow, src, origin, Date.now(), members || (src.contextUri && knownRows.get(src.contextUri)) || null));
+  if (ok) setLastSrc(src, members || (src.contextUri && knownRows.get(src.contextUri)) || null);
   kick();
   return ok;
 }
@@ -1039,11 +1137,15 @@ function previewOf(src) {
 /** The track on screen: a pending play's preview until Spotify reports that track, else the real one. */
 function shownTrack() {
   if (preview && playPending() && !(state.now && preview.uri && state.now.uri === preview.uri)) return preview.uri ? preview : null;
+  if (!state.now && restoring && restoring.track) return restoring.track; // the session Rust loads back
   return state.now;
 }
 
-/** A play is starting and Spotify hasn't reported its track yet. */
-const isLoading = () => Boolean(preview && playPending() && shownTrack() !== state.now);
+/** Rust is loading the last session back and no poll has shown a song yet. */
+const restoringNow = () => Boolean(restoring && !state.now && !playPending());
+
+/** A play (or the restore) is starting and Spotify hasn't reported its track yet. */
+const isLoading = () => Boolean(((preview && playPending()) || restoringNow()) && shownTrack() !== state.now);
 
 const pending = createPending();
 let pendingTimer = null;
@@ -1097,22 +1199,22 @@ function renderPending(render = true) {
   renderChrome();
 }
 
-// ---------- the last session: written while playing, loaded paused once per launch ----------
+// ---------- the last source, and the session Rust restores at launch ----------
 
 let accountP = null; // promise of the /me id for this login session
 let accountNow = null; // that id once known, else null
-let sessionCache; // the stored last session (undefined = not read yet)
+// what the last play started from: {contextUri, uris, trackUri}. uris: the list played, or with a
+// context its known members. From this run's plays, else Rust's saved session (session_get).
+let lastSrc = null;
+// Rust's saved session while it loads back at launch: {trackUri, track (null = unknown), until}
+let restoring = null;
+const RESTORE_WAIT_MS = 20000; // the player connects and loads it; longer = it isn't coming
 
-/** The signed-in account's id (scopes the list cache and the last session), or null on failure. */
+/** The signed-in account's id (scopes the list cache), or null on failure. */
 function accountId() {
   if (!accountP) {
     const p = invoke("me_id").then(
-      (id) => {
-        accountNow = id || null;
-        const last = readSession();
-        if (last && accountNow && last.accountId !== accountNow) clearSession(); // another account's
-        return accountNow;
-      },
+      (id) => (accountNow = id || null),
       (e) => {
         if (isCode(e, "AUTH_EXPIRED")) expire();
         if (accountP === p) accountP = null; // retry on the next ask
@@ -1124,76 +1226,75 @@ function accountId() {
   return accountP;
 }
 
-function readSession() {
-  if (sessionCache === undefined) {
-    try {
-      sessionCache = parseSession(localStorage.getItem(SESSION_KEY));
-    } catch {
-      sessionCache = null;
-    }
-  }
-  return sessionCache;
+/** A play landed: remember its source. With a context, uris are only its known members. */
+function setLastSrc(src, members = null) {
+  const uris = src.contextUri ? members : src.uris;
+  lastSrc = {
+    contextUri: src.contextUri || null,
+    uris: Array.isArray(uris) && uris.length ? uris.slice(0, PLAY_URIS_MAX) : null,
+    trackUri: src.trackUri || (src.uris && src.uris[0]) || null,
+  };
 }
-
-function writeSession(s) {
-  if (!s || !s.accountId) return;
-  sessionCache = s;
-  try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-  } catch {
-    /* kept in memory for this run */
-  }
-}
-
-function clearSession() {
-  sessionCache = null;
-  try {
-    localStorage.removeItem(SESSION_KEY);
-  } catch {
-    /* nothing stored */
-  }
-}
-
-/** Save where the current song is: from polls (throttled), on pause and on quit (force). */
-function noteSession(force) {
-  const t = state.now;
-  if (!t || isLocalFile(t.uri)) return;
-  const poll = { accountId: accountNow, trackUri: t.uri, contextUri: state.contextUri, positionMs: progress() };
-  writeSession(sessionToSave(readSession(), poll, Date.now(), force));
-}
-
-let resumeTried = false; // once per launch
-let lastPoll = null; // the last playback_state
 
 /**
- * Once the engine is ready and a poll has completed: load the last session on the in-app player, paused.
- * Nothing when something plays, when the user already started a play, or when there is nothing to load.
+ * Rust's saved session ({contextUri, uris, trackUri, …}): the last source when this run has none yet,
+ * and, before any poll showed a song, the song it restores, on screen at once (no "Nothing playing").
  */
-async function maybeResume() {
-  if (resumeTried || !state.loaded || !lastPoll || !engine || engine.state !== "ready" || !engine.device_id) return;
-  resumeTried = true;
-  const sess = authSession;
-  const account = await accountId();
-  const runId = engine && engine.device_id;
-  if (sess !== authSession || !account || !runId || !lastPoll) return;
-  const poll = lastPoll;
-  // (a paused session Spotify still shows on the in-app player is loaded too: the restarted player holds nothing)
-  if (poll.is_playing || changesPending || pending.current()) return;
-  const src = resumeSource(poll, readSession(), account);
-  if (!src || isLocalFile(src.trackUri)) return;
-  const token = startPending("resume", src.trackUri, null, false);
-  let failed = false;
-  await changeTrack(() =>
-    invoke("local_load", { ...src, play: false, shuffle: state.shuffle, repeat: state.repeat }).catch((e) => {
-      if (isCode(e, "AUTH_EXPIRED")) throw e;
-      failed = true; // quietly: the app starts idle
-    }),
-  );
-  if (sess !== authSession) return;
-  settlePending(token, !failed);
-  if (failed) return;
-  selectTheRun(runId);
-  kick();
+function noteRestored(s) {
+  if (!s || typeof s.trackUri !== "string" || !s.trackUri) return;
+  if (!lastSrc) setLastSrc({ contextUri: s.contextUri || null, uris: s.uris || null, trackUri: s.trackUri });
+  if (state.now || playPending() || (restoring && restoring.trackUri === s.trackUri)) return;
+  const track = seenTracks.get(s.trackUri) || null;
+  restoring = { trackUri: s.trackUri, track, until: performance.now() + RESTORE_WAIT_MS };
+  applog("info", `session: restoring ${s.trackUri} from ${s.contextUri || `${(s.uris || []).length} uris`}${track ? "" : " (track not known yet)"}`);
+  if (!track) restoredTrack(s).then((t) => {
+    if (!t || !restoring || restoring.trackUri !== s.trackUri) return;
+    restoring.track = t;
+    if (!$("stage").hidden) renderPending();
+  });
+  clearTimeout(restoreTimer);
+  restoreTimer = setTimeout(() => endRestoring("not loaded in time"), RESTORE_WAIT_MS);
+  if (!$("stage").hidden) renderPending();
+}
+
+let restoreTimer = null;
+
+/** The restored song shows as itself now (a poll has it), or isn't coming. */
+function endRestoring(why = "") {
+  if (!restoring) return;
+  if (why) applog("info", `session: restore ${why}`);
+  restoring = null;
+  clearTimeout(restoreTimer);
+  if (!$("stage").hidden) renderPending();
+}
+
+/** The restored song's track from the disk copy of its list (no network), or null. */
+async function restoredTrack(s) {
+  const find = (v) => listTracks(v).find((t) => t && t.uri === s.trackUri) || null;
+  const [, kind, id] = String(s.contextUri || "").split(":");
+  let key = null;
+  if (kind === "album" && id) key = `album:${id}`;
+  else if (/:collection$/.test(s.contextUri || "")) key = "liked";
+  else if (kind === "playlist" && id) {
+    const p = (await diskGet("playlists") || []).find((x) => x && x.id === id);
+    if (p && p.snapshot_id) key = `playlist:${id}:${p.snapshot_id}`;
+  }
+  if (key) return find(await diskGet(key));
+  // a uris play: Liked Songs and the top lists hold most of them
+  for (const k of ["liked", topTracksKey("short_term")]) {
+    const t = find(await diskGet(k));
+    if (t) return t;
+  }
+  return null;
+}
+
+/** Ask Rust for the saved session once per stage start; the event covers a restore that lands later. */
+async function loadRestored() {
+  try {
+    noteRestored(await invoke("session_get"));
+  } catch (e) {
+    applog("warn", `session_get failed: ${e}`);
+  }
 }
 
 /** Make d the shown device. A volume burst on the old device goes out now, to that device. */
@@ -1261,10 +1362,7 @@ async function togglePlay() {
   const dev = state.device && state.device.id; // the device this click is for
   let token = 0;
   if (want) token = startPending("play", state.now && state.now.uri);
-  else {
-    clearPending(); // a pause ends any wait for sound
-    noteSession(true);
-  }
+  else clearPending(); // a pause ends any wait for sound
   renderChrome();
   const ok = await sendIntent(
     "play",
@@ -1273,6 +1371,7 @@ async function togglePlay() {
         dev,
         () => invoke(want ? "local_play" : "local_pause"),
         async () => (want ? resumeOrRestart(await needDevice(id)) : invoke("pause")),
+        want ? "play" : "pause",
       ),
     () => (state.isPlaying = !want), // the device still has the state before this click
   );
@@ -1284,7 +1383,7 @@ async function toggleShuffle() {
   if (state.mode !== "track") return;
   const want = (state.shuffle = !state.shuffle);
   renderChrome();
-  await sendIntent("shuffle", () => invoke("set_shuffle", { on: want }), () => (state.shuffle = !want));
+  await sendIntent("shuffle", () => logged(`shuffle ${want ? "on" : "off"} remote`, () => invoke("set_shuffle", { on: want })), () => (state.shuffle = !want));
 }
 
 /** off → context → track → off. */
@@ -1293,7 +1392,7 @@ async function cycleRepeat() {
   const before = state.repeat;
   const mode = (state.repeat = nextRepeat(before));
   renderChrome();
-  await sendIntent("repeat", () => invoke("set_repeat", { mode }), () => (state.repeat = before));
+  await sendIntent("repeat", () => logged(`repeat ${mode} remote`, () => invoke("set_repeat", { mode })), () => (state.repeat = before));
 }
 
 // ---------- volume: the UI moves at once, one command after 200ms of quiet (30ms on the in-app player) ----------
@@ -1342,7 +1441,7 @@ function sendVolume() {
   const { lagMs } = volumeTiming(isLocal(engine, deviceId, activeId));
   sendIntent(
     volKey(deviceId),
-    () => routed(deviceId, () => invoke("local_volume", { percent }), () => invoke("set_volume", { percent, deviceId })),
+    () => routed(deviceId, () => invoke("local_volume", { percent }), () => invoke("set_volume", { percent, deviceId }), `volume ${percent}%`),
     revert,
     volSeq,
     lagMs,
@@ -1611,10 +1710,13 @@ function setEngine(st) {
   if (!st || !st.state) return;
   const wasReady = engine && engine.state === "ready";
   const wasId = engine && engine.device_id;
+  if (!engine || engine.state !== st.state || engine.device_id !== st.device_id) {
+    applog("info", `engine: ${engine ? engine.state : "unknown"} → ${st.state}${st.reason ? ` (${st.reason})` : ""}${st.device_id ? ` id ${st.device_id}` : ""}`);
+  }
   engine = st;
   if (st.device_id) hereId = st.device_id;
-  if (st.state === "account_mismatch") clearSession(); // the player is on another account
-  if (st.state === "ready") maybeResume();
+  // a player that can't run won't load the saved session back
+  if (restoring && (NEEDS_LOGIN.has(st.state) || st.state === "failed" || st.state === "account_mismatch")) endRestoring(`stopped: engine ${st.state}`);
   if (settingsOpen) renderSettings(); // quality needs a ready player
   if (st.device_id !== wasId && !$("stage").hidden) renderChrome(); // the chip may be the player: "Here"
   if (!devicesOpen) return;
@@ -1804,6 +1906,7 @@ async function pickDevice(d) {
     }),
   );
   if (sess !== authSession) return;
+  applog(failed ? "warn" : "info", `device pick ${devName(d.id)}: ${failed ? failed : "ok"}`);
   intents.finish("device", performance.now());
   if (movingTo && movingTo.seq === seq) movingTo = null;
   renderChrome();
@@ -1827,7 +1930,6 @@ async function pickDevice(d) {
 function onOutside(ev) {
   if (devicesOpen && !ev.target.closest(".device-wrap")) closeDevices();
   if (volumeOpen && !ev.target.closest("#volume")) closeVolume();
-  if (panelOpen && !ev.target.closest(".panel-wrap")) closePanel();
   if (settingsOpen && !ev.target.closest(".settings-wrap")) closeSettings();
 }
 
@@ -1844,6 +1946,8 @@ function startSkip(btn) {
   btn.classList.add("is-pending");
   btn.setAttribute("aria-busy", "true");
   skipWait = wait;
+  $("stage").classList.add("is-skipping");
+  renderProgress();
   return wait;
 }
 
@@ -1853,6 +1957,8 @@ function endSkip() {
   skipWait.btn.classList.remove("is-pending");
   skipWait.btn.removeAttribute("aria-busy");
   skipWait = null;
+  $("stage").classList.remove("is-skipping");
+  renderProgress();
 }
 
 async function skip(cmd) {
@@ -1860,7 +1966,7 @@ async function skip(cmd) {
   const dev = state.device && state.device.id; // the device this click is for
   const local = cmd === "next_track" ? "local_next" : "local_prev";
   const wait = startSkip($(cmd === "next_track" ? "nextBtn" : "prevBtn"));
-  const ok = await changeTrack(() => routed(dev, () => invoke(local), () => invoke(cmd)));
+  const ok = await changeTrack(() => routed(dev, () => invoke(local), () => invoke(cmd), cmd === "next_track" ? "next" : "previous"));
   if (skipWait === wait) {
     if (ok) wait.landedAt = performance.now();
     else endSkip();
@@ -1907,7 +2013,7 @@ async function seekTo(ms, gen = trackGen) {
   const positionMs = state.progressMs;
   const dev = state.device && state.device.id; // the device this seek is for
   await withDevice(() =>
-    gen === trackGen ? routed(dev, () => invoke("local_seek", { positionMs }), () => invoke("seek", { positionMs })) : null,
+    gen === trackGen ? routed(dev, () => invoke("local_seek", { positionMs }), () => invoke("seek", { positionMs }), `seek ${fmtTime(positionMs)}`) : null,
   );
   kick();
 }
@@ -1915,13 +2021,13 @@ async function seekTo(ms, gen = trackGen) {
 // ---------- the playlist panel: the playing list around the current song ----------
 
 let panelOpen = false;
-// the source the current song plays from: {key, ctx, origin, name, tracks (null = loading or none), loading}
+// the source the current song plays from: {key, ctx, name, tracks (null = loading or none), loading}
 let panelSrc = null;
 let panelGen = 0; // the latest source load: an older one's answer is dropped
 let panelShown = ""; // the rows on screen, as a signature: an unchanged render keeps scroll, focus and a spinner
 let panelView = { mode: "queue", rows: [] };
 let panelNowKey = null; // the current song's row on screen: when it moves, the panel scrolls to it
-let lastList = null; // the list the last list play here started from: {tracks, name, origin}
+let lastList = null; // the list the last list play here started from: {tracks, name}
 
 function togglePanel() {
   if (panelOpen) closePanel(true);
@@ -1936,9 +2042,11 @@ function openPanel() {
   panelOpen = true;
   panelShown = "";
   panelNowKey = null;
-  $("panel").hidden = false;
+  $("panelLayer").hidden = false;
   $("panelBtn").setAttribute("aria-expanded", "true");
+  $("stage").inert = true; // a modal sheet over the stage
   renderPanel();
+  $("panel").focus({ preventScroll: true });
 }
 
 function closePanel(refocus = false) {
@@ -1946,19 +2054,19 @@ function closePanel(refocus = false) {
   panelOpen = false;
   panelGen++; // a list still loading must not land in a closed panel
   panelSrc = null; // the next open asks again (the list cache makes it quick)
-  $("panel").hidden = true;
+  $("panelLayer").hidden = true;
   $("panelBtn").setAttribute("aria-expanded", "false");
+  if (!state.overlay) $("stage").inert = false;
   if (refocus) $("panelBtn").focus();
 }
 
 /** A playback context as the panel lists it, or null when Spotify won't list it (artist, radio…). */
-function contextSource(ctx, origin = null) {
+function contextSource(ctx) {
   const [, kind, id] = String(ctx).split(":");
   if (kind === "playlist" && id) {
     return {
       key: ctx,
       ctx,
-      origin: origin || { kind: "playlist", id },
       name: null,
       fetch: async (shown, named) => {
         // the name and the snapshot id (it keys the disk copy): the loaded playlists, their disk copy, or a fetch
@@ -1979,7 +2087,6 @@ function contextSource(ctx, origin = null) {
     return {
       key: ctx,
       ctx,
-      origin: origin || { kind: "album", id },
       name: state.now && state.now.album, // the song plays from its own album
       fetch: async (shown) => {
         if (!lib.has(key)) diskGet(key).then((v) => v && shown(listTracks(v)));
@@ -1991,7 +2098,6 @@ function contextSource(ctx, origin = null) {
     return {
       key: ctx,
       ctx,
-      origin: null,
       name: "Liked Songs",
       fetch: async (shown) => {
         if (!lib.has("liked")) diskGet("liked").then((v) => v && shown(listTracks(v)));
@@ -2002,7 +2108,7 @@ function contextSource(ctx, origin = null) {
   return null;
 }
 
-/** What the current song plays from: the context, else the list a play here started from, else the saved origin. */
+/** What the current song plays from: the context, else the list a play here started from, else the last source's context. */
 function panelSource() {
   const t = state.now;
   if (!t) return null;
@@ -2010,11 +2116,12 @@ function panelSource() {
   // a play by uris: Spotify names no context
   if (lastList && lastList.tracks.some((x) => x.uri === t.uri)) {
     const l = lastList;
-    return { key: l, ctx: null, origin: l.origin, name: l.name, fetch: async () => l.tracks };
+    return { key: l, ctx: null, name: l.name, fetch: async () => l.tracks };
   }
-  const last = readSession();
-  const ctx = last && originUri(last.origin);
-  if (ctx && (last.trackUri === t.uri || (last.uris && last.uris.includes(t.uri)))) return contextSource(ctx, last.origin);
+  // a context load Spotify doesn't name yet: the last source's
+  const last = lastSrc;
+  const ctx = last && offsettable(last.contextUri) ? last.contextUri : null;
+  if (ctx && (last.trackUri === t.uri || (last.uris && last.uris.includes(t.uri)))) return contextSource(ctx);
   return null; // the queue view: recent plays, now, Spotify's queue
 }
 
@@ -2124,6 +2231,7 @@ function onPanelClick(e) {
   const el = e.target.closest(".row[data-n]");
   const r = el && panelView.rows[Number(el.dataset.n)];
   if (!r || r.role === "now" || isLocalFile(r.track.uri)) return;
+  applog("info", `panel: play ${r.role} row ${r.track.uri} "${r.track.name}" (${panelView.mode} view${state.shuffle ? ", shuffle" : ""})`);
   if (panelView.mode === "list") return void playPanelRow(r, el);
   // the queue view: a played or a queued song, as its cover in the run would play it
   playCover({ role: r.role === "played" ? "past" : "next", offset: r.role === "next" ? r.i + 1 : -1, track: r.track }, el);
@@ -2134,19 +2242,19 @@ function playPanelRow(r, el) {
   const src = panelSrc;
   if (!src || !src.tracks) return;
   if (src.ctx && offsettable(src.ctx)) {
-    startPlay({ contextUri: src.ctx, trackUri: r.track.uri }, { kind: "panel", row: el, origin: src.origin });
+    startPlay({ contextUri: src.ctx, trackUri: r.track.uri }, { kind: "panel", row: el });
     return;
   }
   const uris = src.tracks.slice(r.i).map((t) => t.uri).filter((u) => !isLocalFile(u)).slice(0, PLAY_URIS_MAX);
   if (!uris.length) return;
   // Spotify names no context for a uris play: the panel keeps showing this list
-  lastList = { tracks: src.tracks, name: src.name, origin: src.origin };
-  startPlay({ uris, trackUri: uris[0] }, { kind: "panel", row: el, origin: src.origin });
+  lastList = { tracks: src.tracks, name: src.name };
+  startPlay({ uris, trackUri: uris[0] }, { kind: "panel", row: el });
 }
 
 // ---------- settings: album art as the app icon, the in-app player's audio quality ----------
 
-let settings = null; // parseSettings of localStorage "therun.settings", read once
+let settings = null; // parseSettings of the stored "settings", read once
 let settingsOpen = false;
 let quality = null; // the in-app player's bitrate (96 | 160 | 320), null = unknown
 let qualityBusy = 0; // the kbps being applied while the player restarts, 0 = none
@@ -2154,22 +2262,12 @@ let restartHoldUntil = 0; // until then (or the reload), polls that see nothing 
 const RESTART_SEEN_MS = 2500; // after engine_set_quality: a restart that hasn't shown up by now isn't coming
 
 function getSettings() {
-  if (!settings) {
-    try {
-      settings = parseSettings(localStorage.getItem(SETTINGS_KEY));
-    } catch {
-      settings = parseSettings(null); // storage blocked: the defaults, for this run
-    }
-  }
+  if (!settings) settings = parseSettings(storeGet(SETTINGS_KEY));
   return settings;
 }
 
 function saveSettings() {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(getSettings()));
-  } catch {
-    /* kept in memory for this run */
-  }
+  storeSet(SETTINGS_KEY, { ...getSettings() });
 }
 
 function toggleSettings() {
@@ -2201,6 +2299,7 @@ const engineReady = () => Boolean(engine && engine.state === "ready");
 
 function renderSettings() {
   $("dockArtSwitch").setAttribute("aria-checked", String(getSettings().dockArt));
+  $("coverRowSwitch").setAttribute("aria-checked", String(getSettings().coverRow));
   const ready = engineReady();
   for (const b of $("qualityOpts").querySelectorAll("[data-kbps]")) {
     const kbps = Number(b.dataset.kbps);
@@ -2233,9 +2332,27 @@ function toggleDockArt() {
   const s = getSettings();
   s.dockArt = !s.dockArt;
   saveSettings();
+  applog("info", `setting: album art as app icon ${s.dockArt ? "on" : "off"}`);
   renderSettings();
   if (s.dockArt) syncDockArt();
   else resetDockArt();
+}
+
+function toggleCoverRow() {
+  const s = getSettings();
+  s.coverRow = !s.coverRow;
+  saveSettings();
+  applog("info", `setting: cover row ${s.coverRow ? "on" : "off"}`);
+  renderSettings();
+  applyCoverRow();
+}
+
+/** The cover row on or off: off = the current cover alone, centred, with its title under it. */
+function applyCoverRow() {
+  const solo = soloRun();
+  $("stage").classList.toggle("is-solo", solo);
+  resetPan();
+  if (!$("stage").hidden) renderRun();
 }
 
 let dockUrl = null; // the cover set as the app icon, null = the app's own icon
@@ -2292,7 +2409,7 @@ function watchRestart(ms) {
 /** The current song's source for a reload on the in-app player: like a resume, where it is now. */
 function sourceNow() {
   const t = state.now;
-  const last = readSession();
+  const last = lastSrc;
   if (state.contextUri) return { contextUri: state.contextUri, trackUri: t.uri };
   if (last && last.uris && last.uris.includes(t.uri)) return { uris: last.uris, trackUri: t.uri };
   return { uris: [t.uri], trackUri: t.uri };
@@ -2309,6 +2426,7 @@ async function setQuality(kbps) {
   const here = Boolean(t && !isLocalFile(t.uri) && state.device && isLocal(engine, state.device.id, activeId));
   const back = here ? { ...sourceNow(), positionMs: Math.round(progress()), play: state.isPlaying } : null;
   qualityBusy = kbps;
+  applog("info", `quality: ${quality || "?"} → ${kbps} kbps${back ? `, reloading ${back.trackUri} at ${fmtTime(back.positionMs)}` : ""}`);
   renderSettings();
   if (back) restartHoldUntil = performance.now() + ENGINE_WAIT_MS + RESTART_SEEN_MS;
   try {
@@ -2330,6 +2448,7 @@ async function restartOnQuality(kbps, sess, back) {
     qualityBusy = 0;
     renderSettings();
     if (isCode(e, "AUTH_EXPIRED")) return void expire();
+    applog("warn", `quality ${kbps}: ${e}`);
     toast(`Couldn't change the quality: ${reason(e)}`);
     return;
   }
@@ -2340,6 +2459,7 @@ async function restartOnQuality(kbps, sess, back) {
   if (sess !== authSession) return;
   qualityBusy = 0;
   renderSettings();
+  applog(st && st.state === "ready" ? "info" : "warn", `quality ${kbps}: player ${st ? st.state : "not back in time"}`);
   if (!st || st.state !== "ready") return void toast("The player here is still restarting. Try again in a moment.");
   // the user started something else meanwhile: that wins
   if (!back || changesPending || pending.current()) return;
@@ -2354,7 +2474,10 @@ async function restartOnQuality(kbps, sess, back) {
   );
   if (sess !== authSession) return;
   settlePending(token, !failed);
-  if (failed) return void toast("Couldn't load the song again here");
+  if (failed) {
+    applog("warn", `quality ${kbps}: reload of ${back.trackUri} failed`);
+    return void toast("Couldn't load the song again here");
+  }
   if (runId) selectTheRun(runId);
   kick();
 }
@@ -2378,8 +2501,6 @@ function onQualityKey(e) {
 
 let returnFocus = null;
 
-let overlayRev = 0; // bumped on every overlay view change: a slow Play closes only the view it came from
-
 /** back: returning to a view the user already saw: no entry animation. */
 function openOverlay(name, back = false) {
   if (state.overlay === name) return;
@@ -2388,7 +2509,6 @@ function openOverlay(name, back = false) {
   closeVolume();
   closePanel();
   closeSettings();
-  overlayRev++;
   if (state.overlay) $(state.overlay).hidden = true;
   else returnFocus = document.activeElement;
   state.overlay = name;
@@ -2398,7 +2518,6 @@ function openOverlay(name, back = false) {
 
 function closeOverlay() {
   if (!state.overlay) return;
-  overlayRev++;
   $(state.overlay).hidden = true;
   state.overlay = null;
   $("stage").inert = false;
@@ -2530,7 +2649,6 @@ function openLibrary() {
 }
 
 function showList() {
-  overlayRev++;
   state.gen.detail++; // drop any detail response still in flight
   detailTracks = [];
   detailAlbums = [];
@@ -2540,7 +2658,8 @@ function showList() {
   $("libBack").hidden = true;
   $("libLevel1").hidden = false;
   $("libTitle").hidden = false;
-  fitShelves(); // the width may have changed while a detail or a page was on screen
+  $("libTabs").hidden = false;
+  renderLibTabs();
   $("sheetBody").scrollTop = listScroll;
 }
 
@@ -2644,20 +2763,16 @@ const shelfSkeleton = (group) => () => {
   const shelf = group.querySelector(".albums");
   if (shelf.children.length) return;
   group.hidden = false;
-  shelf.innerHTML = skeletonTiles(gridCols(shelf));
+  shelf.innerHTML = skeletonTiles(gridCols(shelf) * 2);
 };
 
-// A Library shelf shows its first rows, as many tiles a row as the width fits; "See all" opens the
-// full page. Never a sideways-scrolling strip.
-const SHELF_ROWS = { topArtists: 1, albums: 2, following: 1, mixes: 1 };
-const SHELF_MAX = 24; // tiles put in a shelf: 2 rows of the widest grid (CSS: 150px tiles, 1200px content)
+// A Library tab shows its whole group: tiles in a grid that wraps, never a sideways-scrolling strip.
 const SHELVES = {
-  topArtists: { title: "Your top artists", list: () => topArtistList, one: "artist", many: "artists" },
-  albums: { title: "Albums", list: () => savedAlbums, one: "album", many: "albums" },
-  following: { title: "Following", list: () => followed, one: "artist", many: "artists" },
-  mixes: { title: "Spotify mixes", list: () => mixList, one: "mix", many: "mixes" },
+  topArtists: { list: () => topArtistList, el: "topArtists" },
+  albums: { list: () => savedAlbums, el: "libAlbums" },
+  following: { list: () => followed, el: "libFollowing" },
+  mixes: { list: () => mixList, el: "libMixes" },
 };
-const SHELF_EL = { topArtists: "topArtists", albums: "libAlbums", following: "libFollowing", mixes: "libMixes" };
 
 /** One shelf item's tile: artists round, albums and mixes square. */
 function shelfTile(kind, it, i) {
@@ -2667,53 +2782,104 @@ function shelfTile(kind, it, i) {
 }
 
 const shelfGrid = (kind) => {
-  const el = $(SHELF_EL[kind]);
+  const el = $(SHELVES[kind].el);
   return el.classList.contains("albums") ? el : el.querySelector(".albums");
 };
 
-/** The columns of a laid-out grid; 4 while it isn't on screen (fitShelves runs again when it is). */
+/** The columns of a laid-out grid; 4 while it isn't on screen. */
 function gridCols(el) {
   const v = getComputedStyle(el).gridTemplateColumns;
-  return v && v !== "none" ? v.trim().split(/\s+/).length : 4;
+  return /^[\d.]+px( [\d.]+px)*$/.test(v || "") ? v.split(" ").length : 4;
 }
 
-/** Show a shelf's first rows at the current width; "See all" when some are left out. */
-function fitShelf(kind) {
-  const grid = shelfGrid(kind);
-  const limit = gridCols(grid) * SHELF_ROWS[kind];
-  [...grid.children].forEach((el, i) => (el.hidden = i >= limit));
-  $("libLevel1").querySelector(`[data-see="${kind}"]`).hidden = SHELVES[kind].list().length <= limit;
-}
-
-/** The window (or the list coming back) changed the columns: refit every shelf on screen. */
-function fitShelves() {
-  if (state.overlay !== "library" || $("libLevel1").hidden) return;
-  for (const kind of Object.keys(SHELVES)) fitShelf(kind);
-}
-
-/** Render a shelf's tiles and fit them to its rows. An open full page of it follows. */
+/** Render a shelf's tiles, all of them. */
 function renderShelf(kind) {
-  const list = SHELVES[kind].list();
-  shelfGrid(kind).innerHTML = list
-    .slice(0, SHELF_MAX)
-    .map((it, i) => shelfTile(kind, it, i))
-    .join("");
-  fitShelf(kind);
-  // fresh data for the shelf open on the full page: re-render it only if it changed (keeps focus)
-  if (state.overlay === "browse" && page.kind === kind && page.shelfSig !== JSON.stringify(list)) renderPageList();
+  shelfGrid(kind).innerHTML = SHELVES[kind].list().map((it, i) => shelfTile(kind, it, i)).join("");
 }
+
+// ---------- Library tabs: one group at a time; a group that's empty or not allowed has no tab ----------
+
+const LIB_TABS = { playlists: "libPlaylists", liked: "libLiked", albums: "libAlbums", following: "libFollowing", top: "libTop", mixes: "libMixes" };
+const LIB_TAB_KEY = "libraryTab";
+
+/** The tab on screen: the last one picked (stored), or Playlists while that one's group is hidden. */
+function libTabShown() {
+  const want = storeGet(LIB_TAB_KEY);
+  return LIB_TABS[want] && !$(LIB_TABS[want]).hidden ? want : "playlists";
+}
+
+/** Tabs follow their groups (hidden with them); the current one is marked and its group shown. */
+function renderLibTabs() {
+  const shown = libTabShown();
+  for (const b of $("libTabs").querySelectorAll("[data-tab]")) {
+    const t = b.dataset.tab;
+    const on = t === shown;
+    if (b.hidden !== $(LIB_TABS[t]).hidden) b.hidden = $(LIB_TABS[t]).hidden;
+    b.setAttribute("aria-selected", String(on));
+    b.tabIndex = on ? 0 : -1;
+    $(LIB_TABS[t]).classList.toggle("is-current", on);
+  }
+}
+
+function selectLibTab(t) {
+  if (!LIB_TABS[t] || t === libTabShown()) return;
+  applog("info", `library: tab ${t}`);
+  storeSet(LIB_TAB_KEY, t);
+  renderLibTabs();
+  $("sheetBody").scrollTop = 0;
+  listScroll = 0;
+  if (t === "liked") loadLikedRows();
+}
+
+/** Arrows move between the visible tabs and pick, like the time range tabs. */
+function onLibTabKey(e) {
+  const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+  if (!step || !e.target.closest("[data-tab]")) return;
+  e.preventDefault();
+  const tabs = [...$("libTabs").querySelectorAll("[data-tab]:not([hidden])")];
+  const at = tabs.findIndex((b) => b.dataset.tab === libTabShown());
+  const next = tabs[(at + step + tabs.length) % tabs.length];
+  selectLibTab(next.dataset.tab);
+  next.focus();
+}
+
+// ---------- Liked Songs: the tab lists them (up to Spotify's 20 pages); the count decides the tab ----------
+
+let likedTracks = [];
+let likedCount = null; // liked_count's answer, null = not known yet
 
 function fillLiked() {
-  const row = $("libLiked");
-  const sub = row.querySelector(".row-sub");
-  row.hidden = false;
-  if (!sub.textContent) {
-    setEl(sub, "Loading…");
-    // the cached Liked Songs list knows the count
-    diskGet("liked").then((v) => v && v.total != null && sub.textContent === "Loading…" && setEl(sub, plural(v.total, "song", "songs")));
-  }
-  // the count alone is one request; the list (up to 20 pages) loads only when opened
-  fillGroup(row, () => libGet("likedCount", "liked_count"), (n) => setEl(sub, plural(n || 0, "song", "songs")), "your liked songs");
+  const group = $("libLiked");
+  if (likedCount !== 0) group.hidden = false; // a tab at once; it goes when the count says there's nothing
+  libGet("likedCount", "liked_count").then(
+    (n) => {
+      likedCount = n || 0;
+      group.hidden = !likedCount;
+    },
+    (e) => {
+      if (overlayFailed(e)) return;
+      if (isScopeError(e)) group.hidden = true; // no library scope: no tab
+    },
+  );
+  if (libTabShown() === "liked") loadLikedRows();
+}
+
+/** The Liked Songs rows: the disk copy at once, or a skeleton, then the fresh list. */
+function loadLikedRows() {
+  const group = $("libLiked");
+  const skeleton = () => {
+    if (!likedTracks.length) $("likedRows").innerHTML = skeletonRows(8);
+  };
+  fillGroup(group, () => libGet("liked", "get_saved_tracks"), renderLiked, "your liked songs", "liked", skeleton);
+}
+
+function renderLiked(data) {
+  likedTracks = listTracks(data).filter((t) => t && t.uri);
+  const n = likedTracks.length;
+  const total = Math.max((data && data.total) || 0, n);
+  $("likedRows").innerHTML = likedTracks.map((t, i) => trackRow(t, i, { num: true, art: true })).join("");
+  setText("likedNote", total > n ? `Showing your newest ${n} of ${total}` : "");
+  setEl($("libLiked").querySelector(".status"), n ? "" : "No liked songs yet.");
 }
 
 let savedAlbums = [];
@@ -2754,7 +2920,6 @@ function fillFollowing() {
 
 // ---------- your top: 3 time ranges, each cached ----------
 
-const TOP_TRACKS_SHOWN = 10; // of 20: the rest of the Library stays in reach
 let topRange = "short_term";
 let topGen = 0; // the latest tab: an older range's answer is dropped
 let topTrackList = [];
@@ -2802,13 +2967,15 @@ async function fillTop() {
 
 function renderTop(tracks, artists, failed) {
   const group = $("libTop");
-  topTrackList = tracks.filter((t) => t && t.uri).slice(0, TOP_TRACKS_SHOWN);
+  topTrackList = tracks.filter((t) => t && t.uri);
   topArtistList = artists.filter((a) => a && a.id);
   group.hidden = false;
-  $("topTracks").innerHTML = topTrackList.map((t, i) => trackRow(t, i, { num: false, art: true })).join("");
+  $("topTracks").innerHTML = topTrackList.map((t, i) => trackRow(t, i, { num: true, art: true })).join("");
+  $("topTracks").style.setProperty("--rows", String(Math.max(1, Math.ceil(topTrackList.length / 2)))); // 2 columns, ranked down
+  $("topTracksHead").hidden = !topTrackList.length;
   $("topArtists").hidden = !topArtistList.length;
   $("topArtistsHead").hidden = !topArtistList.length;
-  renderShelf("topArtists"); // on screen first: it fits its tiles to the columns it has
+  renderShelf("topArtists");
   const err = failed.find((e) => !isScopeError(e));
   const empty = !topTrackList.length && !topArtistList.length;
   setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${reason(err)}` : empty ? "Nothing here yet for this time range." : "");
@@ -2823,7 +2990,7 @@ function onTopTab(e) {
 
 // ---------- Spotify mixes: Spotify doesn't list its own playlists, so remember the ones seen playing ----------
 
-const MIXES_KEY = "therun.knownMixes";
+const MIXES_KEY = "knownMixes";
 const MIX_NOTE = "Spotify doesn't share the track list of its own mixes.";
 let knownMixes = null; // [{id, seen}], newest first; null = not read from storage yet
 let notedContext = null; // the last playback context noted, so a poll doesn't note it every second
@@ -2834,11 +3001,8 @@ let mixesGen = 0;
 
 function mixes() {
   if (!knownMixes) {
-    try {
-      knownMixes = noteMixes(JSON.parse(localStorage.getItem(MIXES_KEY) || "[]"), [], [], "");
-    } catch {
-      knownMixes = []; // storage blocked or broken: this session's mixes only
-    }
+    const raw = storeGet(MIXES_KEY);
+    knownMixes = noteMixes(Array.isArray(raw) ? raw : [], [], [], "");
   }
   return knownMixes;
 }
@@ -2852,11 +3016,7 @@ function noteContexts(uris) {
   // only a seen time moved: not worth a write
   if (next.length === before.length && next.every((m, i) => m.id === before[i].id)) return;
   knownMixes = next;
-  try {
-    localStorage.setItem(MIXES_KEY, JSON.stringify(next));
-  } catch {
-    /* kept in memory for this session */
-  }
+  storeSet(MIXES_KEY, next);
   if (libOpened) renderMixes();
 }
 
@@ -2889,21 +3049,19 @@ async function renderMixes() {
 const mixRefused = (e) => /\b40[34]\b/.test(String(e)) && !isCode(e, "NO_ACTIVE_DEVICE");
 
 async function playMix(src) {
-  const rev = overlayRev;
   let refused = false;
-  const ok = await startPlay(
+  const played = startPlay(
     { contextUri: `spotify:playlist:${src.id}` },
     { kind: "mix", refused: (e) => mixRefused(e) && (refused = true) },
   );
+  closeOverlay(); // the main screen: "Loading…" until the mix's first song shows
+  await played;
   if (refused) {
     toast("Spotify won't start this mix from here");
     refusedMixes.add(src.id);
     noteContexts([]); // drops it from the stored list
     renderMixes();
-    if (rev === overlayRev) $("detailPlay").disabled = true;
-    return;
   }
-  if (ok && rev === overlayRev) closeOverlay();
 }
 
 /** The next login may be another account: forget everything the Library loaded (not the stored mixes). */
@@ -2929,9 +3087,12 @@ function resetLibrary() {
   for (const id of ["libLiked", "libTop", "libAlbums", "libFollowing", "libMixes"]) $(id).hidden = true;
   for (const el of $("libLevel1").querySelectorAll(".albums, #topTracks")) el.innerHTML = "";
   for (const el of $("libLevel1").querySelectorAll(".group .status")) setEl(el, "");
-  for (const el of $("libLevel1").querySelectorAll("[data-see]")) el.hidden = true;
   $("topArtistsHead").hidden = true;
-  setEl($("libLiked").querySelector(".row-sub"), "");
+  $("topTracksHead").hidden = true;
+  likedTracks = [];
+  likedCount = null;
+  $("likedRows").innerHTML = "";
+  setText("likedNote", "");
 }
 
 
@@ -3018,12 +3179,12 @@ async function openDetail(src, push = true) {
     navStack = [];
   }
   curDetail = src;
-  overlayRev++;
   const gen = ++state.gen.detail;
   detailTracks = [];
   detailAlbums = [];
   $("libLevel1").hidden = true;
   $("libTitle").hidden = true;
+  $("libTabs").hidden = true;
   $("libBack").hidden = false;
   $("libBack").querySelector(".back-label").textContent = navStack.length ? "Back" : "Library";
   $("libDetail").hidden = false;
@@ -3226,15 +3387,15 @@ function onDetailPlay() {
 const PLAY_URIS_MAX = 200;
 
 /**
- * opts: {origin, row} — the detail view it came from and the clicked row (see startPlay);
- * name: the list's name, for the playlist panel (Spotify names no context for a uris play).
+ * origin: the detail view it came from ({kind, id}) or null; name: the list's name, for the playlist
+ * panel (Spotify names no context for a uris play); opts: as startPlay (row).
  */
-async function playFrom(tracks, i, { name = null, ...opts } = {}) {
+async function playFrom(tracks, i, { name = null, origin = null, ...opts } = {}) {
   const t = tracks[i];
   if (!t || isLocalFile(t.uri)) return;
   // the whole list, so the panel shows what came before the clicked song too (one song is no list)
-  if (tracks.length > 1) lastList = { tracks: tracks.filter((x) => x && x.uri), name, origin: opts.origin || null };
-  const ctx = originUri(opts.origin);
+  if (tracks.length > 1) lastList = { tracks: tracks.filter((x) => x && x.uri), name };
+  const ctx = originUri(origin);
   let src;
   if (ctx && offsettable(ctx)) {
     // a playlist/album plays as itself from the clicked song: nothing is cut, and Back has
@@ -3248,8 +3409,10 @@ async function playFrom(tracks, i, { name = null, ...opts } = {}) {
     const from = Math.max(0, Math.min(at - PLAY_URIS_BEFORE, all.length - PLAY_URIS_MAX));
     src = { uris: all.slice(from, from + PLAY_URIS_MAX), trackUri: t.uri };
   }
-  const rev = overlayRev;
-  if ((await startPlay(src, { kind: "list", ...opts })) && rev === overlayRev) closeOverlay();
+  const played = startPlay(src, { kind: "list", ...opts });
+  // the main screen shows the song at once (its cover, title and loaders); a failure says so in a toast
+  closeOverlay();
+  await played;
 }
 
 const PLAY_URIS_BEFORE = 50; // songs kept before the clicked one in a uris play
@@ -3273,7 +3436,6 @@ function openSearch() {
 
 function onSearchInput() {
   clearTimeout(searchTimer);
-  overlayRev++; // new results are a new view: a slow Play from the old ones must not close it
   const gen = ++state.gen.search;
   const q = $("searchInput").value.trim();
   if (!q) {
@@ -3287,7 +3449,6 @@ function onSearchInput() {
 }
 
 function searchMessage(text) {
-  overlayRev++;
   searchHits = NO_HITS;
   const box = $("searchResults");
   box.innerHTML = `<p class="status">${esc(text)}</p>`;
@@ -3336,7 +3497,6 @@ async function runSearch(q, gen) {
     html += albums.slice(0, SEARCH_PREVIEW.album).map((a, i) => tile(a, i, { sub: esc(a.artists) })).join("");
     html += `</div></section>`;
   }
-  overlayRev++; // replaced results are a new view
   box.innerHTML = html;
   box.hidden = false;
   box.scrollTop = 0;
@@ -3351,21 +3511,18 @@ function onSearchClick(e) {
   if (a) openAlbum(a);
 }
 
-// ---------- the full page: "See all" from Search or a Library shelf ----------
+// ---------- the full page: "See all" from Search ----------
 
 const FIRST_PAGES = 3; // 30 results up front, then 10 per "Load more"
 const PAGE_ENTRY = { kind: "page" }; // in the detail Back stack: Back returns to the full page
 const STAGE_ENTRY = { kind: "stage" }; // in the detail Back stack: Back closes the Library, back to the main screen
-const RANGE_LABEL = { short_term: "Last 4 weeks", medium_term: "Last 6 months", long_term: "All time" };
 
 const page = {
-  from: null, // "search" | "library": where Back goes
-  kind: null, // "search", or the shelf: "topArtists" | "albums" | "following" | "mixes"
+  kind: null, // "search" while a page is open
   query: "",
-  tab: "track", // search: "track" | "album"
-  lists: {}, // search: tab → {items, next, hasMore, loading, error, started}
+  tab: "track", // "track" | "album"
+  lists: {}, // tab → {items, next, hasMore, loading, error, started}
   opener: null, // the data-see of the "See all" that opened it: Back puts focus there
-  shelfSig: null, // the shelf items on screen, as JSON
   scroll: 0, // the page's scroll when an item on it opened a detail
   returnScroll: 0, // the search results' scroll when the page opened
 };
@@ -3382,20 +3539,13 @@ const newList = (seed) => ({
 
 function openSearchPage(tab) {
   if (!searchHits.q) return;
-  Object.assign(page, { from: "search", kind: "search", query: searchHits.q, tab, opener: tab });
+  Object.assign(page, { kind: "search", query: searchHits.q, tab, opener: tab });
   page.returnScroll = $("searchResults").scrollTop;
   // the palette asked for 10 of each: a full 10 means Spotify has more
   page.lists = {
     track: newList({ items: searchHits.tracks, full: searchHits.tracks.length >= PAGE_SIZE }),
     album: newList({ items: searchHits.albums, full: searchHits.albums.length >= PAGE_SIZE }),
   };
-  showPage();
-}
-
-function openShelfPage(kind) {
-  if (!SHELVES[kind]) return;
-  Object.assign(page, { from: "library", kind, query: "", opener: kind, lists: {} });
-  listScroll = $("sheetBody").scrollTop; // Back puts the Library where it was
   showPage();
 }
 
@@ -3406,7 +3556,7 @@ function showPage() {
   renderPage();
   $("pageBody").scrollTop = 0;
   $("page").focus();
-  if (page.kind === "search") ensureLoaded(page.tab);
+  ensureLoaded(page.tab);
 }
 
 /** Back to the page from a detail opened on it: as it was. Its loads kept landing meanwhile. */
@@ -3418,67 +3568,50 @@ function returnToPage() {
   $("page").focus({ preventScroll: true });
 }
 
-/** Back (or Esc): to the search palette with its query and results, or to the Library list. */
+/** Back (or Esc): to the search palette with its query and results. */
 function pageBack() {
   state.gen.page++;
-  const from = page.from;
-  openOverlay(from, true);
-  if (from === "library") showList();
-  else $("searchResults").scrollTop = page.returnScroll;
-  const box = from === "library" ? $("libLevel1") : $("searchResults");
-  const see = box.querySelector(`[data-see="${page.opener}"]`);
-  const to = see && !see.hidden ? see : from === "library" ? $("sheet") : $("searchInput");
-  to.focus({ preventScroll: true });
+  openOverlay("search", true);
+  $("searchResults").scrollTop = page.returnScroll;
+  const see = $("searchResults").querySelector(`[data-see="${page.opener}"]`);
+  (see && !see.hidden ? see : $("searchInput")).focus({ preventScroll: true });
 }
 
-/** What the page lists now: {kind: "track" | "album" | a shelf kind, items, list (search only)}. */
+/** What the page lists now: {kind: "track" | "album", items, list}. */
 function pageView() {
-  if (page.kind !== "search") return { kind: page.kind, items: SHELVES[page.kind].list(), list: null };
   const list = page.lists[page.tab];
   return { kind: page.tab, items: list.items, list };
 }
 
 function pageItemHtml(kind, it, i) {
   if (kind === "track") return trackRow(it, i, { num: true, art: true });
-  if (kind === "album") return tile(it, i, { sub: esc(it.artists) });
-  return shelfTile(kind, it, i);
+  return tile(it, i, { sub: esc(it.artists) });
 }
 
 /** Skeletons for pages on their way: a full screen at first, a few under the list after. */
 const pageSkeleton = (kind, empty) => (kind === "track" ? skeletonRows(empty ? 10 : 4) : skeletonTiles(empty ? 12 : 6));
 
 function renderPage() {
-  overlayRev++; // a new view: a slow Play from the one before must not close it
-  const search = page.kind === "search";
-  $("pageBack").querySelector(".back-label").textContent = search ? "Search" : "Library";
-  $("pageBack").setAttribute("aria-label", search ? "Back to search" : "Back to Library");
-  setText("pageKicker", search ? "Search results for" : page.kind === "topArtists" ? "Your top" : "Your library");
-  const title = search ? `“${page.query}”` : SHELVES[page.kind].title;
-  $("pageTitle").textContent = title;
-  $("pageTabs").hidden = !search;
+  $("pageBack").querySelector(".back-label").textContent = "Search";
+  $("pageBack").setAttribute("aria-label", "Back to search");
+  setText("pageKicker", "Search results for");
+  $("pageTitle").textContent = `“${page.query}”`;
+  $("pageTabs").hidden = false;
   for (const b of $("pageTabs").querySelectorAll("[data-tab]")) {
     const on = b.dataset.tab === page.tab;
     b.setAttribute("aria-selected", String(on));
     b.tabIndex = on ? 0 : -1;
   }
-  const list = $("pageList");
-  if (search) {
-    list.setAttribute("role", "tabpanel");
-    list.setAttribute("aria-labelledby", page.tab === "track" ? "pageTabTrack" : "pageTabAlbum");
-  } else {
-    list.removeAttribute("role");
-    list.removeAttribute("aria-labelledby");
-  }
+  $("pageList").setAttribute("aria-labelledby", page.tab === "track" ? "pageTabTrack" : "pageTabAlbum");
   renderPageList();
 }
 
 function renderPageList() {
   const { kind, items, list } = pageView();
-  page.shelfSig = list ? null : JSON.stringify(items);
   const el = $("pageList");
   el.className = `page-list ${kind === "track" ? "rows" : "albums page-grid"}`;
-  el.innerHTML = items.map((it, i) => pageItemHtml(kind, it, i)).join("") + (list && list.loading ? pageSkeleton(kind, !items.length) : "");
-  if (list && list.loading && !items.length) el.setAttribute("aria-busy", "true");
+  el.innerHTML = items.map((it, i) => pageItemHtml(kind, it, i)).join("") + (list.loading ? pageSkeleton(kind, !items.length) : "");
+  if (list.loading && !items.length) el.setAttribute("aria-busy", "true");
   else el.removeAttribute("aria-busy");
   renderPageFoot();
 }
@@ -3488,13 +3621,6 @@ function renderPageFoot() {
   const { kind, items, list } = pageView();
   const n = items.length;
   const more = $("pageMore");
-  if (!list) {
-    const shelf = SHELVES[page.kind];
-    setText("pageSub", n ? plural(n, shelf.one, shelf.many) + (page.kind === "topArtists" ? ` · ${RANGE_LABEL[topRange]}` : "") : "");
-    setText("pageStatus", n ? "" : "Nothing here yet.");
-    more.hidden = true;
-    return;
-  }
   setText("pageSub", "");
   const noun = kind === "track" ? "songs" : "albums";
   let status = "";
@@ -3558,7 +3684,7 @@ async function loadPages(tab, n) {
 }
 
 function loadMore() {
-  loadPages(page.tab, 1); // a shelf page has no list for the tab: loadPages returns
+  loadPages(page.tab, 1);
 }
 
 /** The Load more button scrolled into view: load the next page (not after an error: the button retries). */
@@ -3596,10 +3722,7 @@ function onPageClick(e) {
     return;
   }
   const it = tileAt(e, items);
-  if (!it) return;
-  if (kind === "album" || kind === "albums") openAlbum(it);
-  else if (kind === "mixes") openMix(it);
-  else openArtistTile(it);
+  if (it) openAlbum(it);
 }
 
 // ---------- keyboard: Space = play/pause, Esc = close the overlay ----------
@@ -3629,11 +3752,13 @@ function onKey(e) {
 function startStage() {
   $("login").hidden = true;
   $("stage").hidden = false;
+  $("stage").classList.toggle("is-solo", soloRun());
   renderNow();
   renderChrome();
   startPolling();
   refreshEngine();
-  accountId(); // the list cache and the last session are per account: ask once, early
+  accountId(); // the list cache is per account: ask once, early
+  loadRestored();
 }
 
 async function boot() {
@@ -3659,11 +3784,13 @@ async function boot() {
   $("deviceList").addEventListener("click", onDeviceClick);
   $("settingsBtn").addEventListener("click", toggleSettings);
   $("dockArtSwitch").addEventListener("click", toggleDockArt);
+  $("coverRowSwitch").addEventListener("click", toggleCoverRow);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onQualityKey);
   $("panelBtn").addEventListener("click", togglePanel);
   $("panelList").addEventListener("click", onPanelClick);
   $("panel").addEventListener("error", onImgError, true);
+  $("panelLayer").addEventListener("click", (e) => e.target.closest("[data-close]") && closePanel(true));
   document.addEventListener("pointerdown", onOutside);
   // focus rings only for the keyboard: a click must not leave a ring (WebKit can match :focus-visible on one)
   document.addEventListener("pointerdown", () => (document.documentElement.dataset.input = "pointer"), true);
@@ -3684,7 +3811,15 @@ async function boot() {
       openDetail({ kind: "playlist", id: p.id, name: p.name, cover: pickImage(p.images), sub, snapshotId: p.snapshot_id || null });
     }
   });
-  $("libLiked").addEventListener("click", () => openDetail({ kind: "liked", id: "liked", name: "Liked Songs", cover: null, sub: "" }));
+  $("libTabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tab]");
+    if (b) selectLibTab(b.dataset.tab);
+  });
+  $("libTabs").addEventListener("keydown", onLibTabKey);
+  // a group shown or hidden (loaded, empty, not allowed): its tab follows
+  const groupsSeen = new MutationObserver(renderLibTabs);
+  for (const id of Object.values(LIB_TABS)) groupsSeen.observe($(id), { attributes: true, attributeFilter: ["hidden"] });
+  $("likedRows").addEventListener("click", (e) => onTrackClick(e, likedTracks, (i, row) => playFrom(likedTracks, i, { row, name: "Liked Songs" })));
   $("topTabs").addEventListener("click", onTopTab);
   $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row) => playFrom(topTrackList, i, { row, name: "Your top songs" })));
   $("topArtists").addEventListener("click", (e) => openArtistTile(tileAt(e, topArtistList)));
@@ -3694,10 +3829,6 @@ async function boot() {
     if (a) openAlbum(a);
   });
   $("libMixes").addEventListener("click", (e) => openMix(tileAt(e, mixList)));
-  $("libLevel1").addEventListener("click", (e) => {
-    const see = e.target.closest("[data-see]");
-    if (see) openShelfPage(see.dataset.see);
-  });
   $("pageBack").addEventListener("click", pageBack);
   $("pageTabs").addEventListener("click", (e) => {
     const b = e.target.closest("[data-tab]");
@@ -3724,11 +3855,6 @@ async function boot() {
   document.addEventListener("keydown", onKey);
   document.addEventListener("keyup", onKey);
   addEventListener("resize", placeRun);
-  let fitFrame = 0; // a window drag fires resize ~60/s: refit once per frame
-  addEventListener("resize", () => {
-    cancelAnimationFrame(fitFrame);
-    fitFrame = requestAnimationFrame(fitShelves);
-  });
   small.addEventListener("change", () => {
     closeVolume(); // the slider popover exists only on narrow screens
     renderVolume();
@@ -3740,8 +3866,6 @@ async function boot() {
   $("run").addEventListener("pointerup", runUp);
   $("run").addEventListener("pointercancel", runUp);
   $("run").addEventListener("wheel", runWheel, { passive: false });
-  // quitting mid-song: the next launch starts here
-  addEventListener("beforeunload", () => !$("stage").hidden && noteSession(true));
   // dev harness only: the `artist` scenario opens a page by id
   if (window.__mock) window.__openArtist = (id) => openDetail({ kind: "artist", id, name: "", cover: null, sub: "Artist" });
   document.addEventListener("visibilitychange", () => {
@@ -3750,8 +3874,16 @@ async function boot() {
     if (!document.hidden) startPolling();
   });
   listenEvent("engine-status", setEngine);
+  // Rust loaded the saved session back (paused): show it, and let a poll pick it up now
+  listenEvent("session-restored", (p) => {
+    if ($("stage").hidden) return;
+    applog("info", `session restored: ${p && p.trackUri}`);
+    noteRestored(p);
+    kick();
+  });
   listenEvent("media-command", onMediaCommand);
 
+  await loadStore(); // settings and known mixes are read from it
   let status = "login";
   try {
     status = await invoke("auth_status");

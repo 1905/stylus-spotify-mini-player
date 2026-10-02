@@ -1,6 +1,6 @@
-// App settings (localStorage "therun.settings"): parsed with defaults, so a broken value can't break the app.
+// App settings (store key "settings" in Rust's state.json): parsed with defaults, so a broken value can't break the app.
 
-export const SETTINGS_KEY = "therun.settings";
+export const SETTINGS_KEY = "settings";
 
 /** The player's bitrates, kbps, with their labels: Spotify's Normal / High / Very high. */
 export const QUALITIES = [
@@ -11,7 +11,11 @@ export const QUALITIES = [
 
 export const isQuality = (v) => QUALITIES.some((q) => q.kbps === v);
 
-/** The stored settings with defaults; raw is the stored string (or null). */
+/**
+ * The stored settings with defaults; raw is the stored object (or a JSON string, or null).
+ * - dockArt: the current cover as the app icon (default on).
+ * - coverRow: played and next covers around the current one (default on); off = the current cover alone, centred.
+ */
 export function parseSettings(raw) {
   let s = null;
   try {
@@ -19,6 +23,6 @@ export function parseSettings(raw) {
   } catch {
     s = null;
   }
-  const o = s && typeof s === "object" ? s : {};
-  return { dockArt: o.dockArt !== false };
+  const o = s && typeof s === "object" && !Array.isArray(s) ? s : {};
+  return { dockArt: o.dockArt !== false, coverRow: o.coverRow !== false };
 }

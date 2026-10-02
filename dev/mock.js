@@ -8,17 +8,21 @@
 // engine-login (the in-app player needs its login; "This Mac" (shown as "Here") shows up after engine_login, picker open),
 // engine-down (the in-app player failed, picker open),
 // slow (list commands and plays take 2s more: skeletons, the play spinner, "Starting…"),
-// resume (the in-app player is ready, nothing plays, and a last session is stored: the app loads it paused),
-// search-all (search "the xx", then the Songs "See all" page), library-all (Library, then the Albums "See all" page),
+// resume (the in-app player is ready, nothing plays, and a saved session exists: session_get returns it and
+//   "Rust" loads it back paused 2.5s after launch, then emits session-restored),
+// search-all (search "the xx", then the Songs "See all" page), library-all (Library, then its Albums tab, 26 albums),
 // playlist (playing the 5th song of the first captured playlist, as its context: the playlist panel lists it),
-// here (the in-app player is ready and plays the playlist: device "Here", quality changes restart it).
+// here (the in-app player is ready and plays the playlist: device "Here", quality changes restart it;
+//   session_get returns that play).
+// The store (store_all / store_set, Rust's state.json) is in memory: ?store=solo seeds settings with the cover row off.
 // search_page pages through a pool built from the fixture (search hits first, then every other known
 // track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
 // The in-app player (Spotify Connect name "This Mac", shown as "Here") needs its login by default and
 // isn't listed: engine_login lists it. The local_* commands model librespot's Spirc: they act at once, but
 // only while the player is the active device (an inactive Spirc ignores them); local_load activates it
 // first. ENGINE_NOT_READY before ready. engine_set_quality restarts it (starting → ready, playback dropped).
-// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, emit, setEngine }.
+// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, store, emit, setEngine }.
+//   store: the in-memory key-value store behind store_all / store_set; logs: app_log lines ("level msg").
 //   media: recorded media_update / media_clear calls ({cmd, args, at}).
 //   dockArt: recorded set_dock_art urls (null = the app's own icon), oldest first.
 //   calls: every invoke, oldest first ({cmd, args, at}): local_* vs Web API routing shows here.
@@ -117,17 +121,24 @@
       state.history = rows.slice(0, at).reverse().map((t, i) => ({ track: clone(t), played_at: new Date(Date.now() - (i + 1) * 200e3).toISOString(), context_uri: state.contextUri })).concat(state.history);
     }
   }
+  // Rust's saved session (session.json): resume = the 3rd song of the first captured playlist, 1:01 in,
+  // played from that playlist; here = what plays now
+  let savedSession = null;
   if (scenario === "resume") {
-    // what the last run saved: the 3rd song of the first captured playlist, 1:01 in, played from that playlist
     const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
-    const uris = rows.map((t) => t.uri).slice(0, 200);
-    if (uris.length) {
-      localStorage.setItem("therun.lastSession", JSON.stringify({
-        accountId: ME, contextUri: null, origin: { kind: "playlist", id: plId }, uris,
-        trackUri: uris[Math.min(2, uris.length - 1)], positionMs: 61000, savedAt: Date.now() - 3600e3,
-      }));
+    if (rows.length) {
+      savedSession = {
+        contextUri: "spotify:playlist:" + plId, uris: null, trackUri: rows[Math.min(2, rows.length - 1)].uri,
+        positionMs: 61000, shuffle: false, repeat: "off", volume: 32768,
+      };
     }
   }
+  if (scenario === "here" && state.now) {
+    savedSession = { contextUri: state.contextUri, uris: null, trackUri: state.now.uri, positionMs: 44000, shuffle: false, repeat: "off", volume: 32768 };
+  }
+  // the store (state.json), in memory
+  const store = {};
+  if (new URLSearchParams(location.search).get("store") === "solo") store.settings = { dockArt: true, coverRow: false };
 
   const iso = () => new Date().toISOString();
   const progress = () => {
@@ -328,7 +339,15 @@
     list_devices: () =>
       state.devices.map((d) => ({ ...clone(d), is_active: state.active && d.id === state.deviceId })),
 
-    app_log: () => null,
+    app_log: ({ level, msg }) => { logs.push(`${level} ${msg}`); return null; },
+    store_all: () => clone(store),
+    store_set: ({ key, value }) => {
+      if (typeof key !== "string" || !key) throw "BAD_ARGS: key (mock)";
+      if (value == null) delete store[key];
+      else store[key] = clone(value);
+      return null;
+    },
+    session_get: () => clone(savedSession),
     play_on_device: ({ deviceId, uris }) => {
       useDevice(deviceId);
       const tracks = (uris || []).map((u) => byUri.get(u)).filter(Boolean).map(clone);
@@ -522,7 +541,7 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|engine_|media_|local_|cache_get$|set_dock_art$)/;
+  const LOCAL = /^(auth_status|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$)/;
   // `slow`: lists and plays take 2s more
   const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
 
@@ -540,6 +559,7 @@
   const READS_CACHE = new Set(["get_album_tracks", "get_playlist_tracks"]); // a hit makes no request
 
   const calls = []; // every invoke, oldest first
+  const logs = []; // app_log lines, oldest first
 
   async function invoke(cmd, args) {
     args = args || {};
@@ -577,7 +597,21 @@
 
   window.__TAURI__ = { core: { invoke }, event: { listen } };
   // handlers: QA swaps one to inject a failure
-  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, emit, setEngine };
+  // resume: the disk cache from the last run holds the playlists and that playlist: the restored song shows by name
+  if (scenario === "resume" && savedSession) {
+    const plId = savedSession.contextUri.split(":")[2];
+    cache.set(`${ME}/playlists`, handlers.get_playlists());
+    cache.set(`${ME}/playlist:${plId}:snap_${plId}`, clone((fx.playlistTracks || {})[plId] || []));
+  }
+  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, store, logs, emit, setEngine };
+
+  // resume: Rust loads the saved session back (paused) once the player is up, then tells the UI
+  if (scenario === "resume" && savedSession) {
+    setTimeout(() => {
+      handlers.local_load({ ...savedSession, uris: undefined, play: false });
+      emit("session-restored", savedSession);
+    }, 2500);
+  }
 
   // Overlay scenarios: drive the real UI once it exists (T5/T6 markup).
   const waitFor = (sel, ms = 5000) =>
@@ -623,7 +657,7 @@
     }
     if (scenario === "library-all") {
       (await waitFor("#libraryBtn"))?.click();
-      (await waitFor('#libAlbums [data-see="albums"]:not([hidden])'))?.click();
+      (await waitFor("#libTab-albums:not([hidden])"))?.click();
     }
   }
   const DRIVEN = ["library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-login", "engine-down"];
