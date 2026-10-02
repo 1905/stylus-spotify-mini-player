@@ -447,6 +447,9 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     }
                 }
                 engine.0.spirc.lock().unwrap().take();
+                // the player outlives the Spirc: stop what it buffered, or the old track keeps
+                // playing under a new Spirc that has no request id for it and can't pause it
+                player.stop();
                 if up_since.elapsed() >= STABLE_AFTER {
                     attempt = 0;
                 }
