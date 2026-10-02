@@ -1,7 +1,7 @@
 # Snappy Implementation Plan v1.1
 
 **Date:** 2026-10-02
-**Status:** approved (v1.1 = v1.0 + Astra plan review: the 4 HIGH applied, plus med #5 and #10 because the feature fails without them; med #6–#9 skipped by the crit/high rule)
+**Status:** done 2026-10-02
 **Spec:** ./spec.md
 **Goal:** Resume the last session paused on launch; local (no-cloud) controls and loads on "The Run"; parallel + cached lists; clear loaders.
 **Architecture:**

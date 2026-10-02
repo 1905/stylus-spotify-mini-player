@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 **Scope:** ~/dev/rust-spotify
-**Status:** approved 2026-10-02 (user: "plan it well. then review 1 time with astra then implement")
+**Status:** done 2026-10-02 (shipped on feat/snappy; Astra rounds 1-3, final: 0 crit/high)
 
 ## TL;DR
 
@@ -130,3 +130,19 @@ New Rust commands for when the active device id equals the engine's: `local_play
 - **P4:** loaders.
 - **P4b:** play a nearby cover (hover play button, jump within the context).
 - **P5:** QA, Astra loop, `/simplify`, merge, notify.
+
+## As-built notes
+
+Added during exec, beyond the spec:
+- Cover hover play button on the home row (user request mid-plan).
+- No horizontal scroll anywhere: wrapping grids, "See all" full pages with search paging, full-width Library and detail views (user request).
+- Cmd+W hides the window; a Dock click shows it again.
+- Failed polls retry quietly (0.5, 1, 2, 4 s backoff) behind a "Connecting…" loader; "Can't reach Spotify" shows only after 6 failures in a row (user report: artist play showed the error while audio played).
+- Local loads carry shuffle/repeat (Spirc resets them otherwise).
+- Cover jumps keep the playlist: the saved session holds the member list; a track shared by two playlists keeps the playing one.
+
+Known, not fixed (med, by the crit/high rule):
+- Playlist track cache is keyed by the snapshot read at Library load; a playlist edited elsewhere stays stale until the app reloads (spotify.rs get_playlist_tracks).
+- A cover jump within the 10 s session-save throttle after another client switched playlists can reuse the old saved list (app.js playCover listUris).
+
+Follow-ups from /simplify (skipped as refactors): play playlist/album pages by context instead of a 200-uri list (also removes most origin/members code); one cache-then-refresh helper; account id resolved in Rust; one routing helper; one view stack.
