@@ -1057,7 +1057,8 @@ svg {
 .row-title,
 .row-sub {
   display: block;
-  overflow: hidden;
+  /* clip, not hidden: a focused artist link past the ellipsis must not scroll the line sideways */
+  overflow: clip;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1293,6 +1294,8 @@ svg {
   gap: 14px;
   padding: 4px 12px 6px;
   overflow-x: auto;
+  /* a soft right edge says the shelf scrolls */
+  mask-image: linear-gradient(to right, #000 calc(100% - 36px), transparent);
   scrollbar-width: thin;
   scrollbar-color: var(--hair) transparent;
 }
@@ -1453,8 +1456,10 @@ svg {
   .vol-pop {
     position: absolute;
     z-index: 4;
-    right: 0;
-    bottom: calc(100% + 8px);
+    /* beside the speaker button, in the control row: above it would cover the seek bar */
+    right: calc(100% + 6px);
+    top: 50%;
+    margin-top: -20px;
     padding: 8px 14px;
     border: 1px solid var(--hair);
     border-radius: 12px;
@@ -1491,4 +1496,9 @@ svg {
     transition: none !important;
     animation: none !important;
   }
+}
+
+/* the ring of a link inside a clipped line: draw it inside the link */
+.row-sub .artist-link:focus-visible {
+  outline-offset: -2px;
 }

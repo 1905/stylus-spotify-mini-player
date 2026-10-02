@@ -518,6 +518,7 @@ function renderChrome() {
   repeat.disabled = !song;
   repeat.dataset.mode = state.repeat;
   repeat.classList.toggle("is-on", state.repeat !== "off");
+  repeat.setAttribute("aria-pressed", String(state.repeat !== "off"));
   const label = REPEAT_LABEL[state.repeat] || REPEAT_LABEL.off;
   repeat.setAttribute("aria-label", label);
   repeat.title = label;
