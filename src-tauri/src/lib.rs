@@ -27,6 +27,7 @@ pub fn run() {
             spotify::set_shuffle,
             spotify::set_repeat,
             spotify::get_saved_tracks,
+            spotify::liked_count,
             spotify::get_saved_albums,
             spotify::is_saved,
             spotify::save_track,

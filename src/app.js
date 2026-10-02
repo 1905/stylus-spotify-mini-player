@@ -873,17 +873,28 @@ let savedChain = Promise.resolve(); // save/unsave in click order, so the last c
 
 const isScopeError = (e) => /\b403\b|scope/i.test(String(e));
 
+/** Liked Songs reads and writes, in order, for this login session only. */
+function queueSaved(cmd, args) {
+  const sess = authSession;
+  const run = savedChain.then(() => (sess === authSession ? invoke(cmd, args) : null));
+  savedChain = run.catch(() => {});
+  return run;
+}
+
+/** The cached Liked Songs result after saving (newest first) or removing track t. */
+const likedWith = (r, t, saved) => {
+  const rest = (r.tracks || []).filter((x) => x.uri !== t.uri);
+  return { tracks: saved ? [t, ...rest] : rest, total: Math.max(0, (r.total || 0) + (saved ? 1 : -1)) };
+};
+
 /** Ask once per track whether it's in Liked Songs. */
 async function checkSaved(track) {
   const gen = ++heartGen;
   state.saved = null;
   if (!track || !track.id || isLocal(track.uri) || libraryDenied) return;
-  // in the same queue as save/unsave: a read must not overtake a write still on its way
-  const sess = authSession;
-  const run = savedChain.then(() => (sess === authSession ? invoke("is_saved", { trackId: track.id }) : null));
-  savedChain = run.catch(() => {});
   try {
-    const saved = await run;
+    // in the same queue as save/unsave: a read must not overtake a write still on its way
+    const saved = await queueSaved("is_saved", { trackId: track.id });
     if (gen !== heartGen) return;
     state.saved = Boolean(saved);
   } catch (e) {
@@ -903,13 +914,14 @@ async function toggleSaved() {
   state.saved = want;
   renderChrome();
   const sess = authSession;
-  const run = savedChain.then(() => (sess === authSession ? invoke(want ? "save_track" : "unsave_track", { trackId: t.id }) : null));
-  savedChain = run.catch(() => {});
   try {
-    await run;
-    // Liked Songs changed: drop the cached list, refresh the count if the Library has shown it
-    lib.delete("liked");
-    if (sess === authSession && libOpened) fillLiked();
+    await queueSaved(want ? "save_track" : "unsave_track", { trackId: t.id });
+    if (sess !== authSession) return;
+    // Liked Songs changed: patch the cached list in place (no 20-page refetch), recount once
+    const cached = lib.get("liked");
+    if (cached) lib.set("liked", cached.then((r) => r && likedWith(r, t, want)));
+    lib.delete("likedCount");
+    if (libOpened) fillLiked();
   } catch (e) {
     if (isCode(e, "AUTH_EXPIRED")) return expire();
     if (isScopeError(e)) libraryDenied = true;
@@ -1333,7 +1345,8 @@ function fillLiked() {
   const sub = row.querySelector(".row-sub");
   row.hidden = false;
   if (!sub.textContent) setEl(sub, "Loading…");
-  fillGroup(row, () => libGet("liked", "get_saved_tracks"), (res) => setEl(sub, plural((res && res.total) || 0, "song", "songs")), "your liked songs");
+  // the count alone is one request; the list (up to 20 pages) loads only when opened
+  fillGroup(row, () => libGet("likedCount", "liked_count"), (n) => setEl(sub, plural(n || 0, "song", "songs")), "your liked songs");
 }
 
 let savedAlbums = [];
@@ -1381,7 +1394,7 @@ async function fillTop() {
   const gen = ++topGen;
   const group = $("libTop");
   for (const b of $("topTabs").querySelectorAll("[data-range]")) b.setAttribute("aria-selected", String(b.dataset.range === range));
-  const results = await Promise.allSettled(["tracks", "artists"].map((kind) => libGet(`top:${kind}:${range}`, "get_top", { kind, range })));
+  const results = await Promise.allSettled([topTracks(range), libGet(`top:artists:${range}`, "get_top", { kind: "artists", range })]);
   if (gen !== topGen) return;
   const failed = results.filter((r) => r.status === "rejected").map((r) => r.reason);
   if (failed.some((e) => isCode(e, "AUTH_EXPIRED"))) return void expire();
@@ -1469,7 +1482,8 @@ async function renderMixes() {
 }
 
 /** Spotify refuses some of its own mixes: 403, or a 404 that isn't about the device. */
-const mixRefused = (e) => /\b403\b/.test(String(e)) || (/\b404\b/.test(String(e)) && !/device/i.test(String(e)));
+// Rust already tags a device 404 as NO_ACTIVE_DEVICE: any other 403/404 is the mix itself
+const mixRefused = (e) => /\b40[34]\b/.test(String(e)) && !isCode(e, "NO_ACTIVE_DEVICE");
 
 async function playMix(src) {
   const rev = overlayRev;
@@ -1629,23 +1643,29 @@ const kindLabel = (k) => (k ? k[0].toUpperCase() + k.slice(1) : "Album");
 
 const TOP_RANGES = ["short_term", "medium_term", "long_term"];
 
+/** Top tracks at Spotify's max of 50, one cache entry shared by the Library group and artist pages. */
+const topTracks = (range) => libGet(`top50:tracks:${range}`, "get_top", { kind: "tracks", range, limit: 50 });
+
 /** Your own top tracks (50 per range) and Liked Songs, best first; any that fails is just skipped. */
 function favoriteSources(optional) {
   return Promise.all([
-    ...TOP_RANGES.map((range) => libGet(`top50:tracks:${range}`, "get_top", { kind: "tracks", range, limit: 50 }).catch(optional)),
+    ...TOP_RANGES.map((range) => topTracks(range).catch(optional)),
     libGet("liked", "get_saved_tracks").then((r) => (r && r.tracks) || null).catch(optional),
   ]);
 }
 
-/** The artist page: photo and name (best effort), your favorites by them, then albums and singles. */
+/** The artist page: photo and name (best effort), albums and singles, then your favorites by them. */
 async function loadArtist(src, gen) {
   const optional = (e) => (isCode(e, "AUTH_EXPIRED") ? Promise.reject(e) : null); // the page works without these
-  let info, albums, sources;
+  // favorites come from your top tracks and Liked Songs: a cold Liked cache is many pages, so the
+  // albums don't wait for it
+  const sources = favoriteSources(optional);
+  sources.catch(() => {}); // awaited below; until then a rejection must not count as unhandled
+  let info, albums;
   try {
-    [info, albums, sources] = await Promise.all([
+    [info, albums] = await Promise.all([
       invoke("get_artist", { artistId: src.id }).catch(optional),
       invoke("get_artist_albums", { artistId: src.id }),
-      favoriteSources(optional),
     ]);
   } catch (e) {
     if (gen !== state.gen.detail) return;
@@ -1662,8 +1682,21 @@ async function loadArtist(src, gen) {
     $("detailName").title = src.name;
   }
   detailAlbums = (albums || []).filter((a) => a && a.id);
+  detailTracks = [];
+  renderArtist();
+  let lists;
+  try {
+    lists = await sources;
+  } catch (e) {
+    return void (gen === state.gen.detail && overlayFailed(e));
+  }
+  if (gen !== state.gen.detail) return;
   // Spotify no longer gives an artist's top tracks or play counts: rank from your own listening
-  detailTracks = favoritesBy(src.id, sources || []);
+  detailTracks = favoritesBy(src.id, lists || []);
+  renderArtist();
+}
+
+function renderArtist() {
   $("detailPlay").hidden = !detailTracks.length;
   $("detailPlay").disabled = !detailTracks.length;
   setText("detailStatus", detailAlbums.length || detailTracks.length ? "" : "No albums or singles.");
@@ -1678,10 +1711,12 @@ async function loadArtist(src, gen) {
     `</div>`;
 }
 
+const openAlbum = (a, sub = a.artists) => openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub });
+
 function onDetailClick(e) {
   if (onTrackClick(e, detailTracks, playDetailFrom)) return;
   const a = tileAt(e, detailAlbums);
-  if (a) openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: curDetail ? curDetail.name : "" });
+  if (a) openAlbum(a, curDetail ? curDetail.name : "");
 }
 
 function onDetailPlay() {
@@ -1782,7 +1817,7 @@ function onSearchClick(e) {
   if (onTrackClick(e, searchHits.tracks, (i) => playFrom([searchHits.tracks[i]], 0))) return;
   const al = e.target.closest("[data-album]");
   const a = al && searchHits.albums[Number(al.dataset.album)];
-  if (a) openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: a.artists });
+  if (a) openAlbum(a);
 }
 
 // ---------- keyboard: Space = play/pause, Esc = close the overlay ----------
@@ -1856,7 +1891,7 @@ async function boot() {
   $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, followed)));
   $("libAlbums").addEventListener("click", (e) => {
     const a = tileAt(e, savedAlbums);
-    if (a) openDetail({ kind: "album", id: a.id, name: a.name, cover: a.cover, sub: a.artists });
+    if (a) openAlbum(a);
   });
   $("libMixes").addEventListener("click", (e) => {
     const m = tileAt(e, mixList);

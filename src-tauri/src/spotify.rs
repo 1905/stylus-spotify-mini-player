@@ -257,6 +257,12 @@ const MAX_SAVED_TRACKS: usize = 1000;
 const MAX_SAVED_ALBUMS: usize = 200;
 const MAX_FOLLOWED: usize = 200;
 
+/// How many songs are in Liked Songs: one request, for the Library row.
+#[tauri::command]
+pub async fn liked_count() -> Result<u64, String> {
+    Ok(get("/me/tracks?limit=1").await?["total"].as_u64().unwrap_or(0))
+}
+
 /// Liked Songs, newest first, capped at 1000: `{tracks, total}`. `total` is
 /// the full count, so the UI can say when the cap cut some off.
 #[tauri::command]
@@ -376,7 +382,7 @@ pub async fn mix_info(playlist_id: String) -> Result<Value, String> {
     let mut name = "Spotify mix".to_string();
     if let Some(artist_id) = cover.as_deref().and_then(mix_artist_id) {
         // best effort: a failed artist lookup keeps the generic name
-        if let Ok(artist) = get(&format!("/artists/{}", urlencode(&artist_id))).await {
+        if let Ok(artist) = get_artist(artist_id).await {
             if let Some(n) = artist["name"].as_str() {
                 name = format!("{n} Radio");
             }

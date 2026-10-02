@@ -260,6 +260,7 @@
     is_saved: ({ trackId }) => state.saved.has(trackId),
     save_track: ({ trackId }) => { state.saved.add(trackId); return null; },
     unsave_track: ({ trackId }) => { state.saved.delete(trackId); return null; },
+    liked_count: () => handlers.get_saved_tracks().total,
     get_saved_tracks: () => {
       const base = (fx.liked || {}).tracks || [];
       const baseIds = new Set(base.map((t) => t.id));

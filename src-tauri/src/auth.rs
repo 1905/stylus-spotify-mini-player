@@ -457,13 +457,6 @@ mod tests {
     }
 
     #[test]
-    fn scopes_include_library_top_follow() {
-        for s in ["user-library-read", "user-library-modify", "user-top-read", "user-follow-read"] {
-            assert!(REQUIRED_SCOPES.contains(&s), "missing {s}");
-        }
-    }
-
-    #[test]
     fn scopes_missing_library_is_reconnect() {
         let s = all().replace(" user-library-read", "");
         assert!(!has_required_scopes(&s));

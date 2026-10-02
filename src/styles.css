@@ -1502,3 +1502,9 @@ svg {
 .row-sub .artist-link:focus-visible {
   outline-offset: -2px;
 }
+
+/* Liked Songs can be 1000 rows: skip layout and paint for the ones off screen */
+.row-track {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
