@@ -116,7 +116,7 @@ mod tests {
 
     /// A fresh, empty dir under the system temp dir.
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("rust-spotify-cache-{name}-{}-{}", std::process::id(), crate::auth::now()));
+        let dir = std::env::temp_dir().join(format!("needle-cache-{name}-{}-{}", std::process::id(), crate::auth::now()));
         let _ = std::fs::create_dir_all(&dir);
         dir
     }

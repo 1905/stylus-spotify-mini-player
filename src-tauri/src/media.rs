@@ -124,7 +124,7 @@ pub fn playback(playing: Option<bool>, position_ms: Option<f64>) -> MediaPlaybac
 /// Create the controls and attach the event handler. Call on the main thread (Tauri's setup).
 /// A failure is logged; the app runs on without media keys.
 pub fn init(app: &AppHandle) {
-    let config = PlatformConfig { display_name: "The Run", dbus_name: "rust_spotify", hwnd: None };
+    let config = PlatformConfig { display_name: "Needle", dbus_name: "needle", hwnd: None };
     let mut os = match MediaControls::new(config) {
         Ok(c) => c,
         Err(e) => return eprintln!("media: could not create OS media controls: {e:?}"),

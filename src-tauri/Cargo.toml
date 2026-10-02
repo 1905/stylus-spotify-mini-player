@@ -1,11 +1,11 @@
 [package]
-name = "rust-spotify"
+name = "needle"
 version = "0.1.0"
-description = "Spotify profile and playlists"
+description = "Needle — a small Spotify player"
 edition = "2021"
 
 [lib]
-name = "rust_spotify_lib"
+name = "needle_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

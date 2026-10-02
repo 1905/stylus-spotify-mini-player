@@ -2854,6 +2854,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "needle"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "futures-util",
+ "librespot-connect",
+ "librespot-core",
+ "librespot-playback",
+ "librespot-protocol",
+ "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "rodio",
+ "serde",
+ "serde_json",
+ "sha2",
+ "souvlaki",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+]
+
+[[package]]
 name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4058,34 +4086,6 @@ dependencies = [
  "spki",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "rust-spotify"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "dirs 5.0.1",
- "futures-util",
- "librespot-connect",
- "librespot-core",
- "librespot-playback",
- "librespot-protocol",
- "log",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "rand 0.8.8",
- "reqwest 0.12.28",
- "rodio",
- "serde",
- "serde_json",
- "sha2",
- "souvlaki",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
 ]
 
 [[package]]

@@ -6,12 +6,18 @@
 //! The player needs its own login: Spotify's keymaster client id, not the app's
 //! (the app's token logs librespot in, but every audio fetch fails, P0 spike).
 //! librespot's reusable credentials live in the credentials file. They are never logged.
+//!
+//! The playback session (what plays here, where, at what volume) is kept by session.rs:
+//! fed from `local_load`, the player's events and Connect cluster updates, loaded back
+//! (paused) on the first ready of each launch.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use librespot_connect::{ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc};
+use futures_util::StreamExt;
+use librespot_core::dealer::{manager::BoxedStreamResult, protocol::Message};
 use librespot_core::{authentication::Credentials, config::DeviceType, error::ErrorKind, Session, SessionConfig};
 use librespot_playback::{
     config::PlayerConfig,
@@ -19,9 +25,12 @@ use librespot_playback::{
     player::Player,
 };
 use librespot_protocol::authentication::AuthenticationType;
+use librespot_protocol::connect::ClusterUpdate;
 use serde::Serialize;
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter, State as Managed};
 use tokio::sync::watch;
+
+use crate::session::{self, Repeat, Source, Tracker};
 
 /// The Connect device name other Spotify clients show. Renaming keeps the device id.
 pub const DEVICE_NAME: &str = "This Mac";
@@ -257,6 +266,10 @@ struct Inner {
     login_busy: AtomicBool,
     /// The persisted Connect device id, read (or created) on the first run.
     device_id: OnceLock<String>,
+    /// The playback session (session.rs).
+    session: Arc<Tracker>,
+    /// The saved session is loaded back on the first ready of the process only.
+    restore_tried: AtomicBool,
 }
 
 impl Engine {
@@ -270,6 +283,8 @@ impl Engine {
             task: tokio::sync::Mutex::new(None),
             login_busy: AtomicBool::new(false),
             device_id: OnceLock::new(),
+            session: Arc::new(Tracker::new(session::default_path())),
+            restore_tried: AtomicBool::new(false),
         }))
     }
 
@@ -375,7 +390,9 @@ impl Engine {
 
     /// On app exit: stop Spirc and give it up to 2s to disconnect. Not async: called
     /// from the event loop's Exit, outside the async runtime.
+    /// The session's position is written first, synchronously.
     pub fn shutdown(&self) {
+        self.0.session.save_and_close();
         self.retire();
         tauri::async_runtime::block_on(async {
             if let Some(mut task) = self.0.task.lock().await.take() {
@@ -403,11 +420,12 @@ impl Engine {
     }
 }
 
-fn connect_config() -> ConnectConfig {
+/// `initial_volume`: the session's volume, so launches and reconnects keep it.
+fn connect_config(initial_volume: u16) -> ConnectConfig {
     ConnectConfig {
         name: DEVICE_NAME.into(),
         device_type: DeviceType::Computer,
-        initial_volume: u16::MAX / 2,
+        initial_volume,
         ..ConnectConfig::default()
     }
 }
@@ -461,10 +479,18 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     let player = Player::new(player_config, session.clone(), Box::new(NoOpVolume), move || {
         Box::new(crate::audio_out::RampSink::new(sink_mixer))
     });
+    // the session follows the player; the listener ends with the player (its channel closes)
+    let tracker = engine.0.session.clone();
+    if let Some(account) = creds.username.as_deref() {
+        // stored credentials name the account: its saved volume is the first Spirc's volume
+        let (t, account) = (tracker.clone(), account.to_string());
+        let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
+    }
+    tauri::async_runtime::spawn(session::listen(tracker.clone(), player.get_player_event_channel()));
 
     let mut attempt = 0;
     loop {
-        let connect = Spirc::new(connect_config(), session.clone(), creds.clone(), player.clone(), mixer.clone());
+        let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
         let connected = tokio::time::timeout(CONNECT_TIMEOUT, connect)
             .await
@@ -491,17 +517,33 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 let up_since = Instant::now();
                 creds = keep_reusable(&engine, &session, creds).await;
                 let player_user = session.username();
-                let event = Event::Connected { player: player_user, app: app_user.clone() };
-                if let State::AccountMismatch(_) = engine.apply(generation, event) {
-                    engine.stop_spirc();
-                    spirc_task.await;
-                    return;
+                {
+                    let (t, account) = (tracker.clone(), player_user.clone());
+                    let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
                 }
+                let event = Event::Connected { player: player_user, app: app_user.clone() };
+                match engine.apply(generation, event) {
+                    State::AccountMismatch(_) => {
+                        engine.stop_spirc();
+                        spirc_task.await;
+                        return;
+                    }
+                    State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
+                        tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string()));
+                    }
+                    _ => {}
+                }
+                let mut cluster = cluster_updates(&session);
                 tokio::pin!(spirc_task);
                 // the Spirc task ends on shutdown or session loss; a dead player thread is fatal
                 loop {
                     tokio::select! {
                         _ = &mut spirc_task => break,
+                        Some(update) = cluster.next() => {
+                            if let Ok(update) = update {
+                                follow_cluster(&tracker, &update, session.device_id());
+                            }
+                        }
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {
                             if player.is_invalid() {
                                 engine.apply(generation, Event::Fatal("the audio player stopped".into()));
@@ -548,6 +590,81 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
         // a Session can't be reused once it has connected or failed
         session = Session::new(session_config.clone(), None);
         player.set_session(session.clone());
+    }
+}
+
+/// Connect cluster updates (the account's devices and the active one's player state).
+/// Spirc listens too; the dealer hands each update to every listener.
+fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
+    match session.dealer().listen_for("hm://connect-state/v1/cluster", Message::from_raw::<ClusterUpdate>) {
+        Ok(stream) => stream,
+        Err(e) => {
+            log::warn!(target: "needle::session", "no cluster updates, loads by other clients keep their first track only: {e}");
+            Box::pin(futures_util::stream::pending())
+        }
+    }
+}
+
+/// A cluster update while this Mac plays: tells the session which context another client loaded.
+fn follow_cluster(tracker: &Tracker, update: &ClusterUpdate, device_id: &str) {
+    let cluster = &update.cluster;
+    if cluster.active_device_id != device_id {
+        return;
+    }
+    let state = &cluster.player_state;
+    let o = &state.options;
+    tracker.on_cluster(&state.context_uri, &state.track.uri, o.shuffling_context, Repeat::from_flags(o.repeating_context, o.repeating_track));
+}
+
+/// Loads the saved session back, paused, on the first ready of the launch. Skipped when
+/// there is none, when this player already has a track, or when another device is playing.
+async fn restore(engine: Engine, device_id: String) {
+    const LOG: &str = "needle::session";
+    let tracker = engine.0.session.clone();
+    let Some(saved) = tracker.current() else {
+        log::info!(target: LOG, "restore skipped: no saved session for this account");
+        return;
+    };
+    if tracker.has_track() {
+        log::info!(target: LOG, "restore skipped: the player already has a track");
+        return;
+    }
+    // optional check with the app's token; a failure (app logged out, offline) doesn't block
+    match crate::spotify::get("/me/player").await {
+        Ok(p) if p["is_playing"].as_bool() == Some(true) && p["device"]["id"].as_str() != Some(device_id.as_str()) => {
+            let name = p["device"]["name"].as_str().unwrap_or("another device");
+            log::info!(target: LOG, "restore skipped: {name} is playing");
+            return;
+        }
+        Ok(_) => {}
+        Err(e) => log::info!(target: LOG, "playback check failed ({e}), restoring anyway"),
+    }
+    if tracker.has_track() {
+        log::info!(target: LOG, "restore skipped: the player got a track meanwhile");
+        return;
+    }
+    let source = match saved.source.clone() {
+        Some(Source::Context { context_uri }) => LoadSource::Context(context_uri),
+        Some(Source::Uris { uris }) => LoadSource::Tracks(uris),
+        None => return,
+    };
+    let modes = Modes { shuffle: saved.shuffle, repeat: saved.repeat == Repeat::Context, repeat_track: saved.repeat == Repeat::Track };
+    let request = load_request(source, saved.track_uri.clone(), saved.position_ms, false, modes);
+    let volume = saved.volume;
+    // Spirc ignores everything while inactive: activate first, then volume and load, in order
+    let sent = engine.with_spirc(|s| {
+        s.activate()?;
+        s.set_volume(volume)?;
+        s.load(request)
+    });
+    match sent {
+        Ok(()) => {
+            log::info!(target: LOG, "restored {}", session::describe(&saved));
+            if let Some(app) = engine.0.app.get() {
+                let _ = app.emit("session-restored", saved.payload());
+            }
+        }
+        Err(e) => log::warn!(target: LOG, "restore failed: {e}"),
     }
 }
 
@@ -743,11 +860,39 @@ pub fn local_load(
     shuffle: Option<bool>,
     repeat: Option<String>,
 ) -> Result<(), String> {
-    let request = load_request(load_source(context_uri, uris)?, track_uri, position_ms, play, modes(shuffle, repeat));
+    let source = load_source(context_uri, uris)?;
+    let m = modes(shuffle, repeat);
+    let saved = match &source {
+        LoadSource::Context(c) => Source::Context { context_uri: c.clone() },
+        LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
+    };
+    let request = load_request(source, track_uri.clone(), position_ms, play, m);
     engine.with_spirc(|s| {
         s.activate()?;
         s.load(request)
+    })?;
+    engine.0.session.loaded(saved, track_uri, position_ms, m.shuffle, Repeat::from_flags(m.repeat, m.repeat_track));
+    Ok(())
+}
+
+/// The saved playback session of the player's account, for the UI to show before its first
+/// poll: `{contextUri, uris, trackUri, positionMs, shuffle, repeat, volume}` (one of
+/// contextUri/uris is null; volume 0–65535). Null when there is none.
+#[tauri::command]
+pub async fn session_get(engine: Managed<'_, Engine>) -> Result<Option<serde_json::Value>, String> {
+    let engine = engine.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let tracker = &engine.0.session;
+        if tracker.account().is_none() {
+            // before the engine connects: the account of the stored player login
+            if let Some(account) = engine.0.store.load().and_then(|c| c.username) {
+                tracker.use_account(&account);
+            }
+        }
+        tracker.current().map(|s| s.payload())
     })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -864,10 +1009,11 @@ mod tests {
 
     #[test]
     fn device_is_this_mac_at_half_volume() {
-        let c = connect_config();
+        let c = connect_config(session::DEFAULT_VOLUME);
         assert_eq!(c.name, "This Mac");
         assert_eq!(c.device_type, DeviceType::Computer);
         assert_eq!(c.initial_volume, u16::MAX / 2);
+        assert_eq!(connect_config(40_000).initial_volume, 40_000);
         assert!(!c.disable_volume);
     }
 
@@ -918,7 +1064,7 @@ mod tests {
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("rust-spotify-test-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("needle-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("player-device-id")
     }

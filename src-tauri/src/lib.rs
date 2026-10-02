@@ -5,6 +5,7 @@ mod cache;
 mod dock;
 mod media;
 mod player;
+mod session;
 mod settings;
 mod spotify;
 mod store;
@@ -78,6 +79,7 @@ pub fn run() {
             player::local_seek,
             player::local_volume,
             player::local_load,
+            player::session_get,
             spotify::mix_info,
             spotify::get_top,
             spotify::get_artist,
