@@ -97,11 +97,7 @@ fn now() -> u64 {
 // ---- token persistence -----------------------------------------------------
 
 fn token_path() -> std::path::PathBuf {
-    let mut dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    dir.push("rust-spotify");
-    let _ = std::fs::create_dir_all(&dir);
-    dir.push("tokens.json");
-    dir
+    app_dir().join("tokens.json")
 }
 
 pub fn load_tokens() -> Option<Tokens> {
@@ -111,7 +107,26 @@ pub fn load_tokens() -> Option<Tokens> {
 
 fn save_tokens(t: &Tokens) -> Result<(), String> {
     let json = serde_json::to_string_pretty(t).map_err(|e| e.to_string())?;
-    std::fs::write(token_path(), json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
+    write_private(&token_path(), &json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
+}
+
+/// The app's data folder (`~/Library/Application Support/rust-spotify`), created if missing.
+pub(crate) fn app_dir() -> std::path::PathBuf {
+    let mut dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    dir.push("rust-spotify");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Writes a secret file readable by this user only (0600), replacing it atomically.
+pub(crate) fn write_private(path: &std::path::Path, data: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = path.with_extension("tmp");
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    f.write_all(data.as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, path)
 }
 
 /// Moves tokens.json aside to tokens.json.invalid (overwriting) so the next

@@ -8,7 +8,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let engine = player::Engine::new(Arc::new(player::KeychainStore));
+    let engine = player::Engine::new(Arc::new(player::FileStore));
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(engine.clone())

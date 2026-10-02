@@ -982,7 +982,9 @@ function openDevices() {
   refreshDevices();
   clearInterval(devicesTimer);
   devicesTimer = setInterval(() => {
-    if (!(state.devices || []).some(isTheRun)) refreshDevices(); // The Run may be listed any second now
+    // The Run may be listed any second now; one request at a time, so a slow answer isn't
+    // discarded by the next tick's newer generation
+    if (!devicesBusy && !(state.devices || []).some(isTheRun)) refreshDevices();
   }, DEVICES_REFRESH_MS);
 }
 
@@ -998,8 +1000,19 @@ function closeDevices(refocus = false) {
   if (refocus) $("deviceBtn").focus();
 }
 
+let devicesBusy = false;
+
 async function refreshDevices() {
   const gen = ++devicesGen;
+  devicesBusy = true;
+  try {
+    await loadDeviceList(gen);
+  } finally {
+    devicesBusy = false;
+  }
+}
+
+async function loadDeviceList(gen) {
   if (!state.devices) devicesNote = "Looking for devices…";
   renderDeviceList();
   let list;

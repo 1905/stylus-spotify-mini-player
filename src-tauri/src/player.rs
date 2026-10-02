@@ -4,7 +4,7 @@
 //!
 //! The player needs its own login: Spotify's keymaster client id, not the app's
 //! (the app's token logs librespot in, but every audio fetch fails, P0 spike).
-//! librespot's reusable credentials live in the Keychain. They are never logged.
+//! librespot's reusable credentials live in the credentials file. They are never logged.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -36,8 +36,6 @@ const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// A session that stayed up this long resets the reconnect backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
-const KEYCHAIN_SERVICE: &str = "rust-spotify";
-const KEYCHAIN_ACCOUNT: &str = "librespot-credentials";
 /// The scopes librespot's own binary asks for (librespot 0.8.0 src/main.rs `OAUTH_SCOPES`).
 const OAUTH_SCOPES: &[&str] = &[
     "app-remote-control",
@@ -162,30 +160,31 @@ fn backoff(attempt: u32) -> Duration {
 
 // ---- credential storage ----------------------------------------------------
 
-/// Where librespot's reusable credentials live: the Keychain in the app, memory in tests.
+/// Where librespot's reusable credentials live: a private file in the app, memory in tests.
 pub trait CredStore: Send + Sync {
     fn load(&self) -> Option<Credentials>;
     fn save(&self, creds: &Credentials) -> Result<(), String>;
 }
 
-/// macOS Keychain item "rust-spotify" / "librespot-credentials", the credentials as JSON.
-pub struct KeychainStore;
+/// `player-credentials.json` next to the app's `tokens.json`, readable by this user only
+/// (0600). Not the Keychain: unsigned builds count as a new app after every rebuild, so
+/// macOS asked for Keychain access again each time (user chose the file, 2026-10-02).
+pub struct FileStore;
 
-impl KeychainStore {
-    fn entry() -> Result<keyring::Entry, String> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(|e| e.to_string())
+impl FileStore {
+    fn path() -> std::path::PathBuf {
+        crate::auth::app_dir().join("player-credentials.json")
     }
 }
 
-impl CredStore for KeychainStore {
+impl CredStore for FileStore {
     fn load(&self) -> Option<Credentials> {
-        let json = Self::entry().ok()?.get_password().ok()?;
-        serde_json::from_str(&json).ok()
+        serde_json::from_str(&std::fs::read_to_string(Self::path()).ok()?).ok()
     }
 
     fn save(&self, creds: &Credentials) -> Result<(), String> {
         let json = serde_json::to_string(creds).map_err(|e| e.to_string())?;
-        Self::entry()?.set_password(&json).map_err(|e| e.to_string())
+        crate::auth::write_private(&Self::path(), &json).map_err(|e| e.to_string())
     }
 }
 
@@ -494,8 +493,8 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
     let to_save = reusable.clone();
     match tokio::task::spawn_blocking(move || store.save(&to_save)).await {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => eprintln!("engine: could not store the player login in the Keychain: {e}"),
-        Err(e) => eprintln!("engine: could not store the player login in the Keychain: {e}"),
+        Ok(Err(e)) => eprintln!("engine: could not store the player login in the credentials file: {e}"),
+        Err(e) => eprintln!("engine: could not store the player login in the credentials file: {e}"),
     }
     reusable
 }
