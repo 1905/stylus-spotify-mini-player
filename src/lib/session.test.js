@@ -154,3 +154,15 @@ describe("resumeSource", () => {
     });
   });
 });
+
+describe("playSession members", () => {
+  it("keeps a context's member list for the next cover jump, without sending it", () => {
+    const s = playSession("me", { contextUri: "spotify:playlist:p", trackUri: "spotify:track:2" }, { kind: "playlist", id: "p" }, 0, ["spotify:track:1", "spotify:track:2"]);
+    expect(s.contextUri).toBe("spotify:playlist:p");
+    expect(s.uris).toEqual(["spotify:track:1", "spotify:track:2"]);
+    expect(s.origin).toEqual({ kind: "playlist", id: "p" });
+  });
+  it("without members a context play stores no list", () => {
+    expect(playSession("me", { contextUri: "spotify:album:a", trackUri: "spotify:track:9" }, null, 0).uris).toBe(null);
+  });
+});

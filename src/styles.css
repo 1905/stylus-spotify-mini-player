@@ -1885,6 +1885,11 @@ svg {
   inset: -6px;
 }
 
+/* pending: the button is only the spinner, not a pause icon that looks like it already plays */
+.ctl-play.is-pending svg {
+  visibility: hidden;
+}
+
 /* nothing plays yet, so the button is disabled: keep the spinner readable */
 .ctl-play.is-pending:disabled {
   opacity: 1;
@@ -1954,4 +1959,11 @@ svg {
 
 .cover[data-role="now"] .cover-play {
   display: none;
+}
+
+/* skeletons take the shape of what they stand in for: artists are round */
+.is-round-grid .album.is-skeleton .art,
+#topArtists .album.is-skeleton .art,
+#libFollowing .album.is-skeleton .art {
+  border-radius: 50%;
 }

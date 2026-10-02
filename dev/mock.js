@@ -575,7 +575,7 @@
     if (scenario === "library" || scenario === "library-detail") {
       (await waitFor("#libraryBtn"))?.click();
       if (scenario === "library-detail") {
-        const row = await waitFor("#libList [data-id], #libList button, #libList > *");
+        const row = await waitFor("#libList .row:not(.is-skeleton)");
         row?.click();
       }
     }

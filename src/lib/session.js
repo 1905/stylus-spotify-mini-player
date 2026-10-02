@@ -46,8 +46,9 @@ export function parseSession(raw) {
  * The session for a play the app just started. src: {contextUri?} or {uris}; origin: the detail
  * view it was started from ({kind, id}) or null.
  */
-export function playSession(accountId, src, origin, nowMs) {
-  const uris = src.contextUri ? null : cleanUris(src.uris);
+export function playSession(accountId, src, origin, nowMs, members = null) {
+  // with a context, `members` (the context's known tracks) is kept only as a membership list
+  const uris = cleanUris(src.contextUri ? members : src.uris);
   const trackUri = src.trackUri || (uris && uris[0]) || null;
   if (!trackUri && !src.contextUri) return null;
   return {

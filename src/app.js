@@ -488,7 +488,9 @@ function onRunClick(e) {
 async function playCover(item) {
   if (!item || item.role === "now" || isLocalFile(item.track.uri)) return;
   const last = readSession();
-  const ctx = state.contextUri;
+  // Spotify can report no context for a load we started (uris, or a slow state update):
+  // the saved origin playlist/album is then the context
+  const ctx = state.contextUri || (last && (last.contextUri || originUri(last.origin))) || null;
   // what's known to be in the playing context: its loaded rows, or the list the saved play used
   const sameAsLast = last && ctx && (originUri(last.origin) === ctx || last.contextUri === ctx);
   const target = coverTarget(item, {
@@ -501,9 +503,13 @@ async function playCover(item) {
   });
   if (!target) return;
   if (target.uris) target.uris = target.uris.filter((u) => !isLocalFile(u));
-  // a jump inside the saved list keeps its origin playlist/album
-  const origin = last && last.uris && target.uris && last.uris.includes(target.trackUri) ? last.origin : null;
-  await startPlay(target, { kind: "cover", origin });
+  // a jump inside the playing playlist/album keeps where it came from: its origin and its full
+  // track list, so the next jump still knows every member (not just the visible covers)
+  const inSaved = last && last.uris && last.uris.includes(target.trackUri);
+  const inSameContext = target.contextUri && sameAsLast;
+  const origin = inSaved || inSameContext ? last.origin : null;
+  // keep the full member list for the next jump (never sent with a context: Spirc takes one source)
+  await startPlay(target, { kind: "cover", origin, members: inSaved || inSameContext ? last.uris : null });
 }
 
 // ---------- now block, chrome, progress ----------
@@ -826,7 +832,7 @@ async function playSource(deviceId, src) {
  * written once it lands. origin: the detail view it came from ({kind, id}) or null; row: the clicked
  * row; refused(e): true for an error the caller handles itself (the play then counts as failed).
  */
-async function startPlay(src, { kind, origin = null, row = null, refused = null } = {}) {
+async function startPlay(src, { kind, origin = null, row = null, refused = null, members = null } = {}) {
   const token = startPending(kind, src.trackUri || null, row);
   let handled = false;
   const sent = await changeTrack(async (id) => {
@@ -840,7 +846,7 @@ async function startPlay(src, { kind, origin = null, row = null, refused = null 
   });
   const ok = sent && !handled;
   settlePending(token, ok);
-  if (ok) writeSession(playSession(accountNow, src, origin, Date.now()));
+  if (ok) writeSession(playSession(accountNow, src, origin, Date.now(), members || (src.contextUri && knownRows.get(src.contextUri)) || null));
   kick();
   return ok;
 }
@@ -2348,18 +2354,21 @@ async function openDetail(src, push = true) {
     rows.innerHTML = `<div class="albums is-grid">${skeletonTiles(4)}</div>`;
     return loadArtist(src, gen);
   }
-  rows.innerHTML = skeletonRows(8);
-
-  // the disk copy at once (stale until the fresh list lands), then the fresh list if it differs
+  // the disk copy at once (stale until the fresh list lands), then the fresh list if it differs;
+  // the skeleton only when there's no copy, so a cached reopen never flashes it
   const key = detailKey(src);
   let fresh = false;
   let shown = null;
   if (key && !(src.kind === "liked" && lib.has("liked"))) {
+    rows.innerHTML = "";
     diskGet(key).then((v) => {
-      if (fresh || v == null || gen !== state.gen.detail) return;
+      if (fresh || gen !== state.gen.detail) return;
+      if (v == null) return void (rows.innerHTML = skeletonRows(8));
       shown = rowsSig(v);
       showDetail(src, v);
     });
+  } else {
+    rows.innerHTML = skeletonRows(8);
   }
   let data;
   try {
