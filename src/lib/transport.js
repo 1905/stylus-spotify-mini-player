@@ -23,7 +23,8 @@ export function createIntents(lagMs, lagFor = {}) {
       const it = get(key);
       if (--it.pending <= 0) {
         it.pending = 0;
-        it.settleAfter = now + (lagFor[key] ?? lagMs);
+        // a lag set for "volume" also covers "volume:<device>"
+        it.settleAfter = now + (lagFor[key] ?? lagFor[key.split(":")[0]] ?? lagMs);
       }
     },
     /** True if seq is the newest command for key: only it may undo the UI. */

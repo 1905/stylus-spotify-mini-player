@@ -13,6 +13,14 @@ describe("createIntents", () => {
     expect(i.settled("volume", 3500)).toBe(true);
   });
 
+  it("a per-device key gets its family's lag", () => {
+    const i = createIntents(500, { volume: 2500 });
+    i.start("volume:A");
+    i.finish("volume:A", 1000);
+    expect(i.settled("volume:A", 1600)).toBe(false);
+    expect(i.settled("volume:A", 3500)).toBe(true);
+  });
+
   it("is settled before anything was asked", () => {
     const i = createIntents(500);
     expect(i.settled("play", 0)).toBe(true);

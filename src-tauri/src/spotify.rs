@@ -15,9 +15,20 @@ const API: &str = "https://api.spotify.com/v1";
 fn api_error(status: u16, path: &str, body: &str) -> String {
     match status {
         401 => format!("AUTH_EXPIRED: Spotify API 401: {body}"),
-        404 if path.starts_with("/me/player") => format!("NO_ACTIVE_DEVICE: Spotify API 404: {body}"),
+        // only a 404 that is about the device: a player 404 can also mean "that context
+        // doesn't exist" (a refused mix), which must not look like a missing device
+        404 if path.starts_with("/me/player") && is_device_404(body) => {
+            format!("NO_ACTIVE_DEVICE: Spotify API 404: {body}")
+        }
         _ => format!("Spotify API {status}: {body}"),
     }
+}
+
+/// Spotify's no-device 404 says `"reason": "NO_ACTIVE_DEVICE"` or names the device
+/// ("No active device found", "Device not found"); an empty body counts as one too.
+fn is_device_404(body: &str) -> bool {
+    let b = body.to_ascii_lowercase();
+    b.trim().is_empty() || b.contains("no_active_device") || b.contains("device")
 }
 
 /// Turns an absolute `next` URL into a path for `get`.
@@ -769,8 +780,11 @@ mod tests {
     #[test]
     fn api_error_codes() {
         assert!(api_error(401, "/me/playlists", "x").starts_with("AUTH_EXPIRED"));
-        assert!(api_error(404, "/me/player/play?device_id=1", "x").starts_with("NO_ACTIVE_DEVICE"));
-        assert!(api_error(404, "/me/player", "x").starts_with("NO_ACTIVE_DEVICE"));
+        let no_device = r#"{"error":{"status":404,"message":"Player command failed: No active device found","reason":"NO_ACTIVE_DEVICE"}}"#;
+        assert!(api_error(404, "/me/player/play?device_id=1", no_device).starts_with("NO_ACTIVE_DEVICE"));
+        assert!(api_error(404, "/me/player", "").starts_with("NO_ACTIVE_DEVICE"));
+        let gone = r#"{"error":{"status":404,"message":"Resource not found"}}"#;
+        assert_eq!(api_error(404, "/me/player/play?device_id=1", gone), format!("Spotify API 404: {gone}"));
         assert_eq!(api_error(404, "/albums/x", "nope"), "Spotify API 404: nope");
         assert_eq!(api_error(500, "/me/player", "boom"), "Spotify API 500: boom");
     }

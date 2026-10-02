@@ -774,6 +774,7 @@ let volTimer = null;
 let volSeq = 0; // the intent of the current burst of moves
 let volBefore = null; // the volume before that burst: what a failure puts back
 let volDevice = null; // the device the burst started on: a transfer meanwhile must not get its volume
+let volPercent = null; // the level the burst asks for: a poll may replace state.volume meanwhile
 const volKey = (deviceId) => `volume:${deviceId || ""}`; // volume intents are per device
 let unmuteTo = 50;
 let volumeOpen = false; // the narrow-screen slider popover
@@ -788,7 +789,7 @@ function setVolume(pct) {
     volSeq = intents.start(volKey(volDevice));
     volBefore = state.volume;
   }
-  state.volume = v;
+  state.volume = volPercent = v;
   renderVolume();
   clearTimeout(volTimer);
   volTimer = setTimeout(sendVolume, VOLUME_QUIET_MS);
@@ -796,7 +797,7 @@ function setVolume(pct) {
 
 function sendVolume() {
   volTimer = null;
-  const percent = state.volume;
+  const percent = volPercent;
   const before = volBefore;
   const deviceId = volDevice;
   // a failure puts the old level back only while that device is still the one on screen
