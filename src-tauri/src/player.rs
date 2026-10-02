@@ -815,35 +815,44 @@ fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32,
     }
 }
 
+/// A local command's result, logged (an error as a warning).
+fn logged(what: &str, r: Result<(), String>) -> Result<(), String> {
+    match &r {
+        Ok(()) => log::info!(target: "needle::cmd", "{what}"),
+        Err(e) => log::warn!(target: "needle::cmd", "{what} failed: {e}"),
+    }
+    r
+}
+
 #[tauri::command]
 pub fn local_play(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::play)
+    logged("play", engine.with_spirc(Spirc::play))
 }
 
 #[tauri::command]
 pub fn local_pause(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::pause)
+    logged("pause", engine.with_spirc(Spirc::pause))
 }
 
 #[tauri::command]
 pub fn local_next(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::next)
+    logged("next", engine.with_spirc(Spirc::next))
 }
 
 #[tauri::command]
 pub fn local_prev(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::prev)
+    logged("prev", engine.with_spirc(Spirc::prev))
 }
 
 #[tauri::command]
 pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), String> {
-    engine.with_spirc(|s| s.set_position_ms(position_ms))
+    logged(&format!("seek {position_ms}"), engine.with_spirc(|s| s.set_position_ms(position_ms)))
 }
 
 /// `percent` 0–100.
 #[tauri::command]
 pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), String> {
-    engine.with_spirc(|s| s.set_volume(volume_from_percent(percent)))
+    logged(&format!("volume {percent}"), engine.with_spirc(|s| s.set_volume(volume_from_percent(percent))))
 }
 
 /// Loads a context or a track list on this Mac's speaker. Activates the device first: Spirc
@@ -866,6 +875,7 @@ pub fn local_load(
         LoadSource::Context(c) => Source::Context { context_uri: c.clone() },
         LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
     };
+    log::info!(target: "needle::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
     let request = load_request(source, track_uri.clone(), position_ms, play, m);
     engine.with_spirc(|s| {
         s.activate()?;

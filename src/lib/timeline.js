@@ -81,7 +81,8 @@ export function coverTarget(item, ctx = {}) {
   const list = ctx.listUris && (!ctx.nowUri || ctx.listUris.includes(ctx.nowUri)) ? ctx.listUris : null;
   const fromList = () => {
     const i = list ? list.indexOf(uri) : -1;
-    return i < 0 ? null : { uris: list.slice(i), trackUri: uri };
+    // the whole list with a start track: Back still has the songs before it
+    return i < 0 ? null : { uris: list, trackUri: uri };
   };
   if (item.role === "next") {
     const { contextUri, members } = ctx;

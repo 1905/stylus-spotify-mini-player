@@ -296,6 +296,7 @@ impl Live {
 
     fn on_event(&mut self, event: &PlayerEvent, now: Instant) {
         let uri = |id: &librespot_core::SpotifyUri| id.to_uri().unwrap_or_default();
+        log_event(event);
         match event {
             PlayerEvent::SessionConnected { .. } => {
                 self.has_track = false;
@@ -497,6 +498,24 @@ pub fn describe(s: &Saved) -> String {
         s.track_uri.as_deref().unwrap_or("(first)"),
         s.position_ms
     )
+}
+
+/// One log line per player event that matters for debugging (not the position ticks).
+fn log_event(event: &PlayerEvent) {
+    match event {
+        PlayerEvent::PositionCorrection { .. } | PlayerEvent::PositionChanged { .. } => {}
+        PlayerEvent::TrackChanged { audio_item } => {
+            log::info!(target: "needle::player", "track {} \"{}\" ({} ms)", audio_item.uri, audio_item.name, audio_item.duration_ms)
+        }
+        PlayerEvent::Unavailable { track_id, .. } => log::warn!(target: "needle::player", "unavailable: {track_id:?}"),
+        other => log::info!(target: "needle::player", "{}", event_summary(other)),
+    }
+}
+
+/// The event's name and its small fields, without the debug dump of whole audio items.
+fn event_summary(event: &PlayerEvent) -> String {
+    let s = format!("{event:?}");
+    if s.len() > 240 { format!("{}…", &s[..s.char_indices().nth(240).map_or(s.len(), |(i, _)| i)]) } else { s }
 }
 
 #[cfg(test)]

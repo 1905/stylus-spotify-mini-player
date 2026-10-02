@@ -471,7 +471,9 @@ let runNowUri = null; // the song the run was last built around: a new one retur
 function renderRun() {
   const track = $("runTrack");
   const prev = measure(track);
-  const items = buildRun({ history: history(), now: state.now, queue: state.queue }, RUN_LIMITS);
+  // while a play loads, its preview is the big cover and the old queue is gone
+  const loading = isLoading();
+  const items = buildRun({ history: history(), now: shownTrack(), queue: loading ? [] : state.queue }, RUN_LIMITS);
   runItems = new Map(items.map((it) => [it.key, it]));
 
   const old = new Map([...track.querySelectorAll(".cover")].map((el) => [el.dataset.key, el]));
@@ -688,7 +690,9 @@ function setNowArtist(html) {
 }
 
 function renderNow() {
-  const t = state.now;
+  const t = shownTrack();
+  $("stage").classList.toggle("is-loading", isLoading());
+  $("stage").classList.toggle("is-starting", playPending() && !shownTrack());
   const title = $("nowTitle");
   if (t) {
     title.classList.remove("is-connecting");
@@ -700,7 +704,11 @@ function renderNow() {
   }
   let head = "Nothing playing";
   let line = "Pick a playlist from your library to start.";
-  if (state.mode === "other" && state.device) {
+  const starting = playPending() && !state.now; // a play of an unknown track: a loader, never "Nothing playing"
+  if (starting) {
+    head = "Loading…";
+    line = "";
+  } else if (state.mode === "other" && state.device) {
     const name = labelOf(state.device);
     head = name === HERE ? "Playing here" : `Playing on ${name}`;
     line = "An ad or a podcast is on. Songs show up here.";
@@ -715,7 +723,7 @@ function renderNow() {
     line = "Your Mac, phone, or speaker — then press play.";
   }
   title.textContent = head;
-  title.classList.toggle("is-connecting", !state.loaded && !gaveUp(failures));
+  title.classList.toggle("is-connecting", starting || (!state.loaded && !gaveUp(failures)));
   setNowArtist("");
   setText("nowAlbum", "");
   setText("emptyState", line);
@@ -986,7 +994,8 @@ async function playSource(deviceId, src) {
   }
   if (src.contextUri) return invoke("play_context", { deviceId, contextUri: src.contextUri, trackUri: src.trackUri });
   // the Web API play has no start offset here: the list starts at the track
-  return invoke("play_on_device", { deviceId, uris: src.uris });
+  const at = src.trackUri ? src.uris.indexOf(src.trackUri) : 0;
+  return invoke("play_on_device", { deviceId, uris: at > 0 ? src.uris.slice(at) : src.uris });
 }
 
 /**
@@ -995,6 +1004,7 @@ async function playSource(deviceId, src) {
  * row; refused(e): true for an error the caller handles itself (the play then counts as failed).
  */
 async function startPlay(src, { kind, origin = null, row = null, refused = null, members = null } = {}) {
+  preview = kind === "resume" ? null : previewOf(src);
   const token = startPending(kind, src.trackUri || null, row);
   applog("info", `play ${kind}: ${JSON.stringify({ ...src, uris: src.uris && src.uris.length })} on ${state.device && state.device.name}`);
   let handled = false;
@@ -1016,6 +1026,24 @@ async function startPlay(src, { kind, origin = null, row = null, refused = null,
 }
 
 // ---------- pending play: spinner, the clicked row, an 8s timeout ----------
+
+const seenTracks = new Map(); // uri → a track some list showed: what a play is about to start
+let preview = null; // the track a pending play starts, shown at once (or {} when unknown)
+
+/** What a play of src starts, as far as the lists on screen know. */
+function previewOf(src) {
+  const uri = src.trackUri || (src.uris && src.uris[0]) || (src.contextUri && !state.shuffle && (knownRows.get(src.contextUri) || [])[0]);
+  return (uri && seenTracks.get(uri)) || {};
+}
+
+/** The track on screen: a pending play's preview until Spotify reports that track, else the real one. */
+function shownTrack() {
+  if (preview && playPending() && !(state.now && preview.uri && state.now.uri === preview.uri)) return preview.uri ? preview : null;
+  return state.now;
+}
+
+/** A play is starting and Spotify hasn't reported its track yet. */
+const isLoading = () => Boolean(preview && playPending() && shownTrack() !== state.now);
 
 const pending = createPending();
 let pendingTimer = null;
@@ -1057,6 +1085,7 @@ function clearPending() {
 
 function renderPending(render = true) {
   if (!pending.current()) {
+    preview = null;
     clearTimeout(pendingTimer);
     pendingTimer = null;
     if (pendingRow) pendingRow.classList.remove("is-pending");
@@ -1064,6 +1093,7 @@ function renderPending(render = true) {
   }
   if (!render || $("stage").hidden) return;
   renderNow();
+  renderRun(); // the preview's cover comes in big, or leaves when the play ends
   renderChrome();
 }
 
@@ -2411,6 +2441,7 @@ const QUEUE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2
  * The title button covers the whole row (CSS), so a click anywhere plays it; the artist links and "+" sit on top.
  */
 function trackRow(t, i, { num, art }) {
+  seenTracks.set(t.uri, t);
   const local = isLocalFile(t.uri);
   const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}${local ? " is-local" : ""}`;
   const tip = local ? "A local file: play it in Spotify" : "";
@@ -3199,14 +3230,29 @@ const PLAY_URIS_MAX = 200;
  * name: the list's name, for the playlist panel (Spotify names no context for a uris play).
  */
 async function playFrom(tracks, i, { name = null, ...opts } = {}) {
-  // Spotify lists local files in playlists but rejects them in play requests
-  // capped: Liked Songs can hold 1000 rows, and Spotify's limit for one play request is unknown
-  const uris = tracks.slice(i).map((t) => t.uri).filter((u) => !isLocalFile(u)).slice(0, PLAY_URIS_MAX);
+  const t = tracks[i];
+  if (!t || isLocalFile(t.uri)) return;
   // the whole list, so the panel shows what came before the clicked song too (one song is no list)
-  if (uris.length && tracks.length > 1) lastList = { tracks: tracks.filter((t) => t && t.uri), name, origin: opts.origin || null };
+  if (tracks.length > 1) lastList = { tracks: tracks.filter((x) => x && x.uri), name, origin: opts.origin || null };
+  const ctx = originUri(opts.origin);
+  let src;
+  if (ctx && offsettable(ctx)) {
+    // a playlist/album plays as itself from the clicked song: nothing is cut, and Back has
+    // the songs before it (a list from the clicked song on had none: Back did nothing)
+    src = { contextUri: ctx, trackUri: t.uri };
+  } else {
+    // a list without a context: the songs around the clicked one, so Back works here too.
+    // Spotify lists local files but rejects them in play requests; the cap is for Liked's 1000 rows
+    const all = tracks.map((x) => x.uri).filter((u) => !isLocalFile(u));
+    const at = all.indexOf(t.uri);
+    const from = Math.max(0, Math.min(at - PLAY_URIS_BEFORE, all.length - PLAY_URIS_MAX));
+    src = { uris: all.slice(from, from + PLAY_URIS_MAX), trackUri: t.uri };
+  }
   const rev = overlayRev;
-  if ((await playUris(uris, opts)) && rev === overlayRev) closeOverlay();
+  if ((await startPlay(src, { kind: "list", ...opts })) && rev === overlayRev) closeOverlay();
 }
+
+const PLAY_URIS_BEFORE = 50; // songs kept before the clicked one in a uris play
 
 const playDetailFrom = (i, row = null) => playFrom(detailTracks, i, { origin: originOf(curDetail), row, name: curDetail && curDetail.name });
 
