@@ -703,7 +703,20 @@ where
                         break
                     },
                     e = get_url() => e
-                }?;
+                };
+                // rust-spotify patch: upstream returns here (`?`), which ends the dealer worker on
+                // one failed token refresh while the session stays valid, leaving Spirc deaf to
+                // remote commands forever. Retry like a failed connect instead.
+                let url = match url {
+                    Ok(url) => url,
+                    Err(e) => {
+                        error!("Error while getting the dealer URL: {e}");
+                        select! {
+                            () = shared.closed() => break,
+                            () = tokio::time::sleep(RECONNECT_INTERVAL) => continue,
+                        }
+                    }
+                };
 
                 match connect(&url, proxy.as_ref(), &shared).await {
                     Ok((s, r)) => tasks = (init_task(s), init_task(r)),

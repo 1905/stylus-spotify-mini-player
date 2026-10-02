@@ -44,7 +44,8 @@ codegen-units = 1
 # panic = "unwind" (default): librespot's audio output panics when no output device exists; abort would take the whole app down
 strip = true
 
-# librespot-core 0.8.0 exits the process on a non-Premium account (session.rs check_catalogue);
-# vendored with that exit removed. Re-apply when upgrading librespot.
+# librespot-core 0.8.0, vendored with 2 patches (re-apply when upgrading librespot):
+# 1. session.rs check_catalogue: no exit(1) on a non-Premium account (would kill the app)
+# 2. dealer/mod.rs: a failed dealer-URL/token fetch retries instead of ending the worker
 [patch.crates-io]
 librespot-core = { path = "vendor/librespot-core" }
