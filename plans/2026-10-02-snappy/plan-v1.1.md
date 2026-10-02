@@ -1,7 +1,7 @@
-# Snappy Implementation Plan v1.0
+# Snappy Implementation Plan v1.1
 
 **Date:** 2026-10-02
-**Status:** superseded by v1.1
+**Status:** approved (v1.1 = v1.0 + Astra plan review: the 4 HIGH applied, plus med #5 and #10 because the feature fails without them; med #6–#9 skipped by the crit/high rule)
 **Spec:** ./spec.md
 **Goal:** Resume the last session paused on launch; local (no-cloud) controls and loads on "The Run"; parallel + cached lists; clear loaders.
 **Architecture:**
@@ -43,8 +43,9 @@
 | `local_play` / `local_pause` / `local_next` / `local_prev` | — | null | `Err("ENGINE_NOT_READY: …")` when no Spirc |
 | `local_seek` | `{positionMs}` | null | u32 ms |
 | `local_volume` | `{percent}` | null | 0–100 → `u16` = round(percent × 65535 / 100) |
-| `local_load` | `{contextUri?, uris?, trackUri?, positionMs, play}` | null | Exactly one of `contextUri` / `uris` (≤ 200). `trackUri` → `PlayingTrack::Uri`, `positionMs` → `seek_to`, `play` → `start_playing`. Built with `LoadRequest::from_context_uri` / `from_tracks`. Err as above; Err `BAD_ARGS` if both or neither of `contextUri` and `uris` are given |
-| `cache_get` | `{key}` | `Value \| null` | Disk cache read; never errors (corrupt → null) |
+| `local_load` | `{contextUri?, uris?, trackUri?, positionMs, play}` | null | **Sends `spirc.activate()` first, then `spirc.load(..)`** on the same ordered command channel: librespot-connect 0.8.0 ignores every command, Load included, while the device is inactive (`spirc.rs:660`). The returned Ok only means "queued"; the JS pending-play machine confirms the track really loaded (Astra #1). | Exactly one of `contextUri` / `uris` (≤ 200). `trackUri` → `PlayingTrack::Uri`, `positionMs` → `seek_to`, `play` → `start_playing`. Built with `LoadRequest::from_context_uri` / `from_tracks`. Err as above; Err `BAD_ARGS` if both or neither of `contextUri` and `uris` are given |
+| `cache_get` | `{account, key}` | `Value \| null` | Disk cache read; never errors (corrupt → null) |
+| `me_id` | — | `string` | `/me` id (account scoping, lastSession.accountId) |
 | `get_playlist_tracks` (changed) | `{playlistId, snapshotId?}` | `[Track]` | With a `snapshotId` and a cache hit for `playlist:<id>:<snapshotId>`, it returns from cache with no request. Writes the cache on success |
 | `get_album_tracks` (changed) | `{albumId}` | `[Track]` | Cached forever under `album:<id>` |
 | `get_saved_tracks` / `get_saved_albums` / `get_followed_artists` / `get_top` / `get_playlists` (changed) | same | same | Always fetch, then write the cache under `liked`, `albums`, `following`, `top:<kind>:<range>:<limit>`, `playlists` |
@@ -59,10 +60,17 @@
 - `async fn pages_parallel(first: Value, path_for_offset: impl Fn(usize) -> String, page_size, max_items, concurrency = 4) -> Result<Vec<Value>, String>`.
 - It reads `total` from the first page, then fetches the remaining offsets with at most `concurrency` requests in flight, and returns the items in offset order.
 - Any page error fails the whole call.
+- `get_playlist_tracks` must add `total` to its `fields` projection (`total,next,items(...)`) (Astra med #5): without it the helper has no count. If `total` is missing anyway, fall back to the serial `next` walk. Test the real request path string.
 - Used by `get_playlist_tracks` (page 50; limit 100 returns 403), `get_saved_tracks` (≤ 1000) and `get_saved_albums` (≤ 200).
 - `get_followed_artists` stays cursor-paged and serial.
 
 ### Cache (cache.rs)
+
+- **Account-scoped (Astra #4):** every key is prefixed with the verified account id, `<accountId>/…`.
+  - JS learns the id once from a new `me_id` command (`/me` id, cached in memory for the session).
+  - JS never reads the cache before that id is known. The id is captured when each request starts and passed as `account` to every cached command.
+  - On logout/account change, memory caches are dropped; disk entries of another account are simply never read.
+  - **Test:** switching accounts with a failed refresh shows no rows from the other account.
 
 - **Location:** `<app_dir>/cache/lists/<sha1(key)>.json`, written with `write_private`. The body is `{key, saved_at, value}`.
 - **Interface:**
@@ -73,7 +81,8 @@
 
 ### JS: routing (transport)
 
-- `isLocal()` is true when `engine.state === "ready"` and `state.device?.id === engine.device_id`.
+- `isLocal(deviceId)` is true when `engine.state === "ready"`, `deviceId === engine.device_id` **and the last poll's active device is that id**. Ready means connected, not active: Spirc ignores play/pause/seek/next/prev/volume while inactive (Astra #1). An inactive The Run goes through the Web API (transfer/play) or `local_load`, which activates.
+- `deviceId` is the device the command was **captured for**, not `state.device` at send time. Volume passes its captured `volDevice` (Astra med #6, free with this signature).
 - `togglePlay` / `skip` / `seekTo` / volume send:
   - When `isLocal()`, invoke `local_play`/`local_pause` / `local_next`/`local_prev` / `local_seek` / `local_volume`.
   - Otherwise use the existing Web API invoke.
@@ -84,7 +93,10 @@
 
 ### JS: resume
 
-- **localStorage `therun.lastSession`:** `{contextUri, uris, trackUri, positionMs, savedAt}`. `uris` is set only when the app started playback from a URI list (no context), capped at 200.
+- **localStorage `therun.lastSession`:** `{accountId, contextUri, origin, uris, trackUri, positionMs, savedAt}`.
+  - **`origin`** (Astra #10, the user's "same playlist") is `{kind: "playlist"|"album", id}` when the user started playback from a detail view. `playFrom` receives it from `openDetail`'s `curDetail`. On resume it becomes `contextUri = spotify:<kind>:<id>` with `trackUri`, so playback continues through the whole playlist, not a fragment.
+  - **`uris`:** kept only for sources without a playlist/album (search hits, top tracks), capped at 200.
+  - **Provenance** (Astra med #7, cheap here): when the poll shows a track that isn't in the saved source, the source fields are replaced by the poll's `context_uri`, or by `{uris: [track]}` when it has none.
 - **When it's written:**
   - when a play starts from the app (`playFrom` / `playMix` / `play_context`)
   - from the poll, at most every 10 s while a song is current: it updates `trackUri` and `positionMs`, and takes `contextUri` from the poll whenever it's non-null
@@ -92,10 +104,12 @@
   - on `beforeunload`
 - **When it runs:** once per app launch, after `engine.state === "ready"` and the first poll has completed.
   - **Skip** if `playback_state` shows `is_playing` on any device.
-  - **Choose `src`:**
-    - If `playback_state` is active and has a track (paused somewhere), use `{contextUri: s.context_uri, trackUri: s.track.uri, positionMs: s.progress_ms}`.
-    - Otherwise use `lastSession` (with `uris` if it has no `contextUri`).
-    - With neither, do nothing.
+  - **Choose `src`:** `resumeSource(playbackState, lastSession)` normalizes to exactly one source (Astra #2).
+    - **Paused somewhere, with `context_uri`:** `{contextUri, trackUri, positionMs}`.
+    - **Paused somewhere, without a context:** if `lastSession.origin` (see below) or `lastSession.uris` contains the track, use that. Else `{uris: [trackUri], trackUri, positionMs}`.
+    - **Nothing on Spotify:** `lastSession`, as saved.
+    - **Nothing at all:** null, so do nothing.
+    - **Tests:** paused with a context; paused without a context, with and without a matching saved list; no state.
   - **Load:** `local_load({...src, play: false})`, then `pickDevice`-style UI selection of "The Run" without a transfer call. The load itself makes it active.
   - **Failure:** ignore it quietly, start idle.
 - **Login/logout:** `showLogin` doesn't clear `lastSession` (same user). An `account_mismatch` or a different `/me` id clears it.
@@ -128,7 +142,10 @@
 - **Hover:** each visible `.cover[data-role="past"|"next"]` in `#run` gets a round `.cover-play` button, shown on hover/focus-within next to the existing caption (title + artist). The `now` cover gets none. There's no change to how many covers show (`maxPast` / `maxNext` stay) and no scrolling.
 - **Keyboard:** covers become focusable through the button (`aria-label="Play <title>"`). Enter/Space press it.
 - **Target** (pure `coverTarget(item, ctx)` in `src/lib/timeline.js`, tested):
-  - **next** cover: if the poll's `contextUri` is set, use `{contextUri, trackUri}`. Else, if `lastSession.uris` contains the track, use `{uris: lastSession.uris, trackUri}`. Else use `{uris: [trackUri, ...rest of visible queue uris]}`.
+  - **next** cover (Astra #3): **use a context only when membership is known.** The queue can hold tracks the user added from elsewhere ("+").
+  - **In the current context:** if the track is in the loaded context's track list (`origin`'s cached rows, or `lastSession.uris`), use `{contextUri | uris, trackUri}`.
+  - **Otherwise:** `{uris: [trackUri, ...the visible queue uris after it]}`.
+  - **Tests:** a queued track from another album during playlist playback.
   - **past** cover: the history row's own `context_uri` (recently-played rows carry it) gives `{contextUri: row.context_uri, trackUri}`. Else, if the track is in the current `lastSession.uris`, use that list. Else use `{uris: [trackUri]}`.
   - Never send a `trackUri` with a context the track isn't known to be in: Spotify would start that context from the top.
 - **Play:**
@@ -207,3 +224,21 @@
 - Command names are the same in the locked table, T1/T2 (Rust), T3 (JS + mock) and T4 (lib.rs registration).
 - Arg names are `positionMs`, `percent`, `contextUri`, `uris`, `trackUri`, `play`, `key`, `playlistId`, `snapshotId`, `albumId`. Rust uses snake_case: `position_ms`, `context_uri`, `track_uri`, `snapshot_id`.
 - The `therun.lastSession` shape is the same in the writer, `resumeSource` and the mock scenario.
+
+## Astra plan review (v1.0 → v1.1)
+
+Rating 5/10.
+
+**Applied:**
+- 4 HIGH:
+  - #1 Spirc ignores Load while inactive → activate first + JS verification
+  - #2 contextless resume → normalized source
+  - #3 queued covers outside the context → membership rule
+  - #4 cache across accounts → account-scoped keys
+- med #5 (`total` missing from the fields projection: parallel paging can't work without it)
+- med #10 (restore the origin playlist/album: the user's explicit "same playlist")
+- med #6 and #7 came for free with the #1/#2 changes
+
+**Skipped (med, crit/high rule):**
+- #8 id-based comparison for album/artist group refresh
+- #9 stale lookup when a playlist's snapshot changes: the user sees skeletons on the first open after a change
