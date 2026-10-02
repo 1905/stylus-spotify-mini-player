@@ -25,3 +25,11 @@ dirs = "5"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Size over speed: the app is a thin remote, its hot path is waiting on HTTP.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
