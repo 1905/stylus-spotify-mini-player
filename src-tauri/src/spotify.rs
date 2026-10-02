@@ -305,31 +305,67 @@ pub async fn search(query: String) -> Result<Value, String> {
     }
     let path = format!("/search?type=track,album&limit=10&q={}", urlencode(&query));
     let raw = get(&path).await?;
+    Ok(json!({
+        "tracks": search_items(&raw, "track"),
+        "albums": search_items(&raw, "album"),
+    }))
+}
 
-    let tracks: Vec<Value> = raw["tracks"]["items"]
-        .as_array()
-        .map(|items| items.iter().filter(|t| !t.is_null()).map(simplify_track).collect())
-        .unwrap_or_default();
+/// One search page's size: Spotify rejects limit > 10 on /search (400).
+const SEARCH_PAGE: u32 = 10;
+/// Spotify serves search results only while offset + limit <= 1000.
+const SEARCH_MAX: u32 = 1000;
 
-    let albums: Vec<Value> = raw["albums"]["items"]
-        .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter(|a| !a.is_null())
-                .map(|a| {
-                    json!({
-                        "id": a["id"],
-                        "name": a["name"],
-                        "artists": join_artists(&a["artists"]),
-                        "cover": first_image(&a["images"]),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+/// One page of search results of one kind ("track" | "album"), for the full
+/// results page. Returns `{items: [Track] | [Album], has_more}`; albums have the
+/// shape `search` gives them.
+#[tauri::command]
+pub async fn search_page(query: String, kind: String, offset: u32) -> Result<Value, String> {
+    let path = search_page_path(&query, &kind, offset)?;
+    if query.trim().is_empty() || offset.saturating_add(SEARCH_PAGE) > SEARCH_MAX {
+        return Ok(json!({ "items": [], "has_more": false }));
+    }
+    let raw = get(&path).await?;
+    // counted before nulls are dropped: a full page with a null in it still has a next page
+    let got = raw[format!("{kind}s")]["items"].as_array().map_or(0, |a| a.len());
+    Ok(json!({
+        "items": search_items(&raw, &kind),
+        "has_more": search_has_more(got, offset),
+    }))
+}
 
-    Ok(json!({ "tracks": tracks, "albums": albums }))
+/// The /search path of one page; an unknown kind is refused.
+fn search_page_path(query: &str, kind: &str, offset: u32) -> Result<String, String> {
+    if kind != "track" && kind != "album" {
+        return Err(format!("BAD_ARGS: unknown search kind {kind}"));
+    }
+    Ok(format!("/search?type={kind}&limit={SEARCH_PAGE}&offset={offset}&q={}", urlencode(query)))
+}
+
+/// A page of `got` raw items at `offset` has a next page: it was full and the
+/// next one still fits under Spotify's 1000-result cap.
+fn search_has_more(got: usize, offset: u32) -> bool {
+    got == SEARCH_PAGE as usize && offset.saturating_add(SEARCH_PAGE) < SEARCH_MAX
+}
+
+/// The simplified, non-null items of one kind from a /search answer.
+fn search_items(raw: &Value, kind: &str) -> Vec<Value> {
+    let items = raw[format!("{kind}s")]["items"].as_array().into_iter().flatten().filter(|v| !v.is_null());
+    if kind == "track" {
+        items.map(simplify_track).collect()
+    } else {
+        items.map(simplify_search_album).collect()
+    }
+}
+
+/// Spotify album object → `{id, name, artists, cover}`.
+fn simplify_search_album(a: &Value) -> Value {
+    json!({
+        "id": a["id"],
+        "name": a["name"],
+        "artists": join_artists(&a["artists"]),
+        "cover": first_image(&a["images"]),
+    })
 }
 
 /// All of an album's tracks (follows `tracks.next`). Album tracks lack album
@@ -744,6 +780,40 @@ mod tests {
     #[test]
     fn library_path_uses_track_uri_in_query() {
         assert_eq!(library_path("/me/library", "abc"), "/me/library?uris=spotify%3Atrack%3Aabc");
+    }
+
+    #[test]
+    fn search_page_path_shape() {
+        assert_eq!(
+            search_page_path("the xx", "track", 20).unwrap(),
+            "/search?type=track&limit=10&offset=20&q=the%20xx"
+        );
+        assert_eq!(search_page_path("a&b", "album", 0).unwrap(), "/search?type=album&limit=10&offset=0&q=a%26b");
+        assert!(search_page_path("x", "artist", 0).unwrap_err().starts_with("BAD_ARGS"));
+    }
+
+    #[test]
+    fn search_has_more_rules() {
+        assert!(search_has_more(10, 0));
+        assert!(search_has_more(10, 980));
+        assert!(!search_has_more(10, 990)); // the next page would pass the 1000 cap
+        assert!(!search_has_more(9, 0)); // a short page is the last
+        assert!(!search_has_more(0, 0));
+        assert!(!search_has_more(10, u32::MAX)); // no overflow
+    }
+
+    #[test]
+    fn search_items_drop_nulls() {
+        let raw = json!({
+            "tracks": {"items": [raw_track("1"), null, raw_track("2")]},
+            "albums": {"items": [null, {"id": "al", "name": "Alb", "artists": [{"name": "A"}], "images": [{"url": "u"}]}]}
+        });
+        let t = search_items(&raw, "track");
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[1]["uri"], "spotify:track:2");
+        let a = search_items(&raw, "album");
+        assert_eq!(a, vec![json!({"id": "al", "name": "Alb", "artists": "A", "cover": "u"})]);
+        assert!(search_items(&json!({}), "track").is_empty());
     }
 
     #[test]

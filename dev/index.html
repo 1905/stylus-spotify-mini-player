@@ -141,6 +141,10 @@
                 </div>
               </div>
               <p class="status" role="status" hidden></p>
+              <div id="topArtistsHead" class="group-head group-sub" hidden>
+                <h4 class="sub-title">Artists</h4>
+                <button class="see-all" type="button" data-see="topArtists" aria-label="See all your top artists" hidden>See all</button>
+              </div>
               <div id="topArtists" class="albums"></div>
               <div id="topTracks" class="rows"></div>
             </section>
@@ -150,17 +154,26 @@
               <div id="libList" class="rows"></div>
             </section>
             <section id="libAlbums" class="group" hidden>
-              <h3 class="group-title">Albums</h3>
+              <div class="group-head">
+                <h3 class="group-title">Albums</h3>
+                <button class="see-all" type="button" data-see="albums" aria-label="See all your albums" hidden>See all</button>
+              </div>
               <p class="status" role="status" hidden></p>
               <div class="albums"></div>
             </section>
             <section id="libFollowing" class="group" hidden>
-              <h3 class="group-title">Following</h3>
+              <div class="group-head">
+                <h3 class="group-title">Following</h3>
+                <button class="see-all" type="button" data-see="following" aria-label="See all the artists you follow" hidden>See all</button>
+              </div>
               <p class="status" role="status" hidden></p>
               <div class="albums"></div>
             </section>
             <section id="libMixes" class="group" hidden>
-              <h3 class="group-title">Spotify mixes</h3>
+              <div class="group-head">
+                <h3 class="group-title">Spotify mixes</h3>
+                <button class="see-all" type="button" data-see="mixes" aria-label="See all Spotify mixes" hidden>See all</button>
+              </div>
               <div class="albums"></div>
             </section>
           </div>
@@ -190,6 +203,36 @@
         </label>
         <div id="searchResults" class="palette-results" hidden></div>
       </div>
+    </div>
+
+    <div id="browse" class="overlay overlay-page" hidden>
+      <section id="page" class="page" role="dialog" aria-modal="true" aria-labelledby="pageTitle" tabindex="-1">
+        <header class="page-bar">
+          <button id="pageBack" class="btn btn-ghost btn-back" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            <span class="back-label">Back</span>
+          </button>
+          <button class="icon-btn" type="button" data-close aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+          </button>
+        </header>
+        <div id="pageBody" class="page-body">
+          <div class="page-inner">
+            <div class="page-head">
+              <p id="pageKicker" class="page-kicker"></p>
+              <h2 id="pageTitle" class="page-title"></h2>
+              <p id="pageSub" class="page-sub" hidden></p>
+            </div>
+            <div id="pageTabs" class="tabs page-tabs" role="tablist" aria-label="Result type" hidden>
+              <button id="pageTabTrack" class="tab" type="button" role="tab" data-tab="track" aria-selected="true" aria-controls="pageList">Songs</button>
+              <button id="pageTabAlbum" class="tab" type="button" role="tab" data-tab="album" aria-selected="false" aria-controls="pageList" tabindex="-1">Albums</button>
+            </div>
+            <div id="pageList" class="page-list" role="tabpanel"></div>
+            <p id="pageStatus" class="status page-status" role="status" hidden></p>
+            <button id="pageMore" class="btn btn-ghost page-more" type="button" hidden>Load more</button>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div id="toast" class="toast" role="status" hidden></div>

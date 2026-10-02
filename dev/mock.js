@@ -8,7 +8,10 @@
 // engine-login (the in-app player needs its login; "The Run" shows up after engine_login, picker open),
 // engine-down (the in-app player failed, picker open),
 // slow (list commands and plays take 2s more: skeletons, the play spinner, "Starting…"),
-// resume (the in-app player is ready, nothing plays, and a last session is stored: the app loads it paused).
+// resume (the in-app player is ready, nothing plays, and a last session is stored: the app loads it paused),
+// search-all (search "the xx", then the Songs "See all" page), library-all (Library, then the Albums "See all" page).
+// search_page pages through a pool built from the fixture (search hits first, then every other known
+// track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
 // The in-app player ("The Run") needs its login by default and isn't listed: engine_login lists it.
 // The local_* commands model librespot's Spirc: they act at once, but only while The Run is the active
 // device (an inactive Spirc ignores them); local_load activates it first. ENGINE_NOT_READY before ready.
@@ -25,7 +28,7 @@
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
-    "slow", "resume",
+    "slow", "resume", "search-all", "library-all",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -221,6 +224,38 @@
   const RANGES = { short_term: 0, medium_term: 3, long_term: 6 };
   const rotate = (list, n) => list.slice(n % (list.length || 1)).concat(list.slice(0, n % (list.length || 1)));
   const artistTiles = () => [...((fx.top || {}).artists || []), ...(fx.followed || [])];
+  // search_page pools: the captured search hits first, then every other known track / album
+  const TRACK_POOL_MAX = 97; // not a round number of pages: the last page is short
+  const trackPool = () => {
+    const first = ((fx.search || {}).tracks || []);
+    const seen = new Set(first.map((t) => t.uri));
+    return first.concat(allTracks().filter((t) => !seen.has(t.uri))).slice(0, TRACK_POOL_MAX);
+  };
+  const albumPool = () => {
+    const out = [];
+    const seen = new Set();
+    const add = (a, artists) => {
+      if (!a || !a.id || seen.has(a.id)) return;
+      seen.add(a.id);
+      out.push({ id: a.id, name: a.name, artists: a.artists || artists || "", cover: a.cover || null });
+    };
+    ((fx.search || {}).albums || []).forEach((a) => add(a));
+    (fx.savedAlbums || []).forEach((a) => add(a));
+    Object.values(fx.artists || {}).forEach((pg) => (pg.albums || []).forEach((a) => add(a, pg.artist && pg.artist.name)));
+    return repeatTo(out, ALBUM_POOL_MAX);
+  };
+  const ALBUM_POOL_MAX = 46; // the fixture holds ~20 distinct albums: repeated (new ids) to page past 30
+  /** list repeated up to n items; a repeat gets a new id (`<id>_r<k>`) so it isn't a duplicate. */
+  const repeatTo = (list, n) => {
+    const out = [];
+    for (let k = 0; list.length && out.length < n; k++) {
+      for (const a of list) {
+        if (out.length >= n) break;
+        out.push(k ? { ...a, id: `${a.id}_r${k}` } : a);
+      }
+    }
+    return out;
+  };
 
   const handlers = {
     auth_status: () => (scenario === "login" ? "login" : scenario === "reconnect" ? "reconnect" : "ok"),
@@ -241,6 +276,15 @@
       const s = fx.search || {};
       void query; // fixture holds one captured query; any query returns it
       return { tracks: clone((s.tracks || []).slice(0, 10)), albums: clone((s.albums || []).slice(0, 10)) };
+    },
+    // one page of 10 (Spotify's max on /search); has_more like the backend: a full page under the 1000 cap
+    search_page: ({ query, kind, offset }) => {
+      void query;
+      if (kind !== "track" && kind !== "album") throw "BAD_ARGS: unknown search kind " + kind;
+      if (scenario === "search-empty") return { items: [], has_more: false };
+      const pool = kind === "track" ? trackPool() : albumPool();
+      const items = pool.slice(offset, offset + 10);
+      return { items: clone(items), has_more: items.length === 10 && offset + 10 < 1000 && offset + 10 < pool.length };
     },
     get_queue: () => clone(state.queue),
     get_recently_played: () =>
@@ -377,7 +421,9 @@
       const tracks = [...added, ...base.filter((t) => state.saved.has(t.id))];
       return { tracks: clone(tracks), total: ((fx.liked || {}).total || base.length) + state.saved.size - likedBase };
     },
-    get_saved_albums: () => clone(fx.savedAlbums || []),
+    // library-all: enough saved albums for "See all" (the fixture has 3), from the search pool
+    get_saved_albums: () =>
+      clone(scenario === "library-all" ? albumPool().slice(0, 26) : fx.savedAlbums || []),
 
     // ---- v2: taste and artists ----
     get_top: ({ kind, range }) => {
@@ -533,16 +579,21 @@
         row?.click();
       }
     }
-    if (scenario === "search" || scenario === "search-empty") {
+    if (scenario === "search" || scenario === "search-empty" || scenario === "search-all") {
       (await waitFor("#searchBtn"))?.click();
       const input = await waitFor("#searchInput");
       if (input) {
-        input.value = scenario === "search" ? (fx.search && fx.search.query) || "the xx" : "zzqx nothing";
+        input.value = scenario === "search-empty" ? "zzqx nothing" : (fx.search && fx.search.query) || "the xx";
         input.dispatchEvent(new Event("input", { bubbles: true }));
       }
+      if (scenario === "search-all") (await waitFor('#searchResults [data-see="track"]'))?.click();
+    }
+    if (scenario === "library-all") {
+      (await waitFor("#libraryBtn"))?.click();
+      (await waitFor('#libAlbums [data-see="albums"]:not([hidden])'))?.click();
     }
   }
-  const DRIVEN = ["library", "library-detail", "search", "search-empty", "devices", "library-full", "artist", "mix-detail", "engine-login", "engine-down"];
+  const DRIVEN = ["library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-login", "engine-down"];
   if (DRIVEN.includes(scenario)) {
     window.addEventListener("load", () => setTimeout(drive, 300));
   }

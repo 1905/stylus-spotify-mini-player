@@ -12,6 +12,7 @@ import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
 import { SESSION_KEY, parseSession, playSession, sessionToSave, resumeSource, originUri } from "./lib/session.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
+import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -59,7 +60,7 @@ const state = {
   loaded: false,
   error: null,
   overlay: null,
-  gen: { detail: 0, search: 0 },
+  gen: { detail: 0, search: 0, page: 0 },
 };
 
 // ---------- errors ----------
@@ -129,6 +130,8 @@ function showLogin(kind) {
   resetLibrary();
   state.gen.search++;
   state.gen.detail++;
+  state.gen.page++; // a results page still loading must not land in the next session
+  page.lists = {};
   // the next login may be another account: drop everything that belonged to this one
   playlists = null;
   playlistsStale = false;
@@ -1677,8 +1680,10 @@ let returnFocus = null;
 
 let overlayRev = 0; // bumped on every overlay view change: a slow Play closes only the view it came from
 
-function openOverlay(name) {
+/** back: returning to a view the user already saw: no entry animation. */
+function openOverlay(name, back = false) {
   if (state.overlay === name) return;
+  $(name).classList.toggle("is-back", back);
   closeDevices(); // popovers belong to the stage, which goes inert
   closeVolume();
   overlayRev++;
@@ -1832,12 +1837,14 @@ function showList() {
   $("libBack").hidden = true;
   $("libLevel1").hidden = false;
   $("libTitle").hidden = false;
+  fitShelves(); // the width may have changed while a detail or a page was on screen
   $("sheetBody").scrollTop = listScroll;
 }
 
 function goBack() {
   const prev = navStack.pop();
-  if (prev) openDetail(prev, false);
+  if (prev === PAGE_ENTRY) returnToPage();
+  else if (prev) openDetail(prev, false);
   else showList();
 }
 
@@ -1933,8 +1940,64 @@ const shelfSkeleton = (group) => () => {
   const shelf = group.querySelector(".albums");
   if (shelf.children.length) return;
   group.hidden = false;
-  shelf.innerHTML = skeletonTiles(4);
+  shelf.innerHTML = skeletonTiles(gridCols(shelf));
 };
+
+// A Library shelf shows its first rows, as many tiles a row as the width fits; "See all" opens the
+// full page. Never a sideways-scrolling strip.
+const SHELF_ROWS = { topArtists: 1, albums: 2, following: 1, mixes: 1 };
+const SHELF_MAX = 24; // tiles put in a shelf: 2 rows of the widest grid (CSS: 150px tiles, 1200px content)
+const SHELVES = {
+  topArtists: { title: "Your top artists", list: () => topArtistList, one: "artist", many: "artists" },
+  albums: { title: "Albums", list: () => savedAlbums, one: "album", many: "albums" },
+  following: { title: "Following", list: () => followed, one: "artist", many: "artists" },
+  mixes: { title: "Spotify mixes", list: () => mixList, one: "mix", many: "mixes" },
+};
+const SHELF_EL = { topArtists: "topArtists", albums: "libAlbums", following: "libFollowing", mixes: "libMixes" };
+
+/** One shelf item's tile: artists round, albums and mixes square. */
+function shelfTile(kind, it, i) {
+  if (kind === "albums") return tile(it, i, { sub: esc(it.artists) });
+  if (kind === "mixes") return tile(it, i, { attrs: ` data-mix="${esc(it.id)}"` });
+  return tile({ name: it.name, cover: it.image }, i, { round: true });
+}
+
+const shelfGrid = (kind) => {
+  const el = $(SHELF_EL[kind]);
+  return el.classList.contains("albums") ? el : el.querySelector(".albums");
+};
+
+/** The columns of a laid-out grid; 4 while it isn't on screen (fitShelves runs again when it is). */
+function gridCols(el) {
+  const v = getComputedStyle(el).gridTemplateColumns;
+  return v && v !== "none" ? v.trim().split(/\s+/).length : 4;
+}
+
+/** Show a shelf's first rows at the current width; "See all" when some are left out. */
+function fitShelf(kind) {
+  const grid = shelfGrid(kind);
+  const limit = gridCols(grid) * SHELF_ROWS[kind];
+  [...grid.children].forEach((el, i) => (el.hidden = i >= limit));
+  $("libLevel1").querySelector(`[data-see="${kind}"]`).hidden = SHELVES[kind].list().length <= limit;
+}
+
+/** The window (or the list coming back) changed the columns: refit every shelf on screen. */
+function fitShelves() {
+  if (state.overlay !== "library" || $("libLevel1").hidden) return;
+  for (const kind of Object.keys(SHELVES)) fitShelf(kind);
+}
+
+/** Render a shelf's tiles and fit them to its rows. An open full page of it follows. */
+function renderShelf(kind) {
+  const list = SHELVES[kind].list();
+  shelfGrid(kind).innerHTML = list
+    .slice(0, SHELF_MAX)
+    .map((it, i) => shelfTile(kind, it, i))
+    .join("");
+  fitShelf(kind);
+  // fresh data for the shelf open on the full page: re-render it only if it changed (keeps focus)
+  if (state.overlay === "browse" && page.kind === kind && page.shelfSig !== JSON.stringify(list)) renderPageList();
+}
 
 function fillLiked() {
   const row = $("libLiked");
@@ -1959,7 +2022,7 @@ function fillAlbums() {
     (list) => {
       savedAlbums = (list || []).filter((a) => a && a.id);
       group.hidden = !savedAlbums.length;
-      group.querySelector(".albums").innerHTML = savedAlbums.map((a, i) => tile(a, i, { sub: esc(a.artists) })).join("");
+      renderShelf("albums");
     },
     "your albums",
     "albums",
@@ -1977,7 +2040,7 @@ function fillFollowing() {
     (list) => {
       followed = (list || []).filter((a) => a && a.id);
       group.hidden = !followed.length;
-      group.querySelector(".albums").innerHTML = followed.map((a, i) => tile({ name: a.name, cover: a.image }, i, { round: true })).join("");
+      renderShelf("following");
     },
     "the artists you follow",
     "following",
@@ -2011,7 +2074,7 @@ async function fillTop() {
     if (!topTrackList.length && !topArtistList.length) {
       group.hidden = false;
       $("topArtists").hidden = false;
-      $("topArtists").innerHTML = skeletonTiles(4);
+      $("topArtists").innerHTML = skeletonTiles(gridCols($("topArtists")));
       $("topTracks").innerHTML = skeletonRows(8);
     }
     Promise.all([diskGet(topTracksKey(range)), diskGet(aKey)]).then(([t, a]) => {
@@ -2039,8 +2102,9 @@ function renderTop(tracks, artists, failed) {
   topArtistList = artists.filter((a) => a && a.id);
   group.hidden = false;
   $("topTracks").innerHTML = topTrackList.map((t, i) => trackRow(t, i, { num: false, art: true })).join("");
-  $("topArtists").innerHTML = topArtistList.map((a, i) => tile({ name: a.name, cover: a.image }, i, { round: true })).join("");
   $("topArtists").hidden = !topArtistList.length;
+  $("topArtistsHead").hidden = !topArtistList.length;
+  renderShelf("topArtists"); // on screen first: it fits its tiles to the columns it has
   const err = failed.find((e) => !isScopeError(e));
   const empty = !topTrackList.length && !topArtistList.length;
   setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${reason(err)}` : empty ? "Nothing here yet for this time range." : "");
@@ -2113,7 +2177,7 @@ async function renderMixes() {
   mixList = list.map((m, i) => ({ id: m.id, name: (infos[i] && infos[i].name) || "Spotify mix", cover: (infos[i] && infos[i].cover) || null }));
   const group = $("libMixes");
   group.hidden = !mixList.length;
-  group.querySelector(".albums").innerHTML = mixList.map((m, i) => tile(m, i, { attrs: ` data-mix="${esc(m.id)}"` })).join("");
+  renderShelf("mixes");
 }
 
 /** Spotify refuses some of its own mixes: 403, or a 404 that isn't about the device. */
@@ -2161,6 +2225,8 @@ function resetLibrary() {
   for (const id of ["libLiked", "libTop", "libAlbums", "libFollowing", "libMixes"]) $(id).hidden = true;
   for (const el of $("libLevel1").querySelectorAll(".albums, #topTracks")) el.innerHTML = "";
   for (const el of $("libLevel1").querySelectorAll(".group .status")) setEl(el, "");
+  for (const el of $("libLevel1").querySelectorAll("[data-see]")) el.hidden = true;
+  $("topArtistsHead").hidden = true;
   setEl($("libLiked").querySelector(".row-sub"), "");
 }
 
@@ -2225,6 +2291,7 @@ const LIKED_ART = '<svg class="liked-icon" viewBox="0 0 24 24" aria-hidden="true
 
 const openArtist = (link) => openDetail({ kind: "artist", id: link.dataset.artist, name: link.textContent, cover: null, sub: "Artist" });
 const openArtistTile = (a) => a && openDetail({ kind: "artist", id: a.id, name: a.name, cover: a.image, sub: "Artist" });
+const openMix = (m) => m && openDetail({ kind: "mix", id: m.id, name: m.name, cover: m.cover, sub: "Made by Spotify" });
 
 /**
  * Level 2: {kind, id, name, cover, sub}, kind = playlist, album, liked, mix or artist.
@@ -2232,14 +2299,18 @@ const openArtistTile = (a) => a && openDetail({ kind: "artist", id: a.id, name: 
  */
 async function openDetail(src, push = true) {
   if (state.overlay !== "library") {
+    const fromPage = state.overlay === "browse";
+    if (fromPage) page.scroll = $("pageBody").scrollTop;
     openOverlay("library");
     $("sheet").focus();
-    navStack = []; // from the stage or Search: Back shows the list
-    if (!curDetail) listScroll = $("sheetBody").scrollTop;
+    // from the stage or Search: Back shows the list; from a full page: Back returns there
+    navStack = fromPage ? [PAGE_ENTRY] : [];
+    if (!curDetail && !fromPage) listScroll = $("sheetBody").scrollTop;
     loadGroups(); // so Back has a list to show
   } else if (push && curDetail) {
     navStack.push(curDetail);
-    if (navStack.length > NAV_MAX) navStack.shift();
+    // the oldest detail goes; the full page under them all stays
+    if (navStack.length > NAV_MAX) navStack.splice(navStack[0] === PAGE_ENTRY ? 1 : 0, 1);
   } else if (push) {
     listScroll = $("sheetBody").scrollTop;
     navStack = [];
@@ -2453,8 +2524,10 @@ const playDetailFrom = (i, row = null) => playFrom(detailTracks, i, { origin: or
 // ---------- search: songs + albums, debounced, last request wins ----------
 
 const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_PREVIEW = { track: 5, album: 6 }; // the palette's first songs and one row of albums
 let searchTimer = null;
-let searchHits = { tracks: [], albums: [] };
+const NO_HITS = { q: "", tracks: [], albums: [] };
+let searchHits = NO_HITS;
 
 function openSearch() {
   openOverlay("search");
@@ -2469,7 +2542,7 @@ function onSearchInput() {
   const gen = ++state.gen.search;
   const q = $("searchInput").value.trim();
   if (!q) {
-    searchHits = { tracks: [], albums: [] };
+    searchHits = NO_HITS;
     $("searchResults").innerHTML = "";
     $("searchResults").hidden = true;
     $("searchResults").removeAttribute("aria-busy");
@@ -2480,7 +2553,7 @@ function onSearchInput() {
 
 function searchMessage(text) {
   overlayRev++;
-  searchHits = { tracks: [], albums: [] };
+  searchHits = NO_HITS;
   const box = $("searchResults");
   box.innerHTML = `<p class="status">${esc(text)}</p>`;
   box.hidden = false;
@@ -2508,24 +2581,24 @@ async function runSearch(q, gen) {
   const tracks = ((res && res.tracks) || []).filter((t) => t && t.uri).slice(0, 10);
   const albums = ((res && res.albums) || []).filter((a) => a && a.id).slice(0, 10);
   if (!tracks.length && !albums.length) return searchMessage(`No songs or albums for "${q}".`);
-  searchHits = { tracks, albums };
+  searchHits = { q, tracks, albums };
 
+  // a preview: the top songs and one row of albums; "See all" opens the full results page
+  const see = (kind, what) =>
+    `<button class="see-all" type="button" data-see="${kind}" aria-label="${esc(`See all ${what} for “${q}”`)}">See all</button>`;
   let html = "";
   if (tracks.length) {
-    html += `<section class="group"><h3 class="group-title">Songs</h3><div class="rows">`;
-    html += tracks.map((t, i) => trackRow(t, i, { num: false, art: true })).join("");
+    html += `<section class="group"><div class="group-head"><h3 class="group-title">Songs</h3>`;
+    if (tracks.length > SEARCH_PREVIEW.track) html += see("track", "songs");
+    html += `</div><div class="rows">`;
+    html += tracks.slice(0, SEARCH_PREVIEW.track).map((t, i) => trackRow(t, i, { num: false, art: true })).join("");
     html += `</div></section>`;
   }
   if (albums.length) {
-    html += `<section class="group"><h3 class="group-title">Albums</h3><div class="albums">`;
-    html += albums
-      .map(
-        (a, i) =>
-          `<button class="album" type="button" data-album="${i}" title="${esc(a.name)}">` +
-          `<span class="art">${artHtml(a.cover, a.name)}</span>` +
-          `<span class="album-name">${esc(a.name)}</span><span class="album-sub">${esc(a.artists)}</span></button>`,
-      )
-      .join("");
+    html += `<section class="group"><div class="group-head"><h3 class="group-title">Albums</h3>`;
+    if (albums.length > SEARCH_PREVIEW.album) html += see("album", "albums");
+    html += `</div><div class="albums">`;
+    html += albums.slice(0, SEARCH_PREVIEW.album).map((a, i) => tile(a, i, { sub: esc(a.artists) })).join("");
     html += `</div></section>`;
   }
   overlayRev++; // replaced results are a new view
@@ -2535,11 +2608,264 @@ async function runSearch(q, gen) {
 }
 
 function onSearchClick(e) {
+  const see = e.target.closest("[data-see]");
+  if (see) return openSearchPage(see.dataset.see);
   // a song plays alone: the rest of the results aren't a playlist
   if (onTrackClick(e, searchHits.tracks, (i, row) => playFrom([searchHits.tracks[i]], 0, { row }))) return;
-  const al = e.target.closest("[data-album]");
-  const a = al && searchHits.albums[Number(al.dataset.album)];
+  const a = tileAt(e, searchHits.albums);
   if (a) openAlbum(a);
+}
+
+// ---------- the full page: "See all" from Search or a Library shelf ----------
+
+const FIRST_PAGES = 3; // 30 results up front, then 10 per "Load more"
+const PAGE_ENTRY = { kind: "page" }; // in the detail Back stack: Back returns to the full page
+const RANGE_LABEL = { short_term: "Last 4 weeks", medium_term: "Last 6 months", long_term: "All time" };
+
+const page = {
+  from: null, // "search" | "library": where Back goes
+  kind: null, // "search", or the shelf: "topArtists" | "albums" | "following" | "mixes"
+  query: "",
+  tab: "track", // search: "track" | "album"
+  lists: {}, // search: tab → {items, next, hasMore, loading, error, started}
+  opener: null, // the data-see of the "See all" that opened it: Back puts focus there
+  shelfSig: null, // the shelf items on screen, as JSON
+  scroll: 0, // the page's scroll when an item on it opened a detail
+  returnScroll: 0, // the search results' scroll when the page opened
+};
+
+/** A search list; seeded with the palette's first page (Spotify gives 10 a page). */
+const newList = (seed) => ({
+  items: seed ? seed.items : [],
+  next: seed ? PAGE_SIZE : 0,
+  hasMore: seed ? seed.full : true,
+  loading: false,
+  error: null,
+  started: false,
+});
+
+function openSearchPage(tab) {
+  if (!searchHits.q) return;
+  Object.assign(page, { from: "search", kind: "search", query: searchHits.q, tab, opener: tab });
+  page.returnScroll = $("searchResults").scrollTop;
+  // the palette asked for 10 of each: a full 10 means Spotify has more
+  page.lists = {
+    track: newList({ items: searchHits.tracks, full: searchHits.tracks.length >= PAGE_SIZE }),
+    album: newList({ items: searchHits.albums, full: searchHits.albums.length >= PAGE_SIZE }),
+  };
+  showPage();
+}
+
+function openShelfPage(kind) {
+  if (!SHELVES[kind]) return;
+  Object.assign(page, { from: "library", kind, query: "", opener: kind, lists: {} });
+  listScroll = $("sheetBody").scrollTop; // Back puts the Library where it was
+  showPage();
+}
+
+function showPage() {
+  state.gen.page++; // loads of an earlier page must not land here
+  openOverlay("browse");
+  page.scroll = 0;
+  renderPage();
+  $("pageBody").scrollTop = 0;
+  $("page").focus();
+  if (page.kind === "search") ensureLoaded(page.tab);
+}
+
+/** Back to the page from a detail opened on it: as it was. Its loads kept landing meanwhile. */
+function returnToPage() {
+  showList(); // the Library sheet underneath goes back to its list
+  openOverlay("browse", true);
+  renderPage();
+  $("pageBody").scrollTop = page.scroll;
+  $("page").focus({ preventScroll: true });
+}
+
+/** Back (or Esc): to the search palette with its query and results, or to the Library list. */
+function pageBack() {
+  state.gen.page++;
+  const from = page.from;
+  openOverlay(from, true);
+  if (from === "library") showList();
+  else $("searchResults").scrollTop = page.returnScroll;
+  const box = from === "library" ? $("libLevel1") : $("searchResults");
+  const see = box.querySelector(`[data-see="${page.opener}"]`);
+  const to = see && !see.hidden ? see : from === "library" ? $("sheet") : $("searchInput");
+  to.focus({ preventScroll: true });
+}
+
+/** What the page lists now: {kind: "track" | "album" | a shelf kind, items, list (search only)}. */
+function pageView() {
+  if (page.kind !== "search") return { kind: page.kind, items: SHELVES[page.kind].list(), list: null };
+  const list = page.lists[page.tab];
+  return { kind: page.tab, items: list.items, list };
+}
+
+function pageItemHtml(kind, it, i) {
+  if (kind === "track") return trackRow(it, i, { num: true, art: true });
+  if (kind === "album") return tile(it, i, { sub: esc(it.artists) });
+  return shelfTile(kind, it, i);
+}
+
+/** Skeletons for pages on their way: a full screen at first, a few under the list after. */
+const pageSkeleton = (kind, empty) => (kind === "track" ? skeletonRows(empty ? 10 : 4) : skeletonTiles(empty ? 12 : 6));
+
+function renderPage() {
+  overlayRev++; // a new view: a slow Play from the one before must not close it
+  const search = page.kind === "search";
+  $("pageBack").querySelector(".back-label").textContent = search ? "Search" : "Library";
+  $("pageBack").setAttribute("aria-label", search ? "Back to search" : "Back to Library");
+  setText("pageKicker", search ? "Search results for" : page.kind === "topArtists" ? "Your top" : "Your library");
+  const title = search ? `“${page.query}”` : SHELVES[page.kind].title;
+  $("pageTitle").textContent = title;
+  $("pageTitle").title = title;
+  $("pageTabs").hidden = !search;
+  for (const b of $("pageTabs").querySelectorAll("[data-tab]")) {
+    const on = b.dataset.tab === page.tab;
+    b.setAttribute("aria-selected", String(on));
+    b.tabIndex = on ? 0 : -1;
+  }
+  const list = $("pageList");
+  if (search) {
+    list.setAttribute("role", "tabpanel");
+    list.setAttribute("aria-labelledby", page.tab === "track" ? "pageTabTrack" : "pageTabAlbum");
+  } else {
+    list.removeAttribute("role");
+    list.removeAttribute("aria-labelledby");
+  }
+  renderPageList();
+}
+
+function renderPageList() {
+  const { kind, items, list } = pageView();
+  page.shelfSig = list ? null : JSON.stringify(items);
+  const el = $("pageList");
+  el.className = `page-list ${kind === "track" ? "rows" : "albums page-grid"}`;
+  el.innerHTML = items.map((it, i) => pageItemHtml(kind, it, i)).join("") + (list && list.loading ? pageSkeleton(kind, !items.length) : "");
+  if (list && list.loading && !items.length) el.setAttribute("aria-busy", "true");
+  else el.removeAttribute("aria-busy");
+  renderPageFoot();
+}
+
+/** The line under the list (empty, failed) and the Load more button. */
+function renderPageFoot() {
+  const { kind, items, list } = pageView();
+  const n = items.length;
+  const more = $("pageMore");
+  if (!list) {
+    const shelf = SHELVES[page.kind];
+    setText("pageSub", n ? plural(n, shelf.one, shelf.many) + (page.kind === "topArtists" ? ` · ${RANGE_LABEL[topRange]}` : "") : "");
+    setText("pageStatus", n ? "" : "Nothing here yet.");
+    more.hidden = true;
+    return;
+  }
+  setText("pageSub", "");
+  const noun = kind === "track" ? "songs" : "albums";
+  let status = "";
+  if (list.error) status = n ? `Couldn't load more — ${reason(list.error)}` : `Couldn't load ${noun} — ${reason(list.error)}`;
+  else if (!n && !list.loading && !list.hasMore) status = `No ${noun} for “${page.query}”.`;
+  setText("pageStatus", status);
+  // while the first pages load, the skeletons say it; after that the button does
+  more.hidden = !list.hasMore || (list.loading && !n) || (!list.started && !n);
+  more.textContent = list.loading ? "Loading…" : list.error ? "Try again" : "Load more";
+  if (list.loading) more.setAttribute("aria-disabled", "true");
+  else more.removeAttribute("aria-disabled");
+}
+
+/** The first pages of a search tab, once per page: 30 results (the palette's 10 count as the first page). */
+function ensureLoaded(tab) {
+  const list = page.lists[tab];
+  if (!list || list.started) return;
+  list.started = true;
+  loadPages(tab, list.next ? FIRST_PAGES - 1 : FIRST_PAGES);
+}
+
+const isShown = (tab, list) => state.overlay === "browse" && page.kind === "search" && page.tab === tab && page.lists[tab] === list;
+
+/** Load n more pages of a search tab, in parallel; they land in order (see foldPages). */
+async function loadPages(tab, n) {
+  const list = page.lists[tab];
+  if (!list || list.loading || !list.hasMore) return;
+  const offsets = pageOffsets(list.next, n);
+  if (!offsets.length) {
+    list.hasMore = false;
+    if (isShown(tab, list)) renderPageFoot();
+    return;
+  }
+  const gen = state.gen.page;
+  list.loading = true;
+  list.error = null;
+  if (isShown(tab, list)) {
+    $("pageList").insertAdjacentHTML("beforeend", pageSkeleton(tab, !list.items.length));
+    if (!list.items.length) $("pageList").setAttribute("aria-busy", "true");
+    renderPageFoot();
+  }
+  const query = page.query;
+  const results = await Promise.allSettled(offsets.map((offset) => invoke("search_page", { query, kind: tab, offset })));
+  if (gen !== state.gen.page) return; // the page closed (or another opened) meanwhile
+  list.loading = false;
+  const dead = results.find((r) => r.status === "rejected" && isCode(r.reason, "AUTH_EXPIRED"));
+  if (dead) return void overlayFailed(dead.reason);
+  const r = foldPages(list.items, offsets, results, tab === "track" ? (t) => t.uri : (a) => a.id);
+  const from = list.items.length;
+  list.items = list.items.concat(r.added);
+  list.next = r.next;
+  list.hasMore = r.hasMore;
+  list.error = r.error;
+  if (!isShown(tab, list)) return; // a detail or the other tab is on screen: rendered when it comes back
+  // appended, not re-rendered: focus and a pending row's spinner stay where they are
+  const el = $("pageList");
+  for (const sk of el.querySelectorAll(".is-skeleton")) sk.remove();
+  el.removeAttribute("aria-busy");
+  el.insertAdjacentHTML("beforeend", r.added.map((it, k) => pageItemHtml(tab, it, from + k)).join(""));
+  renderPageFoot();
+}
+
+function loadMore() {
+  const list = page.kind === "search" && page.lists[page.tab];
+  if (list) loadPages(page.tab, 1);
+}
+
+/** The Load more button scrolled into view: load the next page (not after an error: the button retries). */
+function onMoreSeen(entries) {
+  const list = page.kind === "search" && page.lists[page.tab];
+  if (!list || list.loading || list.error || !list.hasMore || !list.items.length) return;
+  if (entries.some((en) => en.isIntersecting)) loadMore();
+}
+
+function switchPageTab(tab) {
+  if (page.kind !== "search" || tab === page.tab || !page.lists[tab]) return;
+  page.tab = tab;
+  renderPage();
+  $("pageBody").scrollTop = 0;
+  ensureLoaded(tab);
+}
+
+/** Tabs: a click picks one; arrows move between them (and pick, like the Library's range tabs). */
+function onPageTabKey(e) {
+  const step = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
+  if (!step || !e.target.closest("[data-tab]")) return;
+  e.preventDefault();
+  const tabs = [...$("pageTabs").querySelectorAll("[data-tab]")];
+  const at = tabs.findIndex((b) => b.dataset.tab === page.tab);
+  const next = tabs[(at + step + tabs.length) % tabs.length];
+  switchPageTab(next.dataset.tab);
+  next.focus();
+}
+
+function onPageClick(e) {
+  const { kind, items } = pageView();
+  if (kind === "track") {
+    // a song plays alone, as in the palette: search results aren't a playlist
+    onTrackClick(e, items, (i, row) => playFrom([items[i]], 0, { row }));
+    return;
+  }
+  const it = tileAt(e, items);
+  if (!it) return;
+  if (kind === "album" || kind === "albums") openAlbum(it);
+  else if (kind === "mixes") openMix(it);
+  else openArtistTile(it);
 }
 
 // ---------- keyboard: Space = play/pause, Esc = close the overlay ----------
@@ -2547,11 +2873,12 @@ function onSearchClick(e) {
 const typing = (t) => t && t.closest && t.closest("input, textarea, select, [contenteditable]");
 
 function onKey(e) {
-  // Esc closes the innermost thing: a popover first, then the overlay
+  // Esc closes the innermost thing: a popover first, then a full page (back), then the overlay
   if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || state.overlay)) {
     e.preventDefault();
     if (devicesOpen) closeDevices(true);
     else if (volumeOpen) closeVolume(true);
+    else if (state.overlay === "browse") pageBack(); // a full page returns to where it came from
     else closeOverlay();
     return;
   }
@@ -2598,7 +2925,7 @@ async function boot() {
 
   $("libraryBtn").addEventListener("click", openLibrary);
   $("searchBtn").addEventListener("click", openSearch);
-  for (const id of ["library", "search"]) {
+  for (const id of ["library", "search", "browse"]) {
     $(id).addEventListener("click", (e) => e.target.closest("[data-close]") && closeOverlay());
     $(id).addEventListener("error", onImgError, true);
   }
@@ -2620,10 +2947,22 @@ async function boot() {
     const a = tileAt(e, savedAlbums);
     if (a) openAlbum(a);
   });
-  $("libMixes").addEventListener("click", (e) => {
-    const m = tileAt(e, mixList);
-    if (m) openDetail({ kind: "mix", id: m.id, name: m.name, cover: m.cover, sub: "Made by Spotify" });
+  $("libMixes").addEventListener("click", (e) => openMix(tileAt(e, mixList)));
+  $("libLevel1").addEventListener("click", (e) => {
+    const see = e.target.closest("[data-see]");
+    if (see) openShelfPage(see.dataset.see);
   });
+  $("pageBack").addEventListener("click", pageBack);
+  $("pageTabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tab]");
+    if (b) switchPageTab(b.dataset.tab);
+  });
+  $("pageTabs").addEventListener("keydown", onPageTabKey);
+  $("pageList").addEventListener("click", onPageClick);
+  $("pageMore").addEventListener("click", () => $("pageMore").getAttribute("aria-disabled") !== "true" && loadMore());
+  if (window.IntersectionObserver) {
+    new IntersectionObserver(onMoreSeen, { root: $("pageBody"), rootMargin: "0px 0px 240px 0px" }).observe($("pageMore"));
+  }
   $("detailRows").addEventListener("click", onDetailClick);
   $("detailPlay").addEventListener("click", onDetailPlay);
   $("nowArtist").addEventListener("click", (e) => {
@@ -2635,6 +2974,7 @@ async function boot() {
   document.addEventListener("keydown", onKey);
   document.addEventListener("keyup", onKey);
   addEventListener("resize", center);
+  addEventListener("resize", fitShelves);
   small.addEventListener("change", () => {
     closeVolume(); // the slider popover exists only on narrow screens
     renderVolume();
