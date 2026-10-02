@@ -1,14 +1,29 @@
 mod auth;
-mod local;
+mod player;
 mod spotify;
+
+use std::sync::Arc;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let engine = player::Engine::new(Arc::new(player::KeychainStore));
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(engine.clone())
+        .setup(|app| {
+            // the speaker "The Run" starts with the app (or waits in needs_login)
+            let engine = app.state::<player::Engine>().inner().clone();
+            engine.attach(app.handle().clone());
+            tauri::async_runtime::spawn(async move { engine.restart(None).await });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             auth::auth_status,
             auth::login,
+            player::engine_status,
+            player::engine_login,
+            player::engine_restart,
             spotify::get_playlists,
             spotify::get_playlist_tracks,
             spotify::search,
@@ -20,7 +35,6 @@ pub fn run() {
             spotify::play_on_device,
             spotify::resume,
             spotify::resume_at,
-            local::launch_local_spotify,
             spotify::pause,
             spotify::next_track,
             spotify::previous_track,
@@ -43,6 +57,12 @@ pub fn run() {
             spotify::get_followed_artists,
             spotify::add_to_queue
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.run(move |_, event| {
+        if let tauri::RunEvent::Exit = event {
+            // pause and leave Spotify Connect cleanly, so "The Run" doesn't linger as a device
+            engine.shutdown();
+        }
+    });
 }
