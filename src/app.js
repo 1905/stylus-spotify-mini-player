@@ -2,6 +2,7 @@
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK, extractColors } from "./lib/color.js";
 import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
+import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -33,6 +34,12 @@ const state = {
   mode: "idle", // "track": a song plays, "other": an ad or podcast plays, "idle": nothing
   now: null,
   isPlaying: false,
+  shuffle: false,
+  repeat: "off", // "off" | "context" | "track"
+  volume: null, // 0–100, null = unknown
+  supportsVolume: false,
+  contextUri: null, // what the current song plays from (playlist, album, mix)
+  saved: null, // the current song is in Liked Songs; null = unknown
   progressMs: 0,
   progressAt: 0,
   seekHoldUntil: 0,
@@ -91,10 +98,15 @@ function showLogin(kind) {
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
   clearTimeout(searchTimer); // a debounced search must not start in the next session
   clearTimeout(seekTimer); // nor a debounced seek
+  clearTimeout(volTimer); // nor a debounced volume change
+  volTimer = null;
+  savedChain = Promise.resolve(); // a heart command from the old session will never finish
   changesPending = 0;
   settleAfter = 0;
-  playPending = 0;
-  playSettleAfter = 0;
+  intents.reset();
+  heartGen++;
+  devicesGen++;
+  libraryDenied = false; // the next login may grant the library scopes
   state.gen.search++;
   state.gen.detail++;
   // the next login may be another account: drop everything that belonged to this one
@@ -102,7 +114,12 @@ function showLogin(kind) {
   listScroll = 0;
   $("libList").innerHTML = "";
   $("run").replaceChildren();
-  Object.assign(state, { mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null });
+  Object.assign(state, {
+    mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null,
+    shuffle: false, repeat: "off", volume: null, supportsVolume: false, contextUri: null, saved: null,
+  });
+  closeDevices();
+  closeVolume();
   closeOverlay();
   state.loginKind = LOGIN_COPY[kind] ? kind : "login";
   const copy = LOGIN_COPY[state.loginKind];
@@ -224,11 +241,19 @@ async function refresh(epoch) {
   state.mode = mode;
 
   if (active) {
-    state.device = { id: s.device_id, name: s.device_name };
-    // a play/pause still queued (or just landed) outranks what this poll saw
-    if (playPending === 0 && startedAt >= playSettleAfter) state.isPlaying = Boolean(s.is_playing);
+    // a click still queued (or just landed) outranks what this poll saw
+    const settled = (key) => intents.settled(key, startedAt);
+    if (settled("device")) state.device = { id: s.device_id, name: s.device_name };
+    if (settled("play")) state.isPlaying = Boolean(s.is_playing);
+    if (settled("shuffle")) state.shuffle = Boolean(s.shuffle);
+    if (settled("repeat")) state.repeat = s.repeat || "off";
+    if (settled("volume")) state.volume = s.volume_percent ?? null;
+    state.supportsVolume = Boolean(s.supports_volume);
+    state.contextUri = s.context_uri || null;
   } else {
     state.isPlaying = false;
+    state.supportsVolume = false;
+    state.contextUri = null;
   }
   // right after a local seek, Spotify may still report the old position: keep ours
   const seeking = track && state.now && track.uri === state.now.uri && performance.now() < state.seekHoldUntil;
@@ -243,6 +268,7 @@ async function refresh(epoch) {
   if (changed && state.now) observe(state.now, state.listenedMs);
   if (changed) state.listenedMs = 0;
   state.now = track;
+  if (changed) checkSaved(track);
 
   if (changed || modeChanged || !state.loaded) {
     // show the new track now: what's on screen is what a seek or a skip acts on.
@@ -266,7 +292,7 @@ async function refresh(epoch) {
     if (queue) state.queue = queue;
     if (recent) state.recent = recent;
     state.historyOk = Boolean(recent);
-    if (devices) setDevices(devices);
+    if (devices) setDevices(devices, startedAt);
     state.loaded = true;
     renderNow();
     renderRun();
@@ -286,7 +312,7 @@ async function refresh(epoch) {
     if (track && !sameUris(fresh, state.queue)) {
       state.queue = fresh;
       renderRun();
-    } else if (!track && setDevices(fresh)) {
+    } else if (!track && setDevices(fresh, startedAt)) {
       renderNow();
     }
   }
@@ -323,14 +349,18 @@ const sameUris = (a, b) => a.length === b.length && a.every((t, i) => t.uri === 
 
 const history = () => mergeHistory(state.recent, state.session, SESSION_MATCH_MS);
 
-/** Store a device list; with nothing playing, show its active (or first) device. Returns true if it changed. */
-function setDevices(list) {
+/**
+ * Store a device list; with nothing playing, show its active (or first) device, unless a device
+ * pick is still pending (listed before startedAt). Returns true if it changed.
+ */
+function setDevices(list, startedAt = performance.now()) {
   const changed = JSON.stringify(list) !== JSON.stringify(state.devices);
   state.devices = list;
-  if (state.mode === "idle") {
+  if (state.mode === "idle" && intents.settled("device", startedAt)) {
     const d = list.find((x) => x.is_active) || list[0];
     state.device = d ? { id: d.id, name: d.name } : null;
   }
+  if (changed && devicesOpen) renderDeviceList();
   return changed;
 }
 
@@ -447,11 +477,59 @@ function renderChrome() {
   const noDevice = state.devices && state.devices.length === 0 && mode === "idle";
   $("libraryBtn").classList.toggle("is-primary", mode === "idle" && !noDevice && state.loaded);
 
-  const dev = $("device");
-  dev.hidden = !state.device;
-  if (state.device) dev.querySelector(".device-name").textContent = state.device.name;
+  // hidden only until the first poll: with no device the button still opens the (empty) list
+  const dev = $("deviceBtn");
+  dev.hidden = !state.device && !state.loaded;
+  dev.classList.toggle("is-none", !state.device);
+  dev.querySelector(".device-name").textContent = state.device ? state.device.name : "No device";
+
+  const song = mode === "track";
+  const shuffle = $("shuffleBtn");
+  shuffle.disabled = !song;
+  shuffle.classList.toggle("is-on", state.shuffle);
+  shuffle.setAttribute("aria-pressed", String(state.shuffle));
+  const repeat = $("repeatBtn");
+  repeat.disabled = !song;
+  repeat.dataset.mode = state.repeat;
+  repeat.classList.toggle("is-on", state.repeat !== "off");
+  const label = REPEAT_LABEL[state.repeat] || REPEAT_LABEL.off;
+  repeat.setAttribute("aria-label", label);
+  repeat.title = label;
+
+  const heart = $("heartBtn");
+  const t = state.now;
+  heart.hidden = !song || !t || !t.id || isLocal(t.uri) || libraryDenied;
+  heart.disabled = state.saved === null; // unknown until is_saved answers
+  heart.classList.toggle("is-on", state.saved === true);
+  heart.setAttribute("aria-pressed", String(state.saved === true));
+  const heartLabel = state.saved ? "Remove from Liked Songs" : "Save to Liked Songs";
+  heart.setAttribute("aria-label", heartLabel);
+  heart.title = heartLabel;
+
+  renderVolume();
   renderProgress();
   startFrames();
+}
+
+const REPEAT_LABEL = { off: "Repeat", context: "Repeat: on", track: "Repeat: this song" };
+
+function renderVolume() {
+  const box = $("volume");
+  const v = state.volume;
+  box.hidden = state.mode === "idle" || !state.supportsVolume || v == null;
+  if (box.hidden) return closeVolume();
+  box.classList.toggle("is-muted", v === 0);
+  $("volFill").style.width = `${v}%`;
+  const slider = $("volSlider");
+  slider.setAttribute("aria-valuenow", String(v));
+  slider.setAttribute("aria-valuetext", `${v}%`);
+  // wide: the speaker mutes; narrow: it opens the slider
+  const btn = $("volBtn");
+  const label = small.matches ? "Volume" : v === 0 ? "Unmute" : "Mute";
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+  if (small.matches) btn.setAttribute("aria-expanded", String(volumeOpen));
+  else btn.removeAttribute("aria-expanded");
 }
 
 function progress() {
@@ -606,9 +684,26 @@ async function playUris(uris) {
   return ok;
 }
 
-let playSeq = 0; // counts play/pause clicks: only the latest one may undo the UI
-let playPending = 0; // play/pause commands queued or running
-let playSettleAfter = 0; // a poll must start after this to overwrite the play state
+// Play, shuffle, repeat, volume and a device pick flip the UI at once. A poll doesn't overwrite
+// one while its command is queued, or for PLAY_LAG_MS after it lands. Only the latest may undo the UI.
+const intents = createIntents(PLAY_LAG_MS);
+
+/**
+ * Send an optimistic setting through the player chain. The UI already shows it; if the latest
+ * command for key fails, revert() puts back what the device still has. Returns true on success.
+ */
+async function sendIntent(key, fn, revert, seq = intents.start(key)) {
+  const sess = authSession;
+  const ok = await withDevice(fn);
+  if (sess !== authSession) return false; // logged out meanwhile: the intents were reset
+  intents.finish(key, performance.now());
+  if (!ok && intents.latest(key, seq)) {
+    revert();
+    intents.drop(key);
+    renderChrome();
+  }
+  return ok;
+}
 
 /** Flip play/pause at once in the UI; the command joins the player chain in click order. */
 async function togglePlay() {
@@ -618,18 +713,301 @@ async function togglePlay() {
   state.progressAt = performance.now();
   const want = (state.isPlaying = !state.isPlaying);
   renderChrome();
-  const seq = ++playSeq;
+  await sendIntent(
+    "play",
+    async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")),
+    () => (state.isPlaying = !want), // the device still has the state before this click
+  );
+  kick();
+}
+
+async function toggleShuffle() {
+  if (state.mode !== "track") return;
+  const want = (state.shuffle = !state.shuffle);
+  renderChrome();
+  await sendIntent("shuffle", () => invoke("set_shuffle", { on: want }), () => (state.shuffle = !want));
+}
+
+/** off → context → track → off. */
+async function cycleRepeat() {
+  if (state.mode !== "track") return;
+  const before = state.repeat;
+  const mode = (state.repeat = nextRepeat(before));
+  renderChrome();
+  await sendIntent("repeat", () => invoke("set_repeat", { mode }), () => (state.repeat = before));
+}
+
+// ---------- volume: the UI moves at once, one set_volume after 200ms of quiet ----------
+
+const VOLUME_QUIET_MS = 200;
+let volTimer = null;
+let volSeq = 0; // the intent of the current burst of moves
+let volBefore = null; // the volume before that burst: what a failure puts back
+let unmuteTo = 50;
+let volumeOpen = false; // the narrow-screen slider popover
+
+function setVolume(pct) {
+  if (state.volume == null) return;
+  const v = Math.round(Math.min(100, Math.max(0, pct)));
+  if (v === state.volume) return;
+  if (!volTimer) {
+    // the first move of a burst: polls keep their hands off from now until its command lands
+    volSeq = intents.start("volume");
+    volBefore = state.volume;
+  }
+  state.volume = v;
+  renderVolume();
+  clearTimeout(volTimer);
+  volTimer = setTimeout(sendVolume, VOLUME_QUIET_MS);
+}
+
+function sendVolume() {
+  volTimer = null;
+  const percent = state.volume;
+  const before = volBefore;
+  sendIntent("volume", () => invoke("set_volume", { percent }), () => (state.volume = before), volSeq);
+}
+
+function toggleMute() {
+  if (state.volume == null) return;
+  if (state.volume > 0) unmuteTo = state.volume;
+  setVolume(state.volume > 0 ? 0 : unmuteTo);
+}
+
+function onVolBtn() {
+  if (!small.matches) return toggleMute();
+  if (volumeOpen) closeVolume(true);
+  else {
+    volumeOpen = true;
+    $("volume").classList.add("is-open");
+    renderVolume();
+    $("volSlider").focus();
+  }
+}
+
+function closeVolume(refocus = false) {
+  if (!volumeOpen) return;
+  volumeOpen = false;
+  $("volume").classList.remove("is-open");
+  $("volBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("volBtn").focus();
+}
+
+function volumeAt(ev) {
+  const r = $("volSlider").getBoundingClientRect();
+  setVolume(((ev.clientX - r.left) / r.width) * 100);
+}
+
+function volumeDown(ev) {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  $("volSlider").focus();
+  $("volSlider").setPointerCapture(ev.pointerId);
+  volumeAt(ev);
+}
+
+function volumeMove(ev) {
+  if ($("volSlider").hasPointerCapture(ev.pointerId)) volumeAt(ev);
+}
+
+/** Arrows ±5, Home/End: the ends. */
+function volumeKey(ev) {
+  const v = stepVolume(state.volume, ev.key);
+  if (v === null) return;
+  ev.preventDefault();
+  setVolume(v);
+}
+
+// ---------- heart: the current song in Liked Songs (not a player command) ----------
+
+// Bumped on each track change and heart click: an is_saved answer from before either is stale.
+let heartGen = 0;
+let libraryDenied = false; // the token lacks the library scopes: no heart this session
+let savedChain = Promise.resolve(); // save/unsave in click order, so the last click wins
+
+const isScopeError = (e) => /\b403\b|scope/i.test(String(e));
+
+/** Ask once per track whether it's in Liked Songs. */
+async function checkSaved(track) {
+  const gen = ++heartGen;
+  state.saved = null;
+  if (!track || !track.id || isLocal(track.uri) || libraryDenied) return;
+  try {
+    const saved = await invoke("is_saved", { trackId: track.id });
+    if (gen !== heartGen) return;
+    state.saved = Boolean(saved);
+  } catch (e) {
+    if (gen !== heartGen) return;
+    if (isCode(e, "AUTH_EXPIRED")) return expire();
+    if (isScopeError(e)) libraryDenied = true;
+    // other failures leave it unknown (disabled) until the next track
+  }
+  renderChrome();
+}
+
+async function toggleSaved() {
+  const t = state.now;
+  if (!t || !t.id || state.saved === null) return;
+  const want = !state.saved;
+  const gen = ++heartGen;
+  state.saved = want;
+  renderChrome();
   const sess = authSession;
-  playPending++;
-  const ok = await withDevice(async (id) => (want ? invoke("resume", { deviceId: await needDevice(id) }) : invoke("pause")));
-  if (sess !== authSession) return; // logged out meanwhile: the counters were reset
-  if (--playPending === 0) playSettleAfter = performance.now() + PLAY_LAG_MS;
-  if (!ok && seq === playSeq) {
-    state.isPlaying = !want; // the device still has the state before this click
-    playSettleAfter = 0;
+  const run = savedChain.then(() => (sess === authSession ? invoke(want ? "save_track" : "unsave_track", { trackId: t.id }) : null));
+  savedChain = run.catch(() => {});
+  try {
+    await run;
+  } catch (e) {
+    if (isCode(e, "AUTH_EXPIRED")) return expire();
+    if (isScopeError(e)) libraryDenied = true;
+    if (gen === heartGen) state.saved = !want; // still this click on this track: undo it
     renderChrome();
+    toast(`Spotify didn't respond: ${reason(e)}`);
+  }
+}
+
+// ---------- device picker ----------
+
+let devicesOpen = false;
+let devicesGen = 0; // the latest list_devices request: an older answer is dropped
+let devicesNote = ""; // loading or error line while there is no list to show
+
+function toggleDevices() {
+  if (devicesOpen) closeDevices(true);
+  else openDevices();
+}
+
+function openDevices() {
+  closeVolume();
+  devicesOpen = true;
+  $("devicePop").hidden = false;
+  $("deviceBtn").setAttribute("aria-expanded", "true");
+  renderDeviceList();
+  focusDevice(0);
+  refreshDevices();
+}
+
+function closeDevices(refocus = false) {
+  if (!devicesOpen) return;
+  devicesOpen = false;
+  devicesGen++; // a list still in flight would re-render a closed popover
+  $("devicePop").hidden = true;
+  $("deviceBtn").setAttribute("aria-expanded", "false");
+  if (refocus) $("deviceBtn").focus();
+}
+
+async function refreshDevices() {
+  const gen = ++devicesGen;
+  if (!state.devices) devicesNote = "Looking for devices…";
+  renderDeviceList();
+  let list;
+  try {
+    list = (await invoke("list_devices")) || [];
+  } catch (e) {
+    if (gen !== devicesGen) return;
+    if (isCode(e, "AUTH_EXPIRED")) return expire();
+    devicesNote = state.devices ? "" : `Couldn't load devices — ${reason(e)}`;
+    renderDeviceList();
+    return;
+  }
+  if (gen !== devicesGen) return;
+  devicesNote = "";
+  if (setDevices(list) && state.mode === "idle") renderNow();
+  renderDeviceList();
+  renderChrome();
+  // opened before the list was known: focus lands on its first row once there is one
+  if (devicesOpen && !$("deviceList").contains(document.activeElement)) focusDevice(0);
+}
+
+function renderDeviceList() {
+  const list = state.devices || [];
+  const cur = state.device && state.device.id;
+  const focused = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.device : null;
+  $("deviceList").innerHTML = list
+    .map((d, i) => {
+      const active = cur ? d.id === cur : d.is_active;
+      const tip = d.is_restricted ? "Spotify doesn't allow remote control of this device" : d.name;
+      return (
+        `<button class="device-row${active ? " is-active" : ""}" type="button" role="option" data-i="${i}" data-device="${esc(d.id)}"` +
+        ` aria-selected="${active}" title="${esc(tip)}"${d.is_restricted ? ' aria-disabled="true"' : ""} tabindex="-1">` +
+        `<span class="device-row-dot"></span><span class="device-row-name">${esc(d.name)}</span>` +
+        `<span class="device-row-type">${esc(d.type || "")}</span></button>`
+      );
+    })
+    .join("");
+  $("deviceList").hidden = !list.length;
+  const note = $("devicePop").querySelector(".device-note");
+  note.textContent = devicesNote || (state.devices && !list.length ? "Open Spotify on a phone, computer or speaker to see it here." : "");
+  note.hidden = !note.textContent;
+  if (focused) $("deviceList").querySelector(`[data-device="${CSS.escape(focused)}"]`)?.focus();
+}
+
+const deviceRows = () => [...$("deviceList").querySelectorAll('.device-row:not([aria-disabled="true"])')];
+
+/** Focus the row step rows away from the focused one; 0 = the active row (or the first). */
+function focusDevice(step) {
+  const rows = deviceRows();
+  if (!rows.length) return;
+  const at = rows.indexOf(document.activeElement);
+  if (step === 0 || at < 0) return (rows.find((r) => r.classList.contains("is-active")) || rows[0]).focus();
+  rows[(at + step + rows.length) % rows.length].focus();
+}
+
+/** ArrowDown on the chip opens the list; arrows move between rows (Enter presses the focused one). */
+function onDeviceKey(ev) {
+  const step = { ArrowDown: 1, ArrowUp: -1 }[ev.key];
+  if (!step) return;
+  ev.preventDefault();
+  if (!devicesOpen) openDevices();
+  else focusDevice(step);
+}
+
+function onDeviceClick(ev) {
+  const row = ev.target.closest(".device-row");
+  if (!row || row.getAttribute("aria-disabled") === "true") return;
+  const d = state.devices && state.devices[Number(row.dataset.i)];
+  if (d) pickDevice(d);
+}
+
+/** Move playback to d. The chip shows d at once; a failure puts the old device back. */
+async function pickDevice(d) {
+  closeDevices(true);
+  if (state.device && state.device.id === d.id) return;
+  const before = state.device;
+  state.device = { id: d.id, name: d.name };
+  renderChrome();
+  const seq = intents.start("device");
+  const sess = authSession;
+  let failed = null;
+  // the error is handled here, not by withDevice: rediscovering would retry a device that's gone
+  await changeTrack(() =>
+    invoke("transfer_playback", { deviceId: d.id, play: state.isPlaying }).catch((e) => {
+      if (isCode(e, "AUTH_EXPIRED")) throw e;
+      failed = e;
+    }),
+  );
+  if (sess !== authSession) return;
+  intents.finish("device", performance.now());
+  if (failed) {
+    if (intents.latest("device", seq)) {
+      state.device = before;
+      intents.drop("device");
+      renderChrome();
+    }
+    if (isCode(failed, "NO_ACTIVE_DEVICE") || /\b404\b/.test(String(failed))) {
+      toast(`${d.name} isn't available any more`);
+      refreshDevices();
+    } else {
+      toast(`Spotify didn't respond: ${reason(failed)}`);
+    }
   }
   kick();
+}
+
+/** A press outside an open popover closes it. */
+function onOutside(ev) {
+  if (devicesOpen && !ev.target.closest(".device-wrap")) closeDevices();
+  if (volumeOpen && !ev.target.closest("#volume")) closeVolume();
 }
 
 async function skip(cmd) {
@@ -686,6 +1064,8 @@ let overlayRev = 0; // bumped on every overlay view change: a slow Play closes o
 
 function openOverlay(name) {
   if (state.overlay === name) return;
+  closeDevices(); // popovers belong to the stage, which goes inert
+  closeVolume();
   overlayRev++;
   if (state.overlay) $(state.overlay).hidden = true;
   else returnFocus = document.activeElement;
@@ -946,9 +1326,12 @@ async function onSearchClick(e) {
 const typing = (t) => t && t.closest && t.closest("input, textarea, select, [contenteditable]");
 
 function onKey(e) {
-  if (e.key === "Escape" && e.type === "keydown" && state.overlay) {
+  // Esc closes the innermost thing: a popover first, then the overlay
+  if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || state.overlay)) {
     e.preventDefault();
-    closeOverlay();
+    if (devicesOpen) closeDevices(true);
+    else if (volumeOpen) closeVolume(true);
+    else closeOverlay();
     return;
   }
   if (e.code !== "Space" || $("stage").hidden || typing(e.target)) return;
@@ -978,6 +1361,17 @@ async function boot() {
   $("nextBtn").addEventListener("click", () => skip("next_track"));
   $("scrub").addEventListener("click", seekClick);
   $("scrub").addEventListener("keydown", seekKey);
+  $("shuffleBtn").addEventListener("click", toggleShuffle);
+  $("repeatBtn").addEventListener("click", cycleRepeat);
+  $("heartBtn").addEventListener("click", toggleSaved);
+  $("volBtn").addEventListener("click", onVolBtn);
+  $("volSlider").addEventListener("pointerdown", volumeDown);
+  $("volSlider").addEventListener("pointermove", volumeMove);
+  $("volSlider").addEventListener("keydown", volumeKey);
+  $("deviceBtn").addEventListener("click", toggleDevices);
+  document.querySelector(".device-wrap").addEventListener("keydown", onDeviceKey);
+  $("deviceList").addEventListener("click", onDeviceClick);
+  document.addEventListener("pointerdown", onOutside);
 
   $("libraryBtn").addEventListener("click", openLibrary);
   $("searchBtn").addEventListener("click", openSearch);
@@ -1001,7 +1395,11 @@ async function boot() {
   document.addEventListener("keydown", onKey);
   document.addEventListener("keyup", onKey);
   addEventListener("resize", center);
-  small.addEventListener("change", () => state.loaded && renderRun());
+  small.addEventListener("change", () => {
+    closeVolume(); // the slider popover exists only on narrow screens
+    renderVolume();
+    if (state.loaded) renderRun();
+  });
   $("run").addEventListener("error", onImgError, true);
   // a hidden window needs no 1s polling; come back with a fresh poll
   document.addEventListener("visibilitychange", () => {

@@ -187,22 +187,133 @@ svg {
   gap: 4px;
 }
 
+/* ---------- device picker: the chip and its popover ---------- */
+
+.device-wrap {
+  position: relative;
+  min-width: 0;
+}
+
 .device {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding-right: 14px;
+  max-width: min(320px, 40vw);
+  height: 36px;
+  padding: 0 10px 0 14px;
+  border-radius: 999px;
   color: var(--fg-2);
   font-size: 13px;
   font-weight: 500;
+  transition: background-color 160ms ease, color 160ms ease;
 }
 
-.device-dot {
+.device:hover,
+.device[aria-expanded="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+}
+
+.device-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-caret {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  opacity: 0.7;
+}
+
+.device-dot,
+.device-row-dot {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--live);
   box-shadow: 0 0 0 3px rgb(30 215 96 / 0.16);
+}
+
+.device.is-none .device-dot {
+  background: var(--fg-3);
+  box-shadow: none;
+}
+
+.device-pop {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.07), transparent 160px),
+    rgb(var(--i));
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
+  animation: pop-in 160ms var(--ease) both;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 120ms ease;
+}
+
+.device-row:hover:not([aria-disabled="true"]) {
+  background: rgba(246, 244, 248, 0.07);
+}
+
+.device-row:focus-visible {
+  outline-offset: -2px;
+}
+
+/* only the active device shows its dot */
+.device-row:not(.is-active) .device-row-dot {
+  visibility: hidden;
+}
+
+.device-row[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.device-row-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.device-row-type {
+  color: var(--fg-3);
+  font-size: 12.5px;
+}
+
+.device-note {
+  padding: 10px 12px;
+  color: var(--fg-2);
+  font-size: 13.5px;
+  line-height: 19px;
+}
+
+.device-list:not([hidden]) + .device-note {
+  border-top: 1px solid var(--hair);
+  margin-top: 6px;
 }
 
 /* ---------- the run ---------- */
@@ -435,8 +546,9 @@ svg {
 
 .controls {
   display: flex;
+  flex-wrap: wrap; /* very narrow windows: heart and volume drop under the transport */
   align-items: center;
-  gap: 10px;
+  gap: 4px 10px;
   margin-top: 12px;
   margin-left: -10px; /* the prev icon, not its hit area, lines up with the column */
 }
@@ -489,6 +601,89 @@ svg {
 
 .ctl:disabled {
   opacity: 0.3;
+}
+
+/* shuffle, repeat, heart: off = faint, on = full colour + a dot under the icon */
+.ctl-toggle {
+  position: relative;
+  color: var(--fg-3);
+}
+
+.ctl-toggle.is-on {
+  color: var(--fg);
+}
+
+.ctl-toggle.is-on::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ctl-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* repeat this song: a "1" badge on the loop */
+#repeatBtn[data-mode="track"]::before {
+  content: "1";
+  position: absolute;
+  top: 9px;
+  right: 7px;
+  min-width: 11px;
+  height: 11px;
+  border-radius: 6px;
+  background: var(--fg);
+  color: var(--ink);
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+}
+
+#heartBtn.is-on .heart {
+  fill: currentColor;
+}
+
+/* heart and volume sit at the right end of the control row */
+.controls-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: -10px; /* the icon, not its hit area, lines up with the scrub's end */
+}
+
+.volume {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.volume .i-mute,
+.volume.is-muted .i-vol {
+  display: none;
+}
+
+.volume.is-muted .i-mute {
+  display: block;
+}
+
+.vol-slider {
+  width: 112px;
+  margin-right: 10px;
+  touch-action: none; /* a drag moves the volume, not the page */
+}
+
+.vol-slider:hover .scrub-fill::after,
+.vol-slider:focus-visible .scrub-fill::after {
+  transform: scale(1);
 }
 
 [data-mode="idle"] .transport,
@@ -998,6 +1193,10 @@ svg {
   from { transform: translateX(-100%); }
 }
 
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+
 @keyframes drop-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
 }
@@ -1062,6 +1261,33 @@ svg {
   .ctl-play {
     width: 52px;
     height: 52px;
+  }
+
+  .controls {
+    gap: 4px;
+  }
+
+  /* the speaker opens the slider in a small popover above it */
+  .vol-pop {
+    position: absolute;
+    z-index: 4;
+    right: 0;
+    bottom: calc(100% + 8px);
+    padding: 8px 14px;
+    border: 1px solid var(--hair);
+    border-radius: 12px;
+    background: rgb(var(--i));
+    box-shadow: 0 20px 50px -16px rgb(0 0 0 / 0.6);
+    animation: pop-in 160ms var(--ease) both;
+  }
+
+  .volume:not(.is-open) .vol-pop {
+    display: none;
+  }
+
+  .vol-slider {
+    width: 140px;
+    margin-right: 0;
   }
 
   .toast {

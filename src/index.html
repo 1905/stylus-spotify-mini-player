@@ -43,7 +43,16 @@
             Search
           </button>
         </div>
-        <div id="device" class="device" hidden><span class="device-dot"></span><span class="device-name"></span></div>
+        <div class="device-wrap">
+          <button id="deviceBtn" class="device" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="devicePop" hidden>
+            <span class="device-dot"></span><span class="device-name"></span>
+            <svg class="device-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 8.6 5.6 5.6 5.6-5.6L19 10l-7 7-7-7z" /></svg>
+          </button>
+          <div id="devicePop" class="device-pop" hidden>
+            <div id="deviceList" class="device-list" role="listbox" aria-label="Spotify devices"></div>
+            <p class="device-note" role="status" hidden></p>
+          </div>
+        </div>
       </header>
 
       <div id="run" class="run" aria-label="Played, now playing, and up next"></div>
@@ -64,6 +73,9 @@
           <span id="durTime" class="time">0:00</span>
         </div>
         <div class="controls">
+          <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h3c2 0 3.2 1 4.2 2.6l2.4 3.8c1 1.6 2.2 2.6 4.2 2.6H20M4 17h3c1.3 0 2.3-.4 3.1-1.2M13.7 8.2C14.5 7.4 15.5 7 16.8 7H20M17.6 4.6 20 7l-2.4 2.4M17.6 14.6 20 17l-2.4 2.4" /></svg>
+          </button>
           <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.6v12.8c0 .8-.9 1.3-1.6.8L8.6 12.8a1 1 0 0 1 0-1.6l8.8-6.4c.7-.5 1.6 0 1.6.8z" /></svg>
           </button>
@@ -74,6 +86,25 @@
           <button id="nextBtn" class="ctl" type="button" aria-label="Next">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5h-2.2v14H18zM5 5.6v12.8c0 .8.9 1.3 1.6.8l8.8-6.4a1 1 0 0 0 0-1.6L6.6 4.8C5.9 4.3 5 4.8 5 5.6z" /></svg>
           </button>
+          <button id="repeatBtn" class="ctl ctl-toggle" type="button" aria-label="Repeat" title="Repeat" data-mode="off">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4.5 11.5V10A3 3 0 0 1 7.5 7H19M16.6 4.6 19 7l-2.4 2.4M19.5 12.5V14a3 3 0 0 1-3 3H5M7.4 19.4 5 17l2.4-2.4" /></svg>
+          </button>
+          <div class="controls-side">
+            <button id="heartBtn" class="ctl ctl-toggle" type="button" aria-label="Save to Liked Songs" title="Save to Liked Songs" aria-pressed="false" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path class="heart" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" d="M12 19.5S4.5 15 4.5 9.6A4 4 0 0 1 12 7.7a4 4 0 0 1 7.5 1.9c0 5.4-7.5 9.9-7.5 9.9z" /></svg>
+            </button>
+            <div id="volume" class="volume" hidden>
+              <button id="volBtn" class="ctl" type="button" aria-label="Mute" title="Mute">
+                <svg class="i-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" /><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M14.8 9.6a3.4 3.4 0 0 1 0 4.8M17.4 7.2a6.8 6.8 0 0 1 0 9.6" /></svg>
+                <svg class="i-mute" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" /><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m15.2 9.8 4.4 4.4m0-4.4-4.4 4.4" /></svg>
+              </button>
+              <div class="vol-pop">
+                <div id="volSlider" class="scrub vol-slider" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                  <div id="volFill" class="scrub-fill"></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </footer>
     </main>
