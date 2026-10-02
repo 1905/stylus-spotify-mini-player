@@ -37,7 +37,9 @@ custom-protocol = ["tauri/custom-protocol"]
 
 # Size over speed: the app is a thin remote, its hot path is waiting on HTTP.
 [profile.release]
-opt-level = "s"
+# 3, not "s": at "s" + codegen-units 1 the macOS audio stack (cpal/coreaudio) segfaults in
+# AudioObjectGetPropertyData on engine start (bisected 2026-10-02; default profile runs)
+opt-level = 3
 lto = true
 codegen-units = 1
 # panic = "unwind" (default): librespot's audio output panics when no output device exists; abort would take the whole app down

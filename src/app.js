@@ -5,7 +5,7 @@ import { buildRun, mergeHistory, measure, flip } from "./lib/timeline.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
-import { CONNECTING, NEEDS_LOGIN, isTheRun, thisMacRow } from "./lib/engine.js";
+import { CONNECTING, NEEDS_LOGIN, isTheRun, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { ERROR_POLL_MS, pollDelay } from "./lib/poll.js";
 
@@ -381,19 +381,19 @@ function setDevices(list, startedAt = performance.now()) {
   const changed = JSON.stringify(list) !== JSON.stringify(state.devices);
   state.devices = list;
   if (state.mode === "idle" && intents.settled("device", startedAt)) {
-    const d = list.find((x) => x.is_active) || list[0];
+    const d = preferredDevice(list);
     state.device = d ? { id: d.id, name: d.name } : null;
   }
   if (changed && devicesOpen) renderDeviceList();
   return changed;
 }
 
-/** Fetch devices for a transport command: the active (or first) one, or null. */
+/** Fetch devices for a transport command: this Mac first (see preferredDevice), or null. */
 async function discover() {
   const list = await fetchOr("list_devices");
   if (!list) return null;
   setDevices(list);
-  const d = list.find((x) => x.is_active) || list[0];
+  const d = preferredDevice(list);
   return d ? { id: d.id, name: d.name } : null;
 }
 
