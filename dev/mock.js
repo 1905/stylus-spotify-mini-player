@@ -201,6 +201,12 @@
       state.isPlaying = true;
       return null;
     },
+    // the harness's "Spotify app": registers the MacBook as a device a moment after launch
+    launch_local_spotify: () => {
+      const mac = (fx.devices || []).find((d) => /computer/i.test(d.type));
+      if (mac) setTimeout(() => { if (!state.devices.some((d) => d.id === mac.id)) state.devices.push(clone(mac)); }, 2000);
+      return null;
+    },
     resume_at: ({ deviceId, uri, positionMs }) => {
       useDevice(deviceId);
       const t = allTracks().find((x) => x.uri === uri) || state.now;
