@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { thisMacRow, isTheRun, THE_RUN, THE_RUN_MISSING_MS } from "./engine.js";
+import { thisMacRow, isTheRun, THE_RUN, THE_RUN_MISSING_MS, preferredDevice } from "./engine.js";
 
 const RUN = { id: "r", name: THE_RUN, type: "Computer" };
 const MARANTZ = { id: "m", name: "Marantz", type: "AVR" };
@@ -66,5 +66,23 @@ describe("isTheRun", () => {
     expect(isTheRun(RUN)).toBe(true);
     expect(isTheRun(MACBOOK)).toBe(false);
     expect(isTheRun(null)).toBe(false);
+  });
+});
+
+describe("preferredDevice", () => {
+  const marantz = { id: "m", name: "Marantz STEREO 70s", type: "AVR", is_active: true };
+  const run = { id: "r", name: "The Run", type: "Computer", is_active: false };
+  const mac = { id: "c", name: "MacBook Pro", type: "Computer", is_active: false };
+  it("prefers The Run over an active network player", () => {
+    expect(preferredDevice([marantz, run, mac]).id).toBe("r");
+  });
+  it("then any computer, then the active one, then the first", () => {
+    expect(preferredDevice([marantz, mac]).id).toBe("c");
+    expect(preferredDevice([{ ...marantz, is_active: false }, { id: "t", type: "TV", is_active: true }]).id).toBe("t");
+    expect(preferredDevice([{ ...marantz, is_active: false }]).id).toBe("m");
+    expect(preferredDevice([])).toBe(null);
+  });
+  it("never picks a restricted device", () => {
+    expect(preferredDevice([{ ...run, is_restricted: true }, marantz]).id).toBe("m");
   });
 });

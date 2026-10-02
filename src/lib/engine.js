@@ -36,3 +36,13 @@ export function thisMacRow(engine, devices, busy = "", missingMs = 0) {
     return { type: "Log in to play here", title: engine.reason || "The player on this Mac uses another Spotify account" };
   return { type: "Not available right now", title: engine.reason || "The player on this Mac isn't available right now" };
 }
+
+/**
+ * The device to show and play on when nothing is playing: this Mac first (The Run, then any
+ * other computer), then the last-active device, then the first. Spotify keeps calling a
+ * speaker "active" long after it stopped, so active alone would keep picking the network player.
+ */
+export function preferredDevice(list) {
+  const all = (list || []).filter((d) => d && d.id && !d.is_restricted);
+  return all.find(isTheRun) || all.find((d) => /computer/i.test(d.type || "")) || all.find((d) => d.is_active) || all[0] || null;
+}
