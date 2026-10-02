@@ -1,4 +1,5 @@
 mod auth;
+mod local;
 mod spotify;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,6 +20,7 @@ pub fn run() {
             spotify::play_on_device,
             spotify::resume,
             spotify::resume_at,
+            local::launch_local_spotify,
             spotify::pause,
             spotify::next_track,
             spotify::previous_track,

@@ -98,6 +98,7 @@ function showLogin(kind) {
   authSession++;
   playlistsLoading = false; // a load from the old session will never finish
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
+  thisMacStarting = false;
   clearTimeout(searchTimer); // a debounced search must not start in the next session
   clearTimeout(seekTimer); // nor a debounced seek
   clearTimeout(volTimer); // nor a debounced volume change
@@ -1016,12 +1017,56 @@ function renderDeviceList() {
         `<span class="device-row-type">${esc(d.type || "")}</span></button>`
       );
     })
-    .join("");
-  $("deviceList").hidden = !list.length;
+    .join("") + thisMacRow(list);
+  $("deviceList").hidden = !$("deviceList").children.length;
   const note = $("devicePop").querySelector(".device-note");
-  note.textContent = devicesNote || (state.devices && !list.length ? "Open Spotify on a phone, computer or speaker to see it here." : "");
+  note.textContent = devicesNote || (state.devices && !list.length ? "Open Spotify on a phone or speaker, or play on this Mac." : "");
   note.hidden = !note.textContent;
   if (focused) $("deviceList").querySelector(`[data-device="${CSS.escape(focused)}"]`)?.focus();
+}
+
+/** No computer in the list: offer this Mac, which starts the Spotify app in the background. */
+function thisMacRow(list) {
+  if (!state.devices || list.some((d) => /computer/i.test(d.type || ""))) return "";
+  return (
+    `<button class="device-row" type="button" role="option" data-this-mac="1" tabindex="-1" title="Starts Spotify in the background on this Mac">` +
+    `<span class="device-row-dot"></span><span class="device-row-name">This Mac</span>` +
+    `<span class="device-row-type">${thisMacStarting ? "Starting…" : "Opens Spotify"}</span></button>`
+  );
+}
+
+let thisMacStarting = false;
+const THIS_MAC_WAIT_MS = 20000; // Spotify needs a few seconds after launch to register as a device
+
+/** Start Spotify on this Mac, wait for it to appear as a device, then move playback there. */
+async function playOnThisMac() {
+  if (thisMacStarting) return;
+  thisMacStarting = true;
+  renderDeviceList();
+  const sess = authSession;
+  try {
+    await invoke("launch_local_spotify");
+    const known = new Set((state.devices || []).map((d) => d.id));
+    const until = performance.now() + THIS_MAC_WAIT_MS;
+    while (performance.now() < until) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (sess !== authSession) return;
+      const list = await fetchOr("list_devices");
+      if (!list) continue;
+      setDevices(list);
+      const mac = list.find((d) => /computer/i.test(d.type || "") && !known.has(d.id));
+      if (mac) return void pickDevice(mac);
+    }
+    toast("Spotify on this Mac didn't show up. Open it once and try again.");
+  } catch (e) {
+    if (isCode(e, "AUTH_EXPIRED")) return void expire();
+    toast(isCode(e, "SPOTIFY_NOT_INSTALLED") ? "Install Spotify for Mac to play on this computer" : `Couldn't start Spotify: ${reason(e)}`);
+  } finally {
+    if (sess === authSession) {
+      thisMacStarting = false;
+      if (devicesOpen) renderDeviceList();
+    }
+  }
 }
 
 const deviceRows = () => [...$("deviceList").querySelectorAll('.device-row:not([aria-disabled="true"])')];
@@ -1047,6 +1092,7 @@ function onDeviceKey(ev) {
 function onDeviceClick(ev) {
   const row = ev.target.closest(".device-row");
   if (!row || row.getAttribute("aria-disabled") === "true") return;
+  if (row.dataset.thisMac) return void playOnThisMac();
   const d = state.devices && state.devices[Number(row.dataset.i)];
   if (d) pickDevice(d);
 }
