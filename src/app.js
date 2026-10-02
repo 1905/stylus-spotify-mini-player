@@ -250,7 +250,8 @@ async function refresh(epoch) {
     if (settled("play")) state.isPlaying = Boolean(s.is_playing);
     if (settled("shuffle")) state.shuffle = Boolean(s.shuffle);
     if (settled("repeat")) state.repeat = s.repeat || "off";
-    if (settled("volume")) state.volume = s.volume_percent ?? null;
+    // a volume hold belongs to one device: it must not hide a newly picked device's level
+    if (settled("device") && settled(volKey(s.device_id))) state.volume = s.volume_percent ?? null;
     state.supportsVolume = Boolean(s.supports_volume);
     state.contextUri = s.context_uri || null;
     // a mix playing now is one Spotify won't list: remember it (once per context, not every poll)
@@ -773,6 +774,7 @@ let volTimer = null;
 let volSeq = 0; // the intent of the current burst of moves
 let volBefore = null; // the volume before that burst: what a failure puts back
 let volDevice = null; // the device the burst started on: a transfer meanwhile must not get its volume
+const volKey = (deviceId) => `volume:${deviceId || ""}`; // volume intents are per device
 let unmuteTo = 50;
 let volumeOpen = false; // the narrow-screen slider popover
 
@@ -782,9 +784,9 @@ function setVolume(pct) {
   if (v === state.volume) return;
   if (!volTimer) {
     // the first move of a burst: polls keep their hands off from now until its command lands
-    volSeq = intents.start("volume");
-    volBefore = state.volume;
     volDevice = state.device && state.device.id;
+    volSeq = intents.start(volKey(volDevice));
+    volBefore = state.volume;
   }
   state.volume = v;
   renderVolume();
@@ -797,7 +799,11 @@ function sendVolume() {
   const percent = state.volume;
   const before = volBefore;
   const deviceId = volDevice;
-  sendIntent("volume", () => invoke("set_volume", { percent, deviceId }), () => (state.volume = before), volSeq);
+  // a failure puts the old level back only while that device is still the one on screen
+  const revert = () => {
+    if (state.device && state.device.id === deviceId) state.volume = before;
+  };
+  sendIntent(volKey(deviceId), () => invoke("set_volume", { percent, deviceId }), revert, volSeq);
 }
 
 function toggleMute() {
@@ -864,8 +870,12 @@ async function checkSaved(track) {
   const gen = ++heartGen;
   state.saved = null;
   if (!track || !track.id || isLocal(track.uri) || libraryDenied) return;
+  // in the same queue as save/unsave: a read must not overtake a write still on its way
+  const sess = authSession;
+  const run = savedChain.then(() => (sess === authSession ? invoke("is_saved", { trackId: track.id }) : null));
+  savedChain = run.catch(() => {});
   try {
-    const saved = await invoke("is_saved", { trackId: track.id });
+    const saved = await run;
     if (gen !== heartGen) return;
     state.saved = Boolean(saved);
   } catch (e) {
@@ -1009,7 +1019,14 @@ async function pickDevice(d) {
   closeDevices(true);
   if (state.device && state.device.id === d.id) return;
   const before = state.device;
+  // a volume burst on the old device goes out now, to that device; the new one starts fresh
+  if (volTimer) {
+    clearTimeout(volTimer);
+    sendVolume();
+  }
   state.device = { id: d.id, name: d.name };
+  state.volume = d.volume_percent ?? null;
+  state.supportsVolume = Boolean(d.supports_volume);
   renderChrome();
   const seq = intents.start("device");
   const sess = authSession;
