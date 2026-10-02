@@ -60,6 +60,13 @@ describe("playSession", () => {
 });
 
 describe("sessionToSave", () => {
+  it("another playlist starting skips the throttle", () => {
+    const prev = { accountId: "me", contextUri: "spotify:playlist:A", origin: null, uris: null, trackUri: "spotify:track:X", positionMs: 0, savedAt: 1000 };
+    const moved = sessionToSave(prev, { accountId: "me", trackUri: "spotify:track:X", contextUri: "spotify:playlist:B", positionMs: 10 }, 1001);
+    expect(moved).toMatchObject({ contextUri: "spotify:playlist:B", origin: null, uris: null });
+    expect(sessionToSave(prev, { accountId: "me", trackUri: "spotify:track:X", contextUri: "spotify:playlist:A", positionMs: 10 }, 1001)).toBeNull();
+  });
+
   it("paused on the same song: no write, even when forced", () => {
     const prev = { accountId: "me", contextUri: "spotify:playlist:A", origin: null, uris: null, trackUri: "spotify:track:T", positionMs: 5000, savedAt: 0 };
     const same = { accountId: "me", trackUri: "spotify:track:T", contextUri: "spotify:playlist:A", positionMs: 5000 };
