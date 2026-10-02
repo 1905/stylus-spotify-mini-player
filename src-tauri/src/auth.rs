@@ -21,6 +21,10 @@ const REQUIRED_SCOPES: &[&str] = &[
     "user-read-playback-state",
     "user-modify-playback-state",
     "user-read-recently-played",
+    "user-library-read",
+    "user-library-modify",
+    "user-top-read",
+    "user-follow-read",
 ];
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -428,7 +432,20 @@ mod tests {
     }
     use super::*;
 
-    const ALL: &str = "user-read-private user-read-email playlist-read-private playlist-read-collaborative user-read-playback-state user-modify-playback-state user-read-recently-played";
+    const ALL: &str = "user-read-private user-read-email playlist-read-private playlist-read-collaborative user-read-playback-state user-modify-playback-state user-read-recently-played user-library-read user-library-modify user-top-read user-follow-read";
+
+    #[test]
+    fn scopes_include_library_top_follow() {
+        for s in ["user-library-read", "user-library-modify", "user-top-read", "user-follow-read"] {
+            assert!(REQUIRED_SCOPES.contains(&s), "missing {s}");
+        }
+    }
+
+    #[test]
+    fn scopes_missing_library_is_reconnect() {
+        let s = ALL.replace(" user-library-read", "");
+        assert!(!has_required_scopes(&s));
+    }
 
     #[test]
     fn scopes_all_present() {
