@@ -25,6 +25,7 @@
   "use strict";
 
   const SCENARIOS = [
+    "ended",
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
@@ -190,6 +191,7 @@
     state.isPlaying = !!play;
     setProgress(positionMs || 0);
   }
+  let ended = 0; // scenario "ended": polls seen
   const setVol = (d, percent) => (d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0))));
   const needDevice = () => {
     if (!state.devices.length || !state.active) throw "NO_ACTIVE_DEVICE: no active device (mock)";
@@ -514,6 +516,8 @@
     const slot = key && `${args.account}/${key}`;
     if (slot && READS_CACHE.has(cmd) && cache.has(slot)) return clone(cache.get(slot));
     if (scenario === "error" && !LOCAL.test(cmd)) return reject("network down");
+    // the login ends after the first poll: the "session ended" screen
+    if (scenario === "ended" && cmd === "playback_state" && (ended = ended + 1) > 1) return reject("AUTH_EXPIRED: session ended (mock)");
     if (scenario === "slow" && SLOW.test(cmd)) await sleep(2000);
     try {
       const out = await h(args);
