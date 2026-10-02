@@ -506,7 +506,8 @@ async function playCover(item) {
   // a jump inside the playing playlist/album keeps where it came from: its origin and its full
   // track list, so the next jump still knows every member (not just the visible covers)
   const inSaved = last && last.uris && last.uris.includes(target.trackUri);
-  const inSameContext = target.contextUri && sameAsLast;
+  // only a jump inside the same playlist/album keeps the saved origin (a past cover from another one starts its own)
+  const inSameContext = Boolean(target.contextUri) && target.contextUri === ctx && sameAsLast;
   const origin = inSaved || inSameContext ? last.origin : null;
   // keep the full member list for the next jump (never sent with a context: Spirc takes one source)
   await startPlay(target, { kind: "cover", origin, members: inSaved || inSameContext ? last.uris : null });
@@ -817,7 +818,7 @@ async function playSource(deviceId, src) {
   if (isEngineDevice(engine, deviceId)) {
     try {
       const args = src.contextUri ? { contextUri: src.contextUri, trackUri: src.trackUri } : { uris: src.uris, trackUri: src.trackUri };
-      return await invoke("local_load", { ...args, positionMs: 0, play: true });
+      return await invoke("local_load", { ...args, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat });
     } catch (e) {
       if (!isCode(e, "ENGINE_NOT_READY")) throw e;
     }
@@ -990,7 +991,7 @@ async function maybeResume() {
   const token = startPending("resume", src.trackUri, null, false);
   let failed = false;
   await changeTrack(() =>
-    invoke("local_load", { ...src, play: false }).catch((e) => {
+    invoke("local_load", { ...src, play: false, shuffle: state.shuffle, repeat: state.repeat }).catch((e) => {
       if (isCode(e, "AUTH_EXPIRED")) throw e;
       failed = true; // quietly: the app starts idle
     }),

@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use librespot_connect::{ConnectConfig, LoadRequest, LoadRequestOptions, PlayingTrack, Spirc};
+use librespot_connect::{ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc};
 use librespot_core::{authentication::Credentials, config::DeviceType, error::ErrorKind, Session, SessionConfig};
 use librespot_playback::{
     audio_backend,
@@ -641,11 +641,26 @@ fn load_source(context_uri: Option<String>, uris: Option<Vec<String>>) -> Result
     }
 }
 
-fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32, play: bool) -> LoadRequest {
+/// Shuffle/repeat to keep across a load: librespot's handle_load resets them unless the
+/// request carries them (Astra, 2026-10-02).
+#[derive(Debug, Clone, Copy, Default)]
+struct Modes {
+    shuffle: bool,
+    repeat: bool,
+    repeat_track: bool,
+}
+
+fn modes(shuffle: Option<bool>, repeat: Option<String>) -> Modes {
+    let repeat = repeat.unwrap_or_default();
+    Modes { shuffle: shuffle.unwrap_or(false), repeat: repeat == "context", repeat_track: repeat == "track" }
+}
+
+fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32, play: bool, m: Modes) -> LoadRequest {
     let options = LoadRequestOptions {
         start_playing: play,
         seek_to: position_ms,
         playing_track: track_uri.map(PlayingTrack::Uri),
+        context_options: Some(LoadContextOptions::Options(Options { shuffle: m.shuffle, repeat: m.repeat, repeat_track: m.repeat_track })),
         ..LoadRequestOptions::default()
     };
     match source {
@@ -696,8 +711,10 @@ pub fn local_load(
     track_uri: Option<String>,
     position_ms: u32,
     play: bool,
+    shuffle: Option<bool>,
+    repeat: Option<String>,
 ) -> Result<(), String> {
-    let request = load_request(load_source(context_uri, uris)?, track_uri, position_ms, play);
+    let request = load_request(load_source(context_uri, uris)?, track_uri, position_ms, play, modes(shuffle, repeat));
     engine.with_spirc(|s| {
         s.activate()?;
         s.load(request)
@@ -945,15 +962,24 @@ mod tests {
 
     #[test]
     fn load_request_carries_options() {
-        let req = load_request(LoadSource::Tracks(uris(2)), Some("spotify:track:1".into()), 4200, false);
+        let req = load_request(LoadSource::Tracks(uris(2)), Some("spotify:track:1".into()), 4200, false, Modes::default());
         let dbg = format!("{req:?}");
         assert!(dbg.contains("start_playing: false"), "{dbg}");
         assert!(dbg.contains("seek_to: 4200"), "{dbg}");
         assert!(dbg.contains("Uri(\"spotify:track:1\")"), "{dbg}");
-        let req = load_request(LoadSource::Context("spotify:album:a".into()), None, 0, true);
+        let req = load_request(LoadSource::Context("spotify:album:a".into()), None, 0, true, Modes::default());
         let dbg = format!("{req:?}");
         assert!(dbg.contains("spotify:album:a") && dbg.contains("start_playing: true"), "{dbg}");
         assert!(dbg.contains("playing_track: None"), "{dbg}");
+    }
+
+    #[test]
+    fn load_keeps_shuffle_and_repeat() {
+        let req = load_request(LoadSource::Context("spotify:album:a".into()), None, 0, true, modes(Some(true), Some("context".into())));
+        let dbg = format!("{req:?}");
+        assert!(dbg.contains("shuffle: true") && dbg.contains("repeat: true") && dbg.contains("repeat_track: false"), "{dbg}");
+        let m = modes(None, Some("track".into()));
+        assert!(!m.shuffle && !m.repeat && m.repeat_track);
     }
 
     #[test]
