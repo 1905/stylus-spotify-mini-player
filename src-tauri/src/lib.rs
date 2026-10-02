@@ -1,8 +1,11 @@
 mod applog;
+mod audio_out;
 mod auth;
 mod cache;
+mod dock;
 mod media;
 mod player;
+mod settings;
 mod spotify;
 
 use std::sync::Arc;
@@ -18,7 +21,7 @@ pub fn run() {
         .setup(|app| {
             // setup runs on the main thread: the media controls live there (see media.rs)
             media::init(app.handle());
-            // the speaker "The Run" starts with the app (or waits in needs_login)
+            // the speaker "This Mac" starts with the app (or waits in needs_login)
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
             tauri::async_runtime::spawn(async move { engine.restart(None).await });
@@ -31,6 +34,9 @@ pub fn run() {
             player::engine_status,
             player::engine_login,
             player::engine_restart,
+            player::engine_get_quality,
+            player::engine_set_quality,
+            dock::set_dock_art,
             media::media_update,
             media::media_clear,
             spotify::get_playlists,
@@ -87,7 +93,7 @@ pub fn run() {
         .expect("error while building tauri application");
     app.run(move |app, event| match event {
         tauri::RunEvent::Exit => {
-            // pause and leave Spotify Connect cleanly, so "The Run" doesn't linger as a device
+            // pause and leave Spotify Connect cleanly, so "This Mac" doesn't linger as a device
             engine.shutdown();
         }
         // Dock icon clicked while the window is hidden: bring it back

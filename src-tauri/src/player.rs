@@ -1,6 +1,6 @@
-//! The app's own Spotify Connect speaker "The Run" (librespot): Session + Player +
+//! The app's own Spotify Connect speaker "This Mac" (librespot): Session + Player +
 //! SoftMixer + Spirc, kept alive by a reconnect loop. The UI controls other devices
-//! through the Web API (spotify.rs). For "The Run" it can also call the `local_*`
+//! through the Web API (spotify.rs). For "This Mac" it can also call the `local_*`
 //! commands, which drive Spirc directly with no Web API round trip.
 //!
 //! The player needs its own login: Spotify's keymaster client id, not the app's
@@ -14,9 +14,8 @@ use std::time::{Duration, Instant};
 use librespot_connect::{ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc};
 use librespot_core::{authentication::Credentials, config::DeviceType, error::ErrorKind, Session, SessionConfig};
 use librespot_playback::{
-    audio_backend,
-    config::{AudioFormat, PlayerConfig},
-    mixer::{softmixer::SoftMixer, Mixer, MixerConfig},
+    config::PlayerConfig,
+    mixer::{softmixer::SoftMixer, Mixer, MixerConfig, NoOpVolume},
     player::Player,
 };
 use librespot_protocol::authentication::AuthenticationType;
@@ -24,7 +23,8 @@ use serde::Serialize;
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter, State as Managed};
 use tokio::sync::watch;
 
-pub const DEVICE_NAME: &str = "The Run";
+/// The Connect device name other Spotify clients show. Renaming keeps the device id.
+pub const DEVICE_NAME: &str = "This Mac";
 /// librespot's default client id. Only its logins may fetch audio.
 const KEYMASTER_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
 /// The player login's redirect is `http://127.0.0.1:5588/login`, as in librespot's binary.
@@ -453,13 +453,13 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
             return;
         }
     };
-    let Some(backend) = audio_backend::find(None) else {
-        engine.apply(generation, Event::Fatal("no audio output".into()));
-        return;
-    };
+    let bitrate = tokio::task::spawn_blocking(|| crate::settings::load().bitrate).await.unwrap_or(crate::settings::DEFAULT_BITRATE);
+    let player_config = PlayerConfig { bitrate: crate::settings::librespot_bitrate(bitrate), ..PlayerConfig::default() };
     let mut session = Session::new(session_config.clone(), None);
-    let player = Player::new(PlayerConfig::default(), session.clone(), mixer.get_soft_volume(), move || {
-        backend(None, AudioFormat::default())
+    // volume is applied by the output stage at playback time (audio_out.rs), not at decode time
+    let sink_mixer = mixer.clone();
+    let player = Player::new(player_config, session.clone(), Box::new(NoOpVolume), move || {
+        Box::new(crate::audio_out::RampSink::new(sink_mixer))
     });
 
     let mut attempt = 0;
@@ -575,7 +575,7 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
 
 // ---- commands --------------------------------------------------------------
 
-/// `{state, name: "The Run", reason?, device_id}`; `device_id` is null until ready.
+/// `{state, name: "This Mac", reason?, device_id}`; `device_id` is null until ready.
 #[tauri::command]
 pub fn engine_status(engine: Managed<'_, Engine>) -> Status {
     engine.status(&engine.state())
@@ -602,6 +602,39 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
 /// or logout, so the account check runs again.
 #[tauri::command]
 pub async fn engine_restart(engine: Managed<'_, Engine>) -> Result<(), String> {
+    engine.restart(None).await;
+    Ok(())
+}
+
+/// The stream quality in kbps: 96, 160 or 320.
+#[tauri::command]
+pub fn engine_get_quality() -> u16 {
+    crate::settings::load().bitrate
+}
+
+/// Stores the stream quality (96, 160 or 320 kbps) and restarts the engine with it.
+/// Returns once the restart has begun; the UI waits for `engine-status` ready.
+#[tauri::command]
+pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Result<(), String> {
+    if !crate::settings::BITRATES.contains(&kbps) {
+        return Err(format!("BAD_ARGS: quality must be 96, 160 or 320 kbps, got {kbps}"));
+    }
+    let saved = tokio::task::spawn_blocking(move || {
+        let mut settings = crate::settings::load();
+        let old = settings.bitrate;
+        settings.bitrate = kbps;
+        crate::settings::save(&settings).map(|()| old)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    match saved {
+        Ok(old) => log::info!("quality {old} → {kbps} kbps, restarting the engine"),
+        Err(e) => {
+            log::warn!("quality {kbps} kbps not saved: {e}");
+            return Err(e);
+        }
+    }
     engine.restart(None).await;
     Ok(())
 }
@@ -696,7 +729,7 @@ pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), Stri
     engine.with_spirc(|s| s.set_volume(volume_from_percent(percent)))
 }
 
-/// Loads a context or a track list on The Run. Activates the device first: Spirc
+/// Loads a context or a track list on this Mac's speaker. Activates the device first: Spirc
 /// ignores every command, Load included, while inactive. Both go down the same
 /// ordered channel. Ok only means queued; the UI confirms the track from the poll.
 #[tauri::command]
@@ -830,9 +863,9 @@ mod tests {
     }
 
     #[test]
-    fn device_is_the_run_at_half_volume() {
+    fn device_is_this_mac_at_half_volume() {
         let c = connect_config();
-        assert_eq!(c.name, "The Run");
+        assert_eq!(c.name, "This Mac");
         assert_eq!(c.device_type, DeviceType::Computer);
         assert_eq!(c.initial_volume, u16::MAX / 2);
         assert!(!c.disable_volume);
@@ -861,11 +894,11 @@ mod tests {
     #[test]
     fn status_payload() {
         let v = serde_json::to_value(Status::new(&Ready, Some("dev-1"))).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "ready", "name": "The Run", "device_id": "dev-1"}));
+        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1"}));
         let v = serde_json::to_value(Status::new(&Failed("Premium required".into()), Some("dev-1"))).unwrap();
         assert_eq!(
             v,
-            serde_json::json!({"state": "failed", "name": "The Run", "reason": "Premium required", "device_id": null})
+            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null})
         );
         let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting, AccountMismatch("m".into())]
             .iter()
