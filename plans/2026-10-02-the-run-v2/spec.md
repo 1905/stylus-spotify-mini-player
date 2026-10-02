@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 **Scope:** ~/dev/rust-spotify
-**Status:** approved 2026-10-02 (user: "approved, full auto")
+**Status:** shipped 2026-10-02 (as-built notes at the end)
 
 ## TL;DR
 
@@ -214,3 +214,19 @@ Endpoint paths (`/me/player`, `/me/player/volume`, `/me/player/shuffle`, `/me/pl
 - **P5**: artist links + artist pages + Following.
 - **P6**: Your top + add to queue.
 - **P7**: QA sweep, fixes, Astra loop, `/simplify`, final Astra, merge.
+
+## As-built notes (2026-10-02)
+
+What shipped differs from the text above in these places:
+
+- **All 19 standard Spotify scopes at login** (user: "ask now for ALL POSSIBLE permission upfront"). This is not the 4 new ones the TL;DR named. Partner-only scopes are left out, because Spotify rejects the login if an app asks for one. No future feature needs another reconnect.
+- **Heart uses `/me/library`**. `PUT` and `DELETE /me/library?uris=spotify:track:<id>` and `GET /me/library/contains?uris=` replace the 403'd `/me/tracks*` endpoints (Feb 2026 change). The URIs must be in the query string; a JSON body gives 400.
+- **Artist pages show "Your favorites"**: this artist's songs among your top tracks (3 ranges, 50 each) and your Liked Songs. It replaces the planned "artist top tracks", which is 403. Spotify also exposes no play counts or popularity any more. Albums render first, and favorites fill in after.
+- **Artist albums** are fetched 10 per page (Spotify's new max; 11+ returns 400), up to 50.
+- **Volume** settles for 2.5s, not 500ms, because the read-back lags 1–3s (measured live). Holds are per device, and the command carries `device_id`.
+- **The Liked Songs count** is one request (`liked_count`). The list (up to 1000) loads only when opened. A heart click patches the cached list in place.
+- **Player 404s** become `NO_ACTIVE_DEVICE` only when Spotify's body is about the device. Any other player 404 (e.g. a refused mix) stays a plain error.
+- **Release profile** is tuned for size (`opt-level="s"`, LTO, strip, `panic="abort"`): binary 15.2 → 5.4 MB. The app's memory footprint is about 160 MB on the stage (app 34 MB plus WebKit), flat over time.
+- **`docs/spotify-web-api-reality.md`** records every endpoint as tested live on 2026-10-02. It lists what works, what's blocked, and where the official docs are wrong.
+- **Review rule** (user): fix only crit/high review findings. Med/low are listed, not fixed.
+- **Not done:** add to playlist, follow/save buttons on artist and album pages, podcasts. All of these are possible (see the API doc), but they weren't approved for this round.

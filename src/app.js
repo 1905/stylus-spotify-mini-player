@@ -919,7 +919,12 @@ async function toggleSaved() {
     if (sess !== authSession) return;
     // Liked Songs changed: patch the cached list in place (no 20-page refetch), recount once
     const cached = lib.get("liked");
-    if (cached) lib.set("liked", cached.then((r) => r && likedWith(r, t, want)));
+    if (cached) {
+      const patched = cached.then((r) => r && likedWith(r, t, want));
+      lib.set("liked", patched);
+      // like libGet: a failed load must not stay cached, or Liked Songs never retries
+      patched.catch(() => lib.get("liked") === patched && lib.delete("liked"));
+    }
     lib.delete("likedCount");
     if (libOpened) fillLiked();
   } catch (e) {
