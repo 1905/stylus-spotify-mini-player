@@ -1,7 +1,7 @@
-# Standalone Implementation Plan v1.1
+# Standalone Implementation Plan v1.2
 
 **Date:** 2026-10-02
-**Status:** superseded by v1.2
+**Status:** approved (full auto; v1.2 = v1.1 + Astra plan-review meds #5–#7, user: "verify fix findings")
 **Spec:** ./spec.md (P0 passed; this plan is P1 + P2 + exit)
 **Goal:** The app is its own Spotify Connect speaker "The Run" on this Mac (librespot), "This Mac" plays through it with no Spotify app, and media keys + Now Playing work.
 **Architecture:** A long-lived librespot engine (Session + Player + SoftMixer + Spirc) runs inside the Tauri backend and registers through the cloud as a Connect device. The UI keeps controlling everything through the public Web API, so "The Run" is just another device id. OS media controls (souvlaki → MPRemoteCommandCenter / MPNowPlayingInfoCenter) are fed from the existing poll, and route OS commands to the existing JS transport functions.
@@ -56,13 +56,18 @@
 
 **UI:**
 - **"This Mac" row:**
-  - Shown when no device named "The Run" is in the list and the engine isn't `ready`. Otherwise "The Run" is a normal row.
+  - Shown whenever no device named "The Run" is in the list, including while the engine is `ready` but Spotify hasn't listed it yet (Astra #7). While the menu is open and The Run is missing, `list_devices` refreshes every 3s; after 20s the row says "Not showing up — retry". Once The Run is listed, it's a normal row.
   - On click: if `needs_login` or `account_mismatch`, call `engine_login`. A resolved `engine_login` **is** readiness: no waiting for an event that may already have fired (Astra #4). Otherwise (`starting`/`reconnecting`), subscribe to `engine-status` first, then read `engine_status`; continue when `ready`, give up after 20s with a toast. Then poll `list_devices` until "The Run" appears (≤20s, toast on timeout) and `pickDevice` it.
 - **Engine states in the device menu:**
   - "This Mac — Connecting…" (starting/reconnecting)
   - "This Mac — Log in to play here" (needs_login)
   - "This Mac — Not available right now" (failed, `title` = reason)
-- **Media:** after each `renderChrome` that changes track or play state, call `media_update` (throttled to state changes, not every frame). In idle mode, call `media_clear`. Listen to `media-command` and route it to `togglePlay` / `skip("next_track")` / `skip("previous_track")` / `seekTo(ms)`, so existing guards apply.
+- **Media:** after each `renderChrome` that changes track or play state, call `media_update` (throttled to state changes, not every frame). In idle mode, call `media_clear`. Listen to `media-command` and route it (existing guards apply):
+  - `toggle` → `togglePlay`
+  - `play` → `togglePlay` only if `state.isPlaying` is false; `pause` → only if it is true. A repeated play or pause is a no-op, never an inversion (Astra #5).
+  - `next` / `previous` → `skip`
+  - `seek` → `seekTo(ms)`
+  - Position (Astra #6): `media_update` also runs after every local seek, and when a poll shows the position jumped by more than 3s from the expected one (remote seek, repeat restart). Frames never call it.
 - **Hidden window keeps polling while something plays (Astra #1):** the v2 rule "stop polling when the window is hidden" now applies only when nothing plays (mode idle). While a song plays, polling continues at 3s instead of 1s when hidden, so Now Playing and media commands stay current. Back to 1s when visible.
 
 **Dev scenarios (new):** `engine-login` (needs_login → ready after a fake login), `engine-down` (failed).
@@ -136,4 +141,4 @@
 
 ## Astra plan review (v1.0 → v1.1)
 
-Rating 5/10. 4 HIGH applied above (#1 hidden-window polling, #2 same account, #3 bounded player login, #4 missed ready event). Skipped by the user's crit/high-only rule: #5 play/pause mapped to toggle (med), #6 Now Playing position after seek (med), #7 placeholder while The Run isn't listed yet (med). #8 keyring backend (med) is a false positive for keyring 4.x, whose default `v1` feature includes the Apple keychain store; T1 pins `keyring = "4"` with defaults.
+Rating 5/10. 4 HIGH applied above (#1 hidden-window polling, #2 same account, #3 bounded player login, #4 missed ready event). #5–#7 (med) applied in v1.2 on the user's request ("verify fix findings"). #8 keyring backend (med) is a false positive for keyring 4.x, whose default `v1` feature includes the Apple keychain store; T1 pins `keyring = "4"` with defaults.
