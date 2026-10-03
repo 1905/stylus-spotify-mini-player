@@ -1,0 +1,161 @@
+{
+ "searchV2": {
+  "query": "radiohead",
+  "tracksV2": {
+   "items": [
+    {
+     "item": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e029293c743fa542094336c5e12",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d000048519293c743fa542094336c5e12",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b2739293c743fa542094336c5e12",
+           "width": 640
+          }
+         ]
+        },
+        "id": "35UJLpClj5EDrhpNIi4DFg",
+        "name": "The Bends",
+        "uri": "spotify:album:35UJLpClj5EDrhpNIi4DFg"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 290706
+       },
+       "id": "73CKjW3vsUXRpy3NnX4H7F",
+       "name": "Fake Plastic Trees",
+       "trackMediaType": "AUDIO",
+       "uri": "spotify:track:73CKjW3vsUXRpy3NnX4H7F"
+      }
+     }
+    },
+    {
+     "item": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e029293c743fa542094336c5e12",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d000048519293c743fa542094336c5e12",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b2739293c743fa542094336c5e12",
+           "width": 640
+          }
+         ]
+        },
+        "id": "35UJLpClj5EDrhpNIi4DFg",
+        "name": "The Bends",
+        "uri": "spotify:album:35UJLpClj5EDrhpNIi4DFg"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 257480
+       },
+       "id": "2a1iMaoWQ5MnvLFBDv4qkf",
+       "name": "High and Dry",
+       "trackMediaType": "AUDIO",
+       "uri": "spotify:track:2a1iMaoWQ5MnvLFBDv4qkf"
+      }
+     }
+    },
+    {
+     "item": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e02de3c04b5fc750b68899b20a9",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d00004851de3c04b5fc750b68899b20a9",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b273de3c04b5fc750b68899b20a9",
+           "width": 640
+          }
+         ]
+        },
+        "id": "5vkqYmiPBYLaalcmjujWxK",
+        "name": "In Rainbows",
+        "uri": "spotify:album:5vkqYmiPBYLaalcmjujWxK"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 248893
+       },
+       "id": "0YJ9FWWHn9EfnN0lHwbzvV",
+       "name": "Jigsaw Falling Into Place",
+       "trackMediaType": "AUDIO",
+       "uri": "spotify:track:0YJ9FWWHn9EfnN0lHwbzvV"
+      }
+     }
+    }
+   ],
+   "pagingInfo": {
+    "limit": 10,
+    "nextOffset": 20
+   },
+   "totalCount": 439
+  }
+ }
+}

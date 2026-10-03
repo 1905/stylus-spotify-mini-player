@@ -1,0 +1,18 @@
+{
+ "lookup": [
+  {
+   "__typename": "TrackResponseWrapper",
+   "data": {
+    "__typename": "Track",
+    "saved": false
+   }
+  },
+  {
+   "__typename": "AlbumResponseWrapper",
+   "data": {
+    "__typename": "Album",
+    "saved": false
+   }
+  }
+ ]
+}

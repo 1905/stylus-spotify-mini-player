@@ -1790,7 +1790,7 @@ let devicesOpen = false;
 let devicesGen = 0; // the latest list_devices request: an older answer is dropped
 let devicesNote = ""; // loading or error line while there is no list to show
 let devicesTimer = null; // refreshes the open menu while the in-app player isn't listed
-const DEVICES_REFRESH_MS = 3000;
+const DEVICES_REFRESH_MS = 10000; // Rust lists the in-app player itself once it's ready: this is only a safety net
 let runMissingSince = 0; // menu open, engine ready, the in-app player not listed: since when (0 = not missing)
 
 function toggleDevices() {
@@ -3529,13 +3529,14 @@ function favoriteSources(optional) {
   ]);
 }
 
-/** The artist page: photo and name (best effort), albums and singles, then your favorites by them. */
+let artistTracksTitle = "Popular"; // the artist page's track list: Spotify's popular tracks, or your favorites
+
+/**
+ * The artist page: photo and name (best effort), albums and singles, then Spotify's popular tracks
+ * (get_artist's top_tracks), or, when there are none (the Web API has none), your favorites by them.
+ */
 async function loadArtist(src, gen) {
   const optional = (e) => (isCode(e, "AUTH_EXPIRED") ? Promise.reject(e) : null); // the page works without these
-  // favorites come from your top tracks and Liked Songs: a cold Liked cache is many pages, so the
-  // albums don't wait for it
-  const sources = favoriteSources(optional);
-  sources.catch(() => {}); // awaited below; until then a rejection must not count as unhandled
   let info, albums;
   try {
     [info, albums] = await Promise.all([
@@ -3559,8 +3560,14 @@ async function loadArtist(src, gen) {
     $("detailName").textContent = src.name;
   }
   detailAlbums = (albums || []).filter((a) => a && a.id);
-  detailTracks = [];
+  const popular = ((info && info.top_tracks) || []).filter((t) => t && t.uri);
+  detailTracks = popular;
+  artistTracksTitle = "Popular";
   renderArtist();
+  if (popular.length) return;
+  // favorites come from your top tracks and Liked Songs: a cold Liked cache is many pages, so the
+  // albums above don't wait for it
+  const sources = favoriteSources(optional);
   let lists;
   try {
     lists = await sources;
@@ -3568,8 +3575,9 @@ async function loadArtist(src, gen) {
     return void (gen === state.gen.detail && overlayFailed(e));
   }
   if (gen !== state.gen.detail) return;
-  // Spotify no longer gives an artist's top tracks or play counts: rank from your own listening
+  // no popular tracks (the Web API no longer gives them): rank from your own listening
   detailTracks = favoritesBy(src.id, lists || []);
+  artistTracksTitle = "Your favorites";
   renderArtist();
 }
 
@@ -3579,7 +3587,7 @@ function renderArtist() {
   $("detailPlay").disabled = !detailTracks.length;
   setText("detailStatus", detailAlbums.length || detailTracks.length ? "" : "No albums or singles.");
   const favorites = detailTracks.length
-    ? `<h3 class="group-title">Your favorites</h3><div class="rows">${detailTracks.map((t, i) => trackRow(t, i, { num: true, art: true })).join("")}</div>` +
+    ? `<h3 class="group-title">${esc(artistTracksTitle)}</h3><div class="rows">${detailTracks.map((t, i) => trackRow(t, i, { num: true, art: true })).join("")}</div>` +
       (detailAlbums.length ? `<h3 class="group-title">Albums and singles</h3>` : "")
     : "";
   $("detailRows").innerHTML =

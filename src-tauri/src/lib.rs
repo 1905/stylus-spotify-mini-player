@@ -3,8 +3,12 @@ mod audio_out;
 mod auth;
 mod cache;
 mod dock;
+mod hashes;
+mod internal;
 mod media;
 mod nowplaying;
+mod parse;
+mod pb;
 mod player;
 mod quota;
 mod session;
@@ -19,6 +23,7 @@ use tauri::Manager;
 pub fn run() {
     applog::init();
     let engine = player::Engine::new(Arc::new(player::FileStore));
+    internal::attach(engine.clone());
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(engine.clone())

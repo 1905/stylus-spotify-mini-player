@@ -3,7 +3,7 @@
 // Scenario from ?s= : playing (default), paused, nothing, nodevice, login, reconnect,
 // error, library, library-detail, search, search-empty, long-titles, ad,
 // devices (3 devices incl. a restricted one, picker open), library-full (all Library groups),
-// artist (The xx artist page open), mix-detail (first Spotify mix open),
+// artist (The xx artist page open, with its Popular tracks), mix-detail (first Spotify mix open),
 // no-volume (the active device has no remote volume),
 // engine-login (the in-app player needs its login; "This Mac" (shown as "Here") shows up after engine_login, picker open),
 // engine-down (the in-app player failed, picker open),
@@ -507,7 +507,13 @@
     },
     get_artist: ({ artistId }) => {
       const page = (fx.artists || {})[artistId];
-      if (page) return clone(page.artist);
+      // the captured artist page has Spotify's popular tracks (internal endpoints); the rest have
+      // none, as from the Web API, so the page falls back to "Your favorites"
+      if (page) {
+        const popular = allTracks().filter((t) => (t.artist_list || []).some((x) => x.id === artistId));
+        const seen = new Set();
+        return { ...clone(page.artist), top_tracks: clone(popular.filter((t) => !seen.has(t.uri) && seen.add(t.uri)).slice(0, 10)) };
+      }
       const tile = artistTiles().find((a) => a.id === artistId);
       if (tile) return clone(tile);
       for (const t of allTracks()) {

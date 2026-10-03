@@ -15,7 +15,7 @@ use librespot_metadata::audio::{AudioItem, UniqueFields};
 use librespot_metadata::image::ImageSize;
 use librespot_metadata::{Metadata, Track};
 use librespot_playback::player::{PlayerEvent, PlayerEventChannel};
-use librespot_protocol::connect::ClusterUpdate;
+use librespot_protocol::connect::{Cluster, ClusterUpdate};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
@@ -24,7 +24,7 @@ use crate::session::{Repeat, Source, Tracker};
 pub const EVENT: &str = "player-state";
 const LOG: &str = "needle::now";
 /// Up-next tracks in the payload: as many as the cover row shows.
-const QUEUE_MAX: usize = 20;
+pub const QUEUE_MAX: usize = 20;
 /// Track metadata kept; past this the cache starts over.
 const META_CACHE_MAX: usize = 500;
 /// Metadata requests in flight for one queue.
@@ -276,6 +276,9 @@ pub struct NowPlaying {
     meta: Mutex<HashMap<String, TrackInfo>>,
     fetching: Mutex<HashSet<String>>,
     session: Mutex<Option<Session>>,
+    /// The latest Connect cluster (all devices, the active one's player state), for
+    /// `list_devices` / `get_queue` without the Web API. None until the first update of a session.
+    cluster: Mutex<Option<Cluster>>,
     app: OnceLock<AppHandle>,
     tracker: Arc<Tracker>,
     /// An event was seen: before that, `local_state` is null.
@@ -294,6 +297,7 @@ impl NowPlaying {
             meta: Mutex::new(HashMap::new()),
             fetching: Mutex::new(HashSet::new()),
             session: Mutex::new(None),
+            cluster: Mutex::new(None),
             app: OnceLock::new(),
             tracker,
             seen: Mutex::new(false),
@@ -307,6 +311,22 @@ impl NowPlaying {
     /// The player's session (a new one after every reconnect): metadata is fetched with it.
     pub fn set_session(&self, session: Session) {
         *lock(&self.session) = Some(session);
+        *lock(&self.cluster) = None;
+    }
+
+    /// The latest Connect cluster of the current session.
+    pub fn cluster(&self) -> Option<Cluster> {
+        lock(&self.cluster).clone()
+    }
+
+    /// This Mac's volume, 0–100 %.
+    pub fn volume_percent(&self) -> u8 {
+        volume_percent(lock(&self.now).volume)
+    }
+
+    /// The player's current session, if it ever connected.
+    pub fn session(&self) -> Option<Session> {
+        lock(&self.session).clone()
     }
 
     pub fn set_volume(&self, volume: u16) {
@@ -404,6 +424,7 @@ impl NowPlaying {
         let was = {
             let mut now = lock(&self.now);
             let was = now.engine_active;
+            *lock(&self.cluster) = None;
             now.engine_active = false;
             now.playing = false;
             was
@@ -417,6 +438,7 @@ impl NowPlaying {
     /// A Connect cluster update. While this Mac is the active device: its context and up-next.
     pub fn on_cluster(self: &Arc<Self>, update: &ClusterUpdate, device_id: &str) {
         let cluster = &update.cluster;
+        *lock(&self.cluster) = Some(cluster.clone().unwrap_or_default());
         if cluster.active_device_id != device_id {
             return;
         }

@@ -313,6 +313,28 @@ impl Engine {
         self.0.device_id.get_or_init(|| load_or_create_device_id(&device_id_path())).clone()
     }
 
+    /// The player's session while the engine is ready and the session alive: internal.rs
+    /// calls Spotify's internal endpoints with its tokens. None otherwise.
+    pub fn live_session(&self) -> Option<Session> {
+        if self.state() != State::Ready {
+            return None;
+        }
+        self.0.now.session().filter(|s| !s.is_invalid())
+    }
+
+    /// What Spotify Connect looks like from here while ready: the latest cluster, this Mac's
+    /// device id and its volume %. None before the first cluster update of the session.
+    pub fn connect_view(&self) -> Option<(librespot_protocol::connect::Cluster, String, u8)> {
+        let session = self.live_session()?;
+        let cluster = self.0.now.cluster()?;
+        Some((cluster, session.device_id().to_string(), self.0.now.volume_percent()))
+    }
+
+    /// This Mac's volume, 0–100 %.
+    pub fn volume_percent(&self) -> u8 {
+        self.0.now.volume_percent()
+    }
+
     /// Runs `f` on the current Spirc. Err `ENGINE_NOT_READY` when the engine isn't
     /// ready or Spirc is gone (a send to a stopped Spirc fails too). Ok only means
     /// the command is queued.
