@@ -91,9 +91,9 @@ button:disabled {
   outline: none;
 }
 
+/* icons (src/lib/icons.js) carry their own fill and stroke; CSS sets size and colour only */
 svg {
   display: block;
-  fill: currentColor;
 }
 
 /* ---------- background: two art layers + grain ---------- */
@@ -205,8 +205,8 @@ svg {
 }
 
 .nav-btn svg {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
 }
 
 /* the device chip, then the settings cog */
@@ -251,10 +251,11 @@ svg {
   text-overflow: ellipsis;
 }
 
-.device-caret {
+.device .ic-chevron-down {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.1; /* the family's 1.75 looks hairline this small */
   opacity: 0.7;
 }
 
@@ -357,6 +358,12 @@ svg {
 .settings-wrap .icon-btn {
   width: 36px;
   height: 36px;
+}
+
+/* the cog is as tall as the device chip's text line plus its padding feels: 22 px in 36 */
+.settings-wrap .icon-btn svg {
+  width: 22px;
+  height: 22px;
 }
 
 .settings-wrap .icon-btn[aria-expanded="true"] {
@@ -943,8 +950,15 @@ svg {
 }
 
 .ctl-play svg {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+}
+
+/* previous and next: the solid pair beside play, a step bigger than the line icons */
+#prevBtn svg,
+#nextBtn svg {
+  width: 24px;
+  height: 24px;
 }
 
 .ctl-play:hover:not(:disabled) {
@@ -956,12 +970,12 @@ svg {
   background: rgb(246 244 248 / 0.8);
 }
 
-.ctl-play .i-pause,
-.is-playing .ctl-play .i-play {
+.ctl-play .ic-pause,
+.is-playing .ctl-play .ic-play {
   display: none;
 }
 
-.is-playing .ctl-play .i-pause {
+.is-playing .ctl-play .ic-pause {
   display: block;
 }
 
@@ -969,17 +983,18 @@ svg {
   opacity: 0.3;
 }
 
-/* shuffle, repeat, heart: off = faint, on = full colour + a dot under the icon */
+/* shuffle, repeat, heart: off = the normal grey, on = the accent; shuffle and repeat add a dot
+   under the icon, the heart fills */
 .ctl-toggle {
   position: relative;
-  color: var(--fg-3);
 }
 
-.ctl-toggle.is-on {
-  color: var(--fg);
+.ctl-toggle.is-on,
+.ctl-toggle.is-on:hover:not(:disabled) {
+  color: var(--live);
 }
 
-.ctl-toggle.is-on::after {
+.ctl-toggle.is-on:not(#heartBtn)::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -992,29 +1007,27 @@ svg {
 }
 
 .ctl-toggle svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
-/* repeat this song: a "1" badge on the loop */
-#repeatBtn[data-mode="track"]::before {
-  content: "1";
-  position: absolute;
-  top: 9px;
-  right: 7px;
-  min-width: 11px;
-  height: 11px;
-  border-radius: 6px;
-  background: var(--fg);
-  color: var(--ink);
-  font-size: 8.5px;
-  font-weight: 700;
-  line-height: 11px;
-  text-align: center;
+/* repeat this song: the loop with a 1 inside */
+#repeatBtn .ic-repeat-one,
+#repeatBtn[data-mode="track"] .ic-repeat {
+  display: none;
 }
 
-#heartBtn.is-on .heart {
-  fill: currentColor;
+#repeatBtn[data-mode="track"] .ic-repeat-one {
+  display: block;
+}
+
+#heartBtn .ic-heart-filled,
+#heartBtn.is-on .ic-heart {
+  display: none;
+}
+
+#heartBtn.is-on .ic-heart-filled {
+  display: block;
 }
 
 /* heart and volume sit at the right end of the control row */
@@ -1032,12 +1045,14 @@ svg {
   align-items: center;
 }
 
-.volume .i-mute,
-.volume.is-muted .i-vol {
+/* the speaker: two waves, one wave under 40%, crossed out at 0 */
+.volume :is(.ic-volume-low, .ic-mute),
+.volume:is(.is-low, .is-muted) .ic-volume-high {
   display: none;
 }
 
-.volume.is-muted .i-mute {
+.volume.is-low:not(.is-muted) .ic-volume-low,
+.volume.is-muted .ic-mute {
   display: block;
 }
 
@@ -1498,12 +1513,12 @@ svg {
   background: linear-gradient(135deg, rgb(var(--v) / 0.9), rgb(var(--v) / 0.35));
 }
 
-.liked-art .liked-icon {
+.liked-art .ic-heart-filled {
   width: 24px;
   height: 24px;
 }
 
-.detail-cover.is-liked .liked-icon {
+.detail-cover.is-liked .ic-heart-filled {
   width: 84px;
   height: 84px;
 }
@@ -2485,39 +2500,14 @@ svg {
   border-radius: 50%;
 }
 
-/* ---------- Spotify rate-limited the app's Web API: a calm line, not an error ---------- */
+/* ---------- Spotify rate-limited the app's Web API: one quiet line in Settings ---------- */
 
-.quota-note {
-  margin: 0;
-  color: var(--fg-2);
-  font-size: 12px;
-  line-height: 1.4;
+.set-quota {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--hair);
 }
 
-/* under the device chip; the device menu covers it while open */
-.quota-chip {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 10px;
-  max-width: min(480px, 70vw);
-  text-align: right;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-.device[aria-expanded="true"] ~ .quota-chip {
-  display: none;
-}
-
-.quota-banner {
-  padding: 8px 12px;
-  margin-bottom: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--hair);
-}
-
-.quota-note[hidden] {
+.set-quota[hidden] {
   display: none;
 }

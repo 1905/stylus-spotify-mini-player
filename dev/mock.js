@@ -14,8 +14,11 @@
 // playlist (playing the 5th song of the first captured playlist, as its context: the playlist panel lists it),
 // here (the in-app player is ready and plays the playlist: device "Here", quality changes restart it;
 //   session_get returns that play; Rust's player-state events drive the UI, so no playback_state poll),
-// ratelimited (like here, but Spotify rate-limited the app: every Web API command rejects with
-//   RATE_LIMITED:50000:…, api_status says so; the disk cache and the store's account are from the last run).
+// ratelimited (like here, but Spotify rate-limited the app's Web API: commands with no other source (remote
+//   playback, playback_state) reject with RATE_LIMITED:50000:…, api_status says so; the rest are served as
+//   by Spotify's internal API; the disk cache and the store's account are from the last run),
+// ratelimited-down (ratelimited, and the internal API fails too: every network command rejects with
+//   RATE_LIMITED, as Rust reports when its Web API fallback is blocked).
 // player-state: emitted after every command that changes what the in-app player plays, and when its
 //   track ends; local_state returns the same payload (playback_state's shape + engine_active + queue).
 // The store (store_all / store_set, Rust's state.json) is in memory: ?store=solo seeds settings with the cover row off.
@@ -41,11 +44,12 @@
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
-    "slow", "resume", "search-all", "library-all", "playlist", "here", "ratelimited",
+    "slow", "resume", "search-all", "library-all", "playlist", "here", "ratelimited", "ratelimited-down",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
-  const hereLike = scenario === "here" || scenario === "ratelimited"; // the in-app player plays
+  const limited = scenario === "ratelimited" || scenario === "ratelimited-down";
+  const hereLike = scenario === "here" || limited; // the in-app player plays
   const RATE_LIMIT = "RATE_LIMITED:50000: Spotify paused this app's library access";
   if (scenario !== requested) console.warn(`mock: unknown scenario "${requested}", using "playing"`);
 
@@ -145,7 +149,7 @@
   // the store (state.json), in memory
   const store = {};
   if (new URLSearchParams(location.search).get("store") === "solo") store.settings = { dockArt: true, coverRow: false };
-  if (scenario === "ratelimited") store.account = ME; // the last run saw the account
+  if (limited) store.account = ME; // the last run saw the account
 
   const iso = () => new Date().toISOString();
   const progress = () => {
@@ -376,7 +380,7 @@
     session_get: () => clone(savedSession),
     local_state: () => (localSeen || runActive() ? localPayload() : null),
     api_status: () => ({
-      blockedForSecs: scenario === "ratelimited" ? 50000 : 0,
+      blockedForSecs: limited ? 50000 : 0,
       requestsLastMinute: calls.filter((c) => !LOCAL.test(c.cmd) && Date.now() - c.at < 60e3).length,
       requestsLastHour: calls.filter((c) => !LOCAL.test(c.cmd)).length,
     }),
@@ -585,6 +589,8 @@
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
   const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$|api_status$)/;
+  // commands with no source but the Web API (Rust's spotify.rs; src/lib/quota.js WEB_ONLY)
+  const WEB_ONLY = /^(playback_state|transfer_playback|set_volume|set_shuffle|set_repeat|play_context|play_on_device|resume|resume_at|pause|next_track|previous_track|seek)$/;
   // commands that can change what the in-app player plays: a player-state follows them
   const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
   // `slow`: lists and plays take 2s more
@@ -616,7 +622,7 @@
     const slot = key && `${args.account}/${key}`;
     if (slot && READS_CACHE.has(cmd) && cache.has(slot)) return clone(cache.get(slot));
     if (scenario === "error" && !LOCAL.test(cmd)) return reject("network down");
-    if (scenario === "ratelimited" && !LOCAL.test(cmd)) return reject(RATE_LIMIT);
+    if (limited && (scenario === "ratelimited-down" ? !LOCAL.test(cmd) : WEB_ONLY.test(cmd))) return reject(RATE_LIMIT);
     // the login ends after the first poll: the "session ended" screen
     if (scenario === "ended" && cmd === "playback_state" && (ended = ended + 1) > 1) return reject("AUTH_EXPIRED: session ended (mock)");
     if (scenario === "slow" && SLOW.test(cmd)) await sleep(2000);
@@ -652,7 +658,7 @@
     cache.set(`${ME}/playlist:${plId}:snap_${plId}`, clone((fx.playlistTracks || {})[plId] || []));
   }
   // ratelimited: the disk cache from the last run (playlists, the first playlist, liked songs)
-  if (scenario === "ratelimited") {
+  if (limited) {
     cache.set(`${ME}/playlists`, handlers.get_playlists());
     for (const [plId, rows] of Object.entries(fx.playlistTracks || {})) cache.set(`${ME}/playlist:${plId}:snap_${plId}`, clone(rows));
     cache.set(`${ME}/liked`, handlers.get_saved_tracks());

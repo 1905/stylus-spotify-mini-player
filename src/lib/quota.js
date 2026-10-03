@@ -17,12 +17,30 @@ export function waitText(secs) {
   return `${Math.max(1, Math.round(secs / 60))} min`;
 }
 
-/** The calm notice shown while blocked. */
-export const quotaNotice = (secs) => `Spotify paused library access for ${waitText(secs)} — playback here still works`;
+/** Why an action failed while blocked: "remote" = controlling another device, "library" = a library read or write. */
+export const quotaNotice = (kind, secs) => `Spotify limits this for ${waitText(secs)}${kind === "remote" ? " — works on This Mac" : ""}`;
 
-// Commands that never reach the Web API: the in-app player, the store, the disk cache, the log,
-// the OS media controls, the login flow and the quota status itself.
-const LOCAL_CMD = /^(auth_status$|login$|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$|api_status$)/;
+/** The quiet line in Settings while blocked. */
+export const quotaStatus = (secs) => `Web API paused for ${waitText(secs)}`;
 
-/** True for a command that calls the Spotify Web API (blocked while rate-limited). */
-export const isWebApi = (cmd) => !LOCAL_CMD.test(cmd);
+// Commands with no source but the Web API (Rust's spotify.rs): playback of a remote device and its
+// state. Everything else is local, or Rust tries Spotify's internal API first and the Web API last,
+// so it may still work while blocked: Rust answers RATE_LIMITED only when every source failed.
+const WEB_ONLY = new Set([
+  "playback_state",
+  "transfer_playback",
+  "set_volume",
+  "set_shuffle",
+  "set_repeat",
+  "play_context",
+  "play_on_device",
+  "resume",
+  "resume_at",
+  "pause",
+  "next_track",
+  "previous_track",
+  "seek",
+]);
+
+/** True for a command that can only run on the Web API (fails at once while rate-limited). */
+export const isWebOnly = (cmd) => WEB_ONLY.has(cmd);

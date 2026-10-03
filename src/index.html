@@ -35,19 +35,18 @@
       <header class="topbar">
         <div class="topbar-tools">
           <button id="libraryBtn" class="btn btn-ghost nav-btn" type="button" aria-label="Library">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h3v15H4zM9.5 4.5h3v15h-3zM15.2 5.3l2.9-.8 3.9 14.5-2.9.8z" /></svg>
+            <svg class="ic ic-library" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.46 15.5H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.57"/><circle cx="14" cy="13" r="7"/><circle cx="14" cy="13" r="2"/></svg>
           </button>
           <button id="searchBtn" class="btn btn-ghost nav-btn" type="button" aria-label="Search">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
+            <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
           </button>
         </div>
         <div class="topbar-end">
           <div class="device-wrap">
             <button id="deviceBtn" class="device" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="devicePop" hidden>
               <span class="device-dot"></span><span class="device-name"></span>
-              <svg class="device-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 8.6 5.6 5.6 5.6-5.6L19 10l-7 7-7-7z" /></svg>
+              <svg class="ic ic-chevron-down" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 9.25 5.5 5.5 5.5-5.5"/></svg>
             </button>
-            <p class="quota-note quota-chip" data-quota role="status" hidden></p>
             <div id="devicePop" class="device-pop" hidden>
               <div id="deviceList" class="device-list" role="listbox" aria-label="Spotify devices"></div>
               <p class="device-note" role="status" hidden></p>
@@ -55,7 +54,7 @@
           </div>
           <div class="settings-wrap">
             <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPop">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M10.3 2.5h3.4l.5 2.6c.6.2 1.2.6 1.7 1l2.5-.9 1.7 3-2 1.7a7 7 0 0 1 0 2.1l2 1.7-1.7 3-2.5-.9c-.5.4-1.1.8-1.7 1l-.5 2.7h-3.4l-.5-2.7c-.6-.2-1.2-.6-1.7-1l-2.5.9-1.7-3 2-1.7a7 7 0 0 1 0-2.1l-2-1.7 1.7-3 2.5.9c.5-.4 1.1-.8 1.7-1zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" /></svg>
+              <svg class="ic ic-settings" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 5.3l.26-2.19h2.82l.26 2.19a6.9 6.9 0 0 1 1.88.79l1.74-1.37 1.99 1.99-1.37 1.74a6.9 6.9 0 0 1 .79 1.88l2.19.26v2.82l-2.19.26a6.9 6.9 0 0 1-.79 1.88l1.37 1.74-1.99 1.99-1.74-1.37a6.9 6.9 0 0 1-1.88.79l-.26 2.19h-2.82l-.26-2.19a6.9 6.9 0 0 1-1.88-.79l-1.74 1.37-1.99-1.99 1.37-1.74a6.9 6.9 0 0 1-.79-1.88l-2.19-.26v-2.82l2.19-.26a6.9 6.9 0 0 1 .79-1.88L4.72 6.71l1.99-1.99 1.74 1.37a6.9 6.9 0 0 1 1.88-.79z"/><circle cx="12" cy="12" r="2.75"/></svg>
             </button>
             <div id="settingsPop" class="device-pop settings-pop" role="dialog" aria-label="Settings" hidden>
               <div class="set-row">
@@ -75,6 +74,7 @@
                 </div>
                 <p id="qualityNote" class="set-note">Changing restarts the player for a moment.</p>
               </div>
+              <p id="quotaStatus" class="set-note set-quota" role="status" hidden></p>
             </div>
           </div>
         </div>
@@ -100,35 +100,33 @@
         <div class="controls">
           <div class="controls-lead">
             <button id="panelBtn" class="ctl" type="button" aria-label="Playlist" title="Playlist" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel" disabled>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h12v2H4zM4 11h12v2H4zM4 16h7v2H4zM15 14.5v-0.1c0-.6.6-1 1.2-.8l4.3 2.2c.6.3.6 1.1 0 1.4l-4.3 2.2c-.6.3-1.2-.1-1.2-.8z" /></svg>
+              <svg class="ic ic-playlist" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h14M4 11.5h14M4 16.5h6.5"/><path fill="currentColor" stroke="none" d="M14.5 14.1v4.8a.5.5 0 0 0 .76.43l3.9-2.4a.5.5 0 0 0 0-.86l-3.9-2.4a.5.5 0 0 0-.76.43z"/></svg>
             </button>
           </div>
           <div class="controls-main">
             <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h3c2 0 3.2 1 4.2 2.6l2.4 3.8c1 1.6 2.2 2.6 4.2 2.6H20M4 17h3c1.3 0 2.3-.4 3.1-1.2M13.7 8.2C14.5 7.4 15.5 7 16.8 7H20M17.6 4.6 20 7l-2.4 2.4M17.6 14.6 20 17l-2.4 2.4" /></svg>
+              <svg class="ic ic-shuffle" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h2.2c2 0 3.3.9 4.4 2.5l2.8 5c1.1 1.6 2.4 2.5 4.4 2.5H20M4 17h2.2c1.3 0 2.3-.4 3.1-1.1M14.7 8.1c.8-.7 1.8-1.1 3.1-1.1H20M17 4l3 3-3 3M17 14l3 3-3 3"/></svg>
             </button>
             <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.6v12.8c0 .8-.9 1.3-1.6.8L8.6 12.8a1 1 0 0 1 0-1.6l8.8-6.4c.7-.5 1.6 0 1.6.8z" /></svg>
+              <svg class="ic ic-previous" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M18.5 6.4v11.2a.9.9 0 0 1-1.4.75l-8.3-5.6a.9.9 0 0 1 0-1.5l8.3-5.6a.9.9 0 0 1 1.4.75z"/><rect x="5" y="5.5" width="2.25" height="13" rx="1.125"/></svg>
             </button>
             <button id="playBtn" class="ctl ctl-play" type="button" aria-label="Play">
-              <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>
-              <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>
+              <svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M7.5 5.25v13.5a.9.9 0 0 0 1.38.76l10.6-6.75a.9.9 0 0 0 0-1.52L8.88 4.49A.9.9 0 0 0 7.5 5.25z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="5" width="4.25" height="14" rx="1.5"/><rect x="13.75" y="5" width="4.25" height="14" rx="1.5"/></svg>
             </button>
             <button id="nextBtn" class="ctl" type="button" aria-label="Next">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5h-2.2v14H18zM5 5.6v12.8c0 .8.9 1.3 1.6.8l8.8-6.4a1 1 0 0 0 0-1.6L6.6 4.8C5.9 4.3 5 4.8 5 5.6z" /></svg>
+              <svg class="ic ic-next" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M5.5 6.4v11.2a.9.9 0 0 0 1.4.75l8.3-5.6a.9.9 0 0 0 0-1.5L6.9 5.65a.9.9 0 0 0-1.4.75z"/><rect x="16.75" y="5.5" width="2.25" height="13" rx="1.125"/></svg>
             </button>
             <button id="repeatBtn" class="ctl ctl-toggle" type="button" aria-label="Repeat" title="Repeat" data-mode="off">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4.5 11.5V10A3 3 0 0 1 7.5 7H19M16.6 4.6 19 7l-2.4 2.4M19.5 12.5V14a3 3 0 0 1-3 3H5M7.4 19.4 5 17l2.4-2.4" /></svg>
+              <svg class="ic ic-repeat" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5v-2a3 3 0 0 1 3-3h13M17 3.5l3 3-3 3M20 12.5v2a3 3 0 0 1-3 3H4M7 20.5l-3-3 3-3"/></svg><svg class="ic ic-repeat-one" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5v-2a3 3 0 0 1 3-3h13M17 3.5l3 3-3 3M20 12.5v2a3 3 0 0 1-3 3H4M7 20.5l-3-3 3-3"/><path stroke-width="1.6" d="M10.9 10.4 12.4 9.4v5.2"/></svg>
             </button>
           </div>
           <div class="controls-side">
             <button id="heartBtn" class="ctl ctl-toggle" type="button" aria-label="Save to Liked Songs" title="Save to Liked Songs" aria-pressed="false" hidden>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path class="heart" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" d="M12 19.5S4.5 15 4.5 9.6A4 4 0 0 1 12 7.7a4 4 0 0 1 7.5 1.9c0 5.4-7.5 9.9-7.5 9.9z" /></svg>
+              <svg class="ic ic-heart" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20c-.3 0-.55-.08-.8-.26C8.4 17.7 4 14.2 4 9.6 4 7.05 5.95 5 8.4 5c1.5 0 2.8.73 3.6 1.9C12.8 5.73 14.1 5 15.6 5 18.05 5 20 7.05 20 9.6c0 4.6-4.4 8.1-7.2 10.14-.25.18-.5.26-.8.26z"/></svg><svg class="ic ic-heart-filled" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 20c-.3 0-.55-.08-.8-.26C8.4 17.7 4 14.2 4 9.6 4 7.05 5.95 5 8.4 5c1.5 0 2.8.73 3.6 1.9C12.8 5.73 14.1 5 15.6 5 18.05 5 20 7.05 20 9.6c0 4.6-4.4 8.1-7.2 10.14-.25.18-.5.26-.8.26z"/></svg>
             </button>
             <div id="volume" class="volume" hidden>
               <button id="volBtn" class="ctl" type="button" aria-label="Mute" title="Mute">
-                <svg class="i-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" /><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M14.8 9.6a3.4 3.4 0 0 1 0 4.8M17.4 7.2a6.8 6.8 0 0 1 0 9.6" /></svg>
-                <svg class="i-mute" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" /><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m15.2 9.8 4.4 4.4m0-4.4-4.4 4.4" /></svg>
+                <svg class="ic ic-volume-high" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1 1 0 0 0 1 1h2.6l4.15 3.6a.6.6 0 0 0 1-.45V5.85a.6.6 0 0 0-1-.45L7.6 9H5a1 1 0 0 0-1 1z"/><path d="M15.75 9.5a3.5 3.5 0 0 1 0 5M18.25 7a7 7 0 0 1 0 10"/></svg><svg class="ic ic-volume-low" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1 1 0 0 0 1 1h2.6l4.15 3.6a.6.6 0 0 0 1-.45V5.85a.6.6 0 0 0-1-.45L7.6 9H5a1 1 0 0 0-1 1z"/><path d="M15.75 9.5a3.5 3.5 0 0 1 0 5"/></svg><svg class="ic ic-mute" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1 1 0 0 0 1 1h2.6l4.15 3.6a.6.6 0 0 0 1-.45V5.85a.6.6 0 0 0-1-.45L7.6 9H5a1 1 0 0 0-1 1z"/><path d="m16 10 4 4M20 10l-4 4"/></svg>
               </button>
               <div class="vol-pop">
                 <div id="volSlider" class="scrub vol-slider" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
@@ -150,7 +148,7 @@
             <h2 id="panelTitle" class="panel-title"></h2>
           </div>
           <button class="icon-btn" type="button" data-close aria-label="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
           </button>
         </header>
         <div id="panelList" class="panel-list"></div>
@@ -163,11 +161,11 @@
         <header class="sheet-bar">
           <h2 id="libTitle" class="sheet-title">Library</h2>
           <button id="libBack" class="btn btn-ghost btn-back" type="button" hidden>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            <svg class="ic ic-back" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.75 5.5 8.25 12l6.5 6.5"/></svg>
             <span class="back-label">Library</span>
           </button>
           <button class="icon-btn" type="button" data-close aria-label="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
           </button>
         </header>
         <div id="libTabs" class="lib-tabs" role="tablist" aria-label="Library">
@@ -179,7 +177,6 @@
           <button id="libTab-mixes" class="lib-tab" type="button" role="tab" data-tab="mixes" aria-controls="libMixes" aria-selected="false" tabindex="-1" hidden>Mixes</button>
         </div>
         <div id="sheetBody" class="sheet-body">
-          <p class="quota-note quota-banner" data-quota role="status" hidden></p>
           <div id="libLevel1">
             <section id="libPlaylists" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-playlists">
               <p id="listStatus" class="status" role="status" hidden></p>
@@ -235,10 +232,9 @@
       <div class="backdrop" data-close></div>
       <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
         <label class="palette-field">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
+          <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
           <input id="searchInput" type="text" placeholder="Songs or albums" aria-label="Search songs or albums" autocomplete="off" spellcheck="false" />
         </label>
-        <p class="quota-note quota-banner" data-quota role="status" hidden></p>
         <div id="searchResults" class="palette-results" hidden></div>
       </div>
     </div>
@@ -247,11 +243,11 @@
       <section id="page" class="page" role="dialog" aria-modal="true" aria-labelledby="pageTitle" tabindex="-1">
         <header class="page-bar">
           <button id="pageBack" class="btn btn-ghost btn-back" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            <svg class="ic ic-back" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.75 5.5 8.25 12l6.5 6.5"/></svg>
             <span class="back-label">Back</span>
           </button>
           <button class="icon-btn" type="button" data-close aria-label="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
           </button>
         </header>
         <div id="pageBody" class="page-body">

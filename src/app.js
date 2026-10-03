@@ -10,23 +10,25 @@ import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
-import { isWebApi, rateLimitedSecs, rateLimitedError, quotaNotice, waitText } from "./lib/quota.js";
+import { isWebOnly, rateLimitedSecs, rateLimitedError, quotaNotice, quotaStatus, waitText } from "./lib/quota.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
 import { originUri, offsettable } from "./lib/source.js";
 import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
+import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
 let authSession = 0;
 const STALE = new Promise(() => {});
-// While Spotify rate-limits the app, a Web API command fails here without reaching Rust (quota.rs
-// would refuse it too, without a request): RATE_LIMITED:<secs>: …
+// While Spotify rate-limits the app, a command with no source but the Web API fails here without
+// reaching Rust (quota.rs would refuse it too, without a request): RATE_LIMITED:<secs>: …
+// The rest go to Rust, which tries Spotify's internal API first.
 function invoke(cmd, args) {
   const sess = authSession;
-  if (isWebApi(cmd) && blockedMs() > 0) return blockedReject(cmd, sess);
+  if (isWebOnly(cmd) && blockedMs() > 0) return blockedReject(cmd, sess);
   return window.__TAURI__.core.invoke(cmd, args).then(
     (v) => (sess === authSession ? v : STALE),
     (e) => {
@@ -80,7 +82,7 @@ const isCode = (e, code) => String(e).startsWith(code);
 /** A line in the app log file (<app dir>/logs/needle.log). Never throws. */
 const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
 const reason = (e) =>
-  rateLimitedSecs(e) ? `Spotify paused library access for ${waitText(rateLimitedSecs(e))}` : String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
+  rateLimitedSecs(e) ? `Spotify limits this for ${waitText(rateLimitedSecs(e))}` : String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
 
 /** Run a player command and log one line: what, the path (local or remote, the device), ok or the error. */
 async function logged(what, fn) {
@@ -132,7 +134,7 @@ function toast(msg) {
 // ---------- Spotify's rate limit on the Web API (see lib/quota.js, Rust quota.rs) ----------
 
 let blockedUntil = 0; // performance.now() when the Web API block ends; 0 = open
-let quotaToasted = false; // the toast shows once per block
+const quotaToasted = new Set(); // the kinds ("remote", "library") whose notice this run already showed
 // disk-cache reads in flight: a blocked call fails only after them, so a cached copy lands before the error
 const diskPending = new Set();
 
@@ -153,32 +155,44 @@ function noteRateLimited(e) {
   const was = blockedMs() > 0;
   blockedUntil = performance.now() + secs * 1000;
   if (was) return;
-  applog("warn", `Web API rate-limited for ${secs} s: the UI makes no Web API calls until then; playback here keeps working`);
+  applog("warn", `Web API rate-limited for ${secs} s: no Web-API-only calls until then; playback here and the internal API keep working`);
   renderQuota();
-  if (!quotaToasted && !$("stage").hidden) {
-    quotaToasted = true;
-    toast(quotaNotice(secs));
-  }
 }
+
+/**
+ * An action failed because it needs the blocked Web API: the notice, once per run for each kind
+ * ("remote": another device; "library": a library read or write whose internal source failed too).
+ * True when e is that error, so the caller shows nothing else.
+ */
+function limitedToast(kind, e) {
+  const secs = rateLimitedSecs(e);
+  if (!secs) return false;
+  if (!quotaToasted.has(kind)) {
+    quotaToasted.add(kind);
+    toast(quotaNotice(kind, secs));
+  }
+  return true;
+}
+
+/** reason(e) for a library status line; a rate limit also gets its once-a-run notice. */
+const libReason = (e) => (limitedToast("library", e), reason(e));
 
 /** The block ran out: allowed again. Called every loop tick. */
 function syncQuota() {
   if (blockedUntil && blockedMs() === 0) {
     blockedUntil = 0;
-    quotaToasted = false;
     applog("info", "Web API block over: polling allowed again");
   }
   renderQuota();
 }
 
-/** The calm notice (under the device chip, in the Library and Search): shown while blocked. */
+/** The quiet line in Settings while blocked. Nothing else shows the block until an action needs it. */
 function renderQuota() {
   const ms = blockedMs();
-  const text = ms > 0 ? quotaNotice(ms / 1000) : "";
-  for (const el of document.querySelectorAll("[data-quota]")) {
-    if (el.textContent !== text) el.textContent = text;
-    el.hidden = !text;
-  }
+  const text = ms > 0 ? quotaStatus(ms / 1000) : "";
+  const el = $("quotaStatus");
+  if (el.textContent !== text) el.textContent = text;
+  el.hidden = !text;
 }
 
 /** Rust's block at startup (it survives a relaunch: state.json `apiBlockedUntil`). */
@@ -704,12 +718,11 @@ function makeCover(item) {
   // the play button shows on hover/focus for past and next covers (CSS hides it on "now")
   el.innerHTML =
     `<div class="art">${artHtml(t.cover, t.name, 'crossorigin="anonymous"')}</div>` +
-    (isLocalFile(t.uri) ? "" : `<button class="cover-play" type="button" aria-label="${esc(`Play ${t.name}`)}">${PLAY_ICON}</button>`) +
+    (isLocalFile(t.uri) ? "" : `<button class="cover-play" type="button" aria-label="${esc(`Play ${t.name}`)}">${ICONS.play}</button>`) +
     `<figcaption><span class="ct">${esc(t.name)}</span><span class="ca">${esc(t.artists)}</span></figcaption>`;
   return el;
 }
 
-const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>';
 
 let runItems = new Map(); // the covers on screen: key → buildRun item
 let runNowUri = null; // the song the run was last built around: a new one returns a pan to rest
@@ -1080,6 +1093,7 @@ function renderVolume() {
   box.hidden = state.mode === "idle" || !state.supportsVolume || v == null;
   if (box.hidden) return closeVolume();
   box.classList.toggle("is-muted", v === 0);
+  box.classList.toggle("is-low", v > 0 && v < 40);
   $("volFill").style.width = `${v}%`;
   const slider = $("volSlider");
   slider.setAttribute("aria-valuenow", String(v));
@@ -1190,7 +1204,7 @@ async function withDeviceNow(fn) {
   } catch (e) {
     if (isCode(e, "AUTH_EXPIRED")) return expire(), false;
     if (!isCode(e, "NO_ACTIVE_DEVICE")) {
-      toast(`Spotify didn't respond: ${reason(e)}`);
+      if (!limitedToast("remote", e)) toast(`Spotify didn't respond: ${reason(e)}`);
       return false;
     }
   }
@@ -1780,7 +1794,7 @@ async function toggleSaved() {
     // still this click on this track: ask Spotify what is true (!want may itself be unconfirmed)
     if (gen === heartGen && state.now && state.now.id === t.id) checkSaved(t);
     renderChrome();
-    toast(`Spotify didn't respond: ${reason(e)}`);
+    if (!limitedToast("library", e)) toast(`Spotify didn't respond: ${reason(e)}`);
   }
 }
 
@@ -2132,7 +2146,7 @@ async function pickDevice(d) {
     if (isCode(failed, "NO_ACTIVE_DEVICE") || /\b404\b/.test(String(failed))) {
       toast(`${d.name} isn't available any more`);
       refreshDevices();
-    } else {
+    } else if (!limitedToast("remote", failed)) {
       toast(`Spotify didn't respond: ${reason(failed)}`);
     }
   }
@@ -2766,7 +2780,6 @@ function artistLinks(t) {
   return list.map((a) => `<button class="artist-link" type="button" data-artist="${esc(a.id)}">${esc(a.name)}</button>`).join(", ");
 }
 
-const QUEUE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z" /></svg>';
 
 /**
  * A playable track row. num: show the position; art: show the cover (album rows skip it, it's the same every row).
@@ -2785,7 +2798,7 @@ function trackRow(t, i, { num, art }) {
     `<span class="row-sub">${artistLinks(t)}</span></span>` +
     `<span class="row-time">${fmtTime(t.duration_ms)}</span>` +
     // Spotify can't queue a local file
-    (local ? "<span></span>" : `<button class="row-queue" type="button" aria-label="Add to queue" title="Add to queue">${QUEUE_ICON}</button>`) +
+    (local ? "<span></span>" : `<button class="row-queue" type="button" aria-label="Add to queue" title="Add to queue">${ICONS.addToQueue}</button>`) +
     `</div>`
   );
 }
@@ -2971,7 +2984,7 @@ async function fillGroup(group, load, render, what, key = null, skeleton = null)
     for (const el of group.querySelectorAll(".is-skeleton")) el.remove();
     group.hidden = isScopeError(e);
     // the Liked Songs row has no status line: its subtitle says it
-    setEl(group.querySelector(".status") || group.querySelector(".row-sub"), `Couldn't load ${what} — ${reason(e)}`);
+    setEl(group.querySelector(".status") || group.querySelector(".row-sub"), `Couldn't load ${what} — ${libReason(e)}`);
   } finally {
     if (live()) group.removeAttribute("aria-busy");
   }
@@ -3197,7 +3210,7 @@ function renderTop(tracks, artists, failed) {
   renderShelf("topArtists");
   const err = failed.find((e) => !isScopeError(e));
   const empty = !topTrackList.length && !topArtistList.length;
-  setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${reason(err)}` : empty ? "Nothing here yet for this time range." : "");
+  setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${libReason(err)}` : empty ? "Nothing here yet for this time range." : "");
 }
 
 function onTopTab(e) {
@@ -3345,7 +3358,7 @@ async function loadPlaylists() {
     if (overlayFailed(e)) return;
     if (shown === null) {
       list.innerHTML = "";
-      setText("listStatus", `Couldn't load your playlists — ${reason(e)}`);
+      setText("listStatus", `Couldn't load your playlists — ${libReason(e)}`);
     }
   } finally {
     playlistsLoading = false;
@@ -3368,7 +3381,6 @@ function renderPlaylists() {
   renderMixes();
 }
 
-const LIKED_ART = '<svg class="liked-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3S3.8 15.5 3.8 9.4A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 8.2 2.2c0 6.1-8.2 10.9-8.2 10.9z" /></svg>';
 
 const openArtist = (link) => openDetail({ kind: "artist", id: link.dataset.artist, name: link.textContent, cover: null, sub: "Artist" });
 const openArtistTile = (a) => a && openDetail({ kind: "artist", id: a.id, name: a.name, cover: a.image, sub: "Artist" });
@@ -3410,7 +3422,7 @@ async function openDetail(src, push = true) {
   const cover = $("detailCover");
   cover.classList.toggle("is-round", src.kind === "artist");
   cover.classList.toggle("is-liked", src.kind === "liked");
-  cover.innerHTML = src.kind === "liked" ? LIKED_ART : artHtml(src.cover, src.name);
+  cover.innerHTML = src.kind === "liked" ? ICONS.heartFilled : artHtml(src.cover, src.name);
   $("detailName").textContent = src.name;
   setText("detailSub", src.sub);
   setText("detailNote", src.kind === "mix" ? MIX_NOTE : "");
@@ -3457,7 +3469,7 @@ async function openDetail(src, push = true) {
     rows.removeAttribute("aria-busy");
     if (shown !== null) return; // keep the cached rows
     rows.innerHTML = "";
-    setText("detailStatus", `Couldn't load tracks — ${reason(e)}`);
+    setText("detailStatus", `Couldn't load tracks — ${libReason(e)}`);
     return;
   }
   fresh = true;
@@ -3548,7 +3560,7 @@ async function loadArtist(src, gen) {
     if (overlayFailed(e)) return;
     $("detailRows").innerHTML = "";
     $("detailRows").removeAttribute("aria-busy");
-    setText("detailStatus", `Couldn't load albums — ${reason(e)}`);
+    setText("detailStatus", `Couldn't load albums — ${libReason(e)}`);
     return;
   }
   if (gen !== state.gen.detail) return;
@@ -3696,7 +3708,7 @@ async function runSearch(q, gen) {
   } catch (e) {
     if (gen !== state.gen.search) return;
     box.removeAttribute("aria-busy");
-    if (!overlayFailed(e)) searchMessage(`Search failed — ${reason(e)}`);
+    if (!overlayFailed(e)) searchMessage(`Search failed — ${libReason(e)}`);
     return;
   }
   if (gen !== state.gen.search) return;
@@ -3851,7 +3863,7 @@ function renderPageFoot() {
   setText("pageSub", "");
   const noun = kind === "track" ? "songs" : "albums";
   let status = "";
-  if (list.error) status = n ? `Couldn't load more — ${reason(list.error)}` : `Couldn't load ${noun} — ${reason(list.error)}`;
+  if (list.error) status = n ? `Couldn't load more — ${libReason(list.error)}` : `Couldn't load ${noun} — ${libReason(list.error)}`;
   else if (!n && !list.loading && !list.hasMore) status = `No ${noun} for “${page.query}”.`;
   setText("pageStatus", status);
   // while the first pages load, the skeletons say it; after that the button does
