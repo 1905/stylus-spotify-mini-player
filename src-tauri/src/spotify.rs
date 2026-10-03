@@ -1,7 +1,7 @@
 //! Thin Spotify Web API client: playlists, albums, search, queue, history and
 //! Spotify Connect playback control.
 //!
-//! Errors starting with `AUTH_EXPIRED` or `NO_ACTIVE_DEVICE` are codes the
+//! Errors starting with `AUTH_EXPIRED`, `NO_ACTIVE_DEVICE` or `RATE_LIMITED` are codes the
 //! frontend matches with `startsWith`.
 
 use crate::auth::{http, urlencode, valid_access_token};
@@ -36,16 +36,24 @@ fn api_path(url: &str) -> &str {
     url.strip_prefix(API).unwrap_or(url)
 }
 
-/// One Spotify request: the response body as text, or a mapped error.
+/// One Spotify request: the response body as text, or a mapped error. Every Web API call
+/// comes through here: while Spotify rate-limits the app it fails at once with
+/// `RATE_LIMITED:<secs>: …` and sends nothing (quota.rs); each request sent is counted.
 async fn request(method: Method, path: &str, body: Option<Value>) -> Result<String, String> {
+    crate::quota::check()?;
     let token = valid_access_token().await?;
     let req = http().request(method, format!("{API}{path}")).bearer_auth(token);
     let req = match body {
         Some(b) => req.json(&b),
         None => req.header("Content-Length", "0"),
     };
+    crate::quota::record(path);
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
+    if status.as_u16() == 429 {
+        let retry_after = resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()).map(str::to_string);
+        return Err(crate::quota::on_429(retry_after.as_deref(), path));
+    }
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
         return Err(api_error(status.as_u16(), path, &text));

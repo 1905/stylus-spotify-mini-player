@@ -2484,3 +2484,40 @@ svg {
 #libFollowing .album.is-skeleton .art {
   border-radius: 50%;
 }
+
+/* ---------- Spotify rate-limited the app's Web API: a calm line, not an error ---------- */
+
+.quota-note {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* under the device chip; the device menu covers it while open */
+.quota-chip {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 10px;
+  max-width: min(480px, 70vw);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.device[aria-expanded="true"] ~ .quota-chip {
+  display: none;
+}
+
+.quota-banner {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--hair);
+}
+
+.quota-note[hidden] {
+  display: none;
+}

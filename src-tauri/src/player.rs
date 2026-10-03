@@ -30,6 +30,7 @@ use serde::Serialize;
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter, State as Managed};
 use tokio::sync::watch;
 
+use crate::nowplaying::{self, NowPlaying};
 use crate::session::{self, Repeat, Source, Tracker};
 
 /// The Connect device name other Spotify clients show. Renaming keeps the device id.
@@ -270,10 +271,14 @@ struct Inner {
     session: Arc<Tracker>,
     /// The saved session is loaded back on the first ready of the process only.
     restore_tried: AtomicBool,
+    /// What plays here, for the UI (`player-state` events, nowplaying.rs).
+    now: Arc<NowPlaying>,
 }
 
 impl Engine {
     pub fn new(store: Arc<dyn CredStore>) -> Self {
+        let session = Arc::new(Tracker::new(session::default_path()));
+        let now = Arc::new(NowPlaying::new(session.clone()));
         Engine(Arc::new(Inner {
             state: watch::Sender::new(State::Starting),
             generation: AtomicU64::new(0),
@@ -283,13 +288,15 @@ impl Engine {
             task: tokio::sync::Mutex::new(None),
             login_busy: AtomicBool::new(false),
             device_id: OnceLock::new(),
-            session: Arc::new(Tracker::new(session::default_path())),
+            session,
             restore_tried: AtomicBool::new(false),
+            now,
         }))
     }
 
     /// Where `engine-status` events go. Set once, in `setup`.
     pub fn attach(&self, app: AppHandle) {
+        self.0.now.attach(app.clone());
         let _ = self.0.app.set(app);
     }
 
@@ -335,6 +342,9 @@ impl Engine {
         if changed {
             if let Some(app) = self.0.app.get() {
                 let _ = app.emit("engine-status", self.status(&now));
+            }
+            if now != State::Ready {
+                self.0.now.set_inactive();
             }
         }
         now
@@ -487,6 +497,9 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
         let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
     }
     tauri::async_runtime::spawn(session::listen(tracker.clone(), player.get_player_event_channel()));
+    let now_playing = engine.0.now.clone();
+    now_playing.set_volume(tracker.volume());
+    tauri::async_runtime::spawn(nowplaying::listen(now_playing.clone(), player.get_player_event_channel()));
 
     let mut attempt = 0;
     loop {
@@ -515,6 +528,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     return;
                 }
                 let up_since = Instant::now();
+                now_playing.set_session(session.clone());
                 creds = keep_reusable(&engine, &session, creds).await;
                 let player_user = session.username();
                 {
@@ -542,6 +556,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         Some(update) = cluster.next() => {
                             if let Ok(update) = update {
                                 follow_cluster(&tracker, &update, session.device_id());
+                                now_playing.on_cluster(&update, session.device_id());
                             }
                         }
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {
@@ -856,6 +871,33 @@ pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), S
 #[tauri::command]
 pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), String> {
     logged(&format!("volume {percent}"), engine.with_spirc(|s| s.set_volume(volume_from_percent(percent))))
+}
+
+#[tauri::command]
+pub fn local_shuffle(engine: Managed<'_, Engine>, on: bool) -> Result<(), String> {
+    logged(&format!("shuffle {on}"), engine.with_spirc(|s| s.shuffle(on)))
+}
+
+/// `mode` is "off", "context" or "track".
+#[tauri::command]
+pub fn local_repeat(engine: Managed<'_, Engine>, mode: String) -> Result<(), String> {
+    let (context, track) = match mode.as_str() {
+        "off" => (false, false),
+        "context" => (true, false),
+        "track" => (true, true),
+        _ => return Err(format!("BAD_ARGS: bad repeat mode: {mode}")),
+    };
+    logged(&format!("repeat {mode}"), engine.with_spirc(|s| {
+        s.repeat(context)?;
+        s.repeat_track(track)
+    }))
+}
+
+/// What plays on this Mac now, from librespot: the latest `player-state` payload (see
+/// nowplaying.rs), for the UI's first paint. Null before the player's first event.
+#[tauri::command]
+pub fn local_state(engine: Managed<'_, Engine>) -> Option<serde_json::Value> {
+    engine.0.now.snapshot()
 }
 
 /// Loads a context or a track list on this Mac's speaker. Activates the device first: Spirc

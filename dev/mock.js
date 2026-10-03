@@ -13,7 +13,11 @@
 // search-all (search "the xx", then the Songs "See all" page), library-all (Library, then its Albums tab, 26 albums),
 // playlist (playing the 5th song of the first captured playlist, as its context: the playlist panel lists it),
 // here (the in-app player is ready and plays the playlist: device "Here", quality changes restart it;
-//   session_get returns that play).
+//   session_get returns that play; Rust's player-state events drive the UI, so no playback_state poll),
+// ratelimited (like here, but Spotify rate-limited the app: every Web API command rejects with
+//   RATE_LIMITED:50000:…, api_status says so; the disk cache and the store's account are from the last run).
+// player-state: emitted after every command that changes what the in-app player plays, and when its
+//   track ends; local_state returns the same payload (playback_state's shape + engine_active + queue).
 // The store (store_all / store_set, Rust's state.json) is in memory: ?store=solo seeds settings with the cover row off.
 // search_page pages through a pool built from the fixture (search hits first, then every other known
 // track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
@@ -37,10 +41,12 @@
     "playing", "paused", "nothing", "nodevice", "login", "reconnect", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-login", "engine-down",
-    "slow", "resume", "search-all", "library-all", "playlist", "here",
+    "slow", "resume", "search-all", "library-all", "playlist", "here", "ratelimited",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
+  const hereLike = scenario === "here" || scenario === "ratelimited"; // the in-app player plays
+  const RATE_LIMIT = "RATE_LIMITED:50000: Spotify paused this app's library access";
   if (scenario !== requested) console.warn(`mock: unknown scenario "${requested}", using "playing"`);
 
   // Synchronous load so invoke is ready before app.js runs.
@@ -98,7 +104,7 @@
     engine:
       scenario === "engine-login" ? { state: "needs_login", name: RUN_NAME, device_id: null }
       : scenario === "engine-down" ? { state: "failed", name: RUN_NAME, reason: "Spotify changed its protocol (mock)", device_id: null }
-      : scenario === "resume" || scenario === "here" ? { state: "ready", name: RUN_NAME, device_id: RUN_ID }
+      : scenario === "resume" || hereLike ? { state: "ready", name: RUN_NAME, device_id: RUN_ID }
       : { state: "needs_login", name: RUN_NAME, device_id: null }, // first run: the player isn't logged in yet
     quality: 160, // the in-app player's bitrate, kbps
   };
@@ -110,7 +116,7 @@
     state.now.album = "A Deluxe Remastered Anniversary Edition With Bonus Tracks And Demos";
   }
   if (["nothing", "nodevice", "resume"].includes(scenario)) state.queue = [];
-  if (scenario === "playlist" || scenario === "here") {
+  if (scenario === "playlist" || hereLike) {
     // the 5th song of the first captured playlist, played as that playlist (context)
     const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
     if (rows.length) {
@@ -133,12 +139,13 @@
       };
     }
   }
-  if (scenario === "here" && state.now) {
+  if (hereLike && state.now) {
     savedSession = { contextUri: state.contextUri, uris: null, trackUri: state.now.uri, positionMs: 44000, shuffle: false, repeat: "off", volume: 32768 };
   }
   // the store (state.json), in memory
   const store = {};
   if (new URLSearchParams(location.search).get("store") === "solo") store.settings = { dockArt: true, coverRow: false };
+  if (scenario === "ratelimited") store.account = ME; // the last run saw the account
 
   const iso = () => new Date().toISOString();
   const progress = () => {
@@ -182,12 +189,13 @@
     const device_id = st === "ready" ? RUN_ID : null; // the stable id, once ready
     state.engine = reason ? { state: st, name: RUN_NAME, reason, device_id } : { state: st, name: RUN_NAME, device_id };
     emit("engine-status", state.engine);
+    emitLocal();
   }
   function listTheRun() {
     if (!state.devices.some((d) => d.id === THE_RUN.id)) state.devices.push(clone(THE_RUN));
   }
-  if (scenario === "resume" || scenario === "here") listTheRun(); // ready: Spotify lists it
-  if (scenario === "here") state.deviceId = RUN_ID; // and plays on it
+  if (scenario === "resume" || hereLike) listTheRun(); // ready: Spotify lists it
+  if (hereLike) state.deviceId = RUN_ID; // and plays on it
 
   // ---- the in-app player's own commands (librespot Spirc) ----
   const engineReady = () => {
@@ -195,6 +203,24 @@
   };
   // Spirc ignores everything but load while the player isn't the active device
   const runActive = () => state.active && state.deviceId === RUN_ID;
+  // Rust's player-state payload (nowplaying.rs): playback_state's shape, plus engine_active and queue
+  const localPayload = () => {
+    if (state.engine.state !== "ready" || !runActive()) return { active: false, engine_active: false };
+    if (!state.now) return { active: false, engine_active: true };
+    return {
+      active: true, engine_active: true, is_playing: state.isPlaying, progress_ms: progress(),
+      ...playerExtras(), track: clone(state.now), queue: clone(state.queue.slice(0, 20)),
+    };
+  };
+  let localSeen = false; // local_state is null before the player's first event
+  let wasRun = false; // the in-app player was active at the last emit
+  function emitLocal() {
+    const run = state.engine.state === "ready" && runActive();
+    if (!run && !wasRun) return; // another device: the in-app player has nothing to say
+    wasRun = run;
+    localSeen = true;
+    emit("player-state", localPayload());
+  }
   const spirc = (fn) => () => {
     engineReady();
     if (runActive()) fn();
@@ -348,6 +374,12 @@
       return null;
     },
     session_get: () => clone(savedSession),
+    local_state: () => (localSeen || runActive() ? localPayload() : null),
+    api_status: () => ({
+      blockedForSecs: scenario === "ratelimited" ? 50000 : 0,
+      requestsLastMinute: calls.filter((c) => !LOCAL.test(c.cmd) && Date.now() - c.at < 60e3).length,
+      requestsLastHour: calls.filter((c) => !LOCAL.test(c.cmd)).length,
+    }),
     play_on_device: ({ deviceId, uris }) => {
       useDevice(deviceId);
       const tracks = (uris || []).map((u) => byUri.get(u)).filter(Boolean).map(clone);
@@ -385,6 +417,11 @@
       const d = activeDevice();
       if (d) setVol(d, percent);
     })(),
+    local_shuffle: ({ on }) => spirc(() => (state.shuffle = !!on))(),
+    local_repeat: ({ mode }) => {
+      if (!["off", "context", "track"].includes(mode)) throw "BAD_ARGS: bad repeat mode " + mode;
+      return spirc(() => (state.repeat = mode))();
+    },
     // activates the player, then loads: Ok only means queued (the poll shows the result)
     local_load: ({ contextUri, uris, trackUri, positionMs, play }) => {
       engineReady();
@@ -541,7 +578,9 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$)/;
+  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$|api_status$)/;
+  // commands that can change what the in-app player plays: a player-state follows them
+  const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
   // `slow`: lists and plays take 2s more
   const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
 
@@ -571,6 +610,7 @@
     const slot = key && `${args.account}/${key}`;
     if (slot && READS_CACHE.has(cmd) && cache.has(slot)) return clone(cache.get(slot));
     if (scenario === "error" && !LOCAL.test(cmd)) return reject("network down");
+    if (scenario === "ratelimited" && !LOCAL.test(cmd)) return reject(RATE_LIMIT);
     // the login ends after the first poll: the "session ended" screen
     if (scenario === "ended" && cmd === "playback_state" && (ended = ended + 1) > 1) return reject("AUTH_EXPIRED: session ended (mock)");
     if (scenario === "slow" && SLOW.test(cmd)) await sleep(2000);
@@ -580,6 +620,8 @@
       return out;
     } catch (e) {
       return reject(String(e));
+    } finally {
+      if (CHANGES_PLAYER.test(cmd)) emitLocal();
     }
   }
 
@@ -603,7 +645,22 @@
     cache.set(`${ME}/playlists`, handlers.get_playlists());
     cache.set(`${ME}/playlist:${plId}:snap_${plId}`, clone((fx.playlistTracks || {})[plId] || []));
   }
-  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, store, logs, emit, setEngine };
+  // ratelimited: the disk cache from the last run (playlists, the first playlist, liked songs)
+  if (scenario === "ratelimited") {
+    cache.set(`${ME}/playlists`, handlers.get_playlists());
+    for (const [plId, rows] of Object.entries(fx.playlistTracks || {})) cache.set(`${ME}/playlist:${plId}:snap_${plId}`, clone(rows));
+    cache.set(`${ME}/liked`, handlers.get_saved_tracks());
+  }
+  // the in-app player's track ends by itself: librespot plays the next one and says so (no poll drives it)
+  setInterval(() => {
+    if (state.engine.state !== "ready" || !runActive() || !state.now || !state.now.duration_ms) return;
+    if (state.isPlaying && progress() >= state.now.duration_ms) {
+      advance();
+      emitLocal();
+    }
+  }, 500);
+  if (hereLike) localSeen = true; // the player is up and playing: it has spoken
+  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, store, logs, emit, setEngine, emitLocal };
 
   // resume: Rust loads the saved session back (paused) once the player is up, then tells the UI
   if (scenario === "resume" && savedSession) {

@@ -4,7 +4,9 @@ mod auth;
 mod cache;
 mod dock;
 mod media;
+mod nowplaying;
 mod player;
+mod quota;
 mod session;
 mod settings;
 mod spotify;
@@ -27,6 +29,8 @@ pub fn run() {
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
             tauri::async_runtime::spawn(async move { engine.restart(None).await });
+            // one Web API usage line every 10 minutes (quota.rs)
+            tauri::async_runtime::spawn(quota::summaries());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -80,6 +84,10 @@ pub fn run() {
             player::local_volume,
             player::local_load,
             player::session_get,
+            player::local_shuffle,
+            player::local_repeat,
+            player::local_state,
+            quota::api_status,
             spotify::mix_info,
             spotify::get_top,
             spotify::get_artist,

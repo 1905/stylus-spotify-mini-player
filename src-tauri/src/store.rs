@@ -51,6 +51,11 @@ pub fn store_all() -> Value {
     with_state(|s| Value::Object(s.clone()))
 }
 
+/// The value stored under key, for Rust's own keys (`apiBlockedUntil`).
+pub fn get(key: &str) -> Option<Value> {
+    with_state(|s| s.get(key).cloned())
+}
+
 /// Store value under key (null removes it). Written to disk before it returns.
 #[tauri::command]
 pub fn store_set(key: String, value: Value) -> Result<(), String> {

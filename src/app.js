@@ -9,7 +9,8 @@ import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
-import { ERROR_POLL_MS, GIVE_UP_FAILURES, gaveUp, pollDelay } from "./lib/poll.js";
+import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
+import { isWebApi, rateLimitedSecs, rateLimitedError, quotaNotice, waitText } from "./lib/quota.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
 import { originUri, offsettable } from "./lib/source.js";
 import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
@@ -21,16 +22,22 @@ import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 // (still in flight across a logout) never settles, so it can't touch the new one.
 let authSession = 0;
 const STALE = new Promise(() => {});
+// While Spotify rate-limits the app, a Web API command fails here without reaching Rust (quota.rs
+// would refuse it too, without a request): RATE_LIMITED:<secs>: …
 function invoke(cmd, args) {
   const sess = authSession;
+  if (isWebApi(cmd) && blockedMs() > 0) return blockedReject(cmd, sess);
   return window.__TAURI__.core.invoke(cmd, args).then(
     (v) => (sess === authSession ? v : STALE),
-    (e) => (sess === authSession ? Promise.reject(e) : STALE),
+    (e) => {
+      if (sess !== authSession) return STALE;
+      noteRateLimited(e);
+      return Promise.reject(e);
+    },
   );
 }
 const $ = (id) => document.getElementById(id);
 
-const QUEUE_EVERY = 10; // ticks
 const HOLD_MS = 1500; // keep a local seek position this long against polls that may lag
 const PLAY_LAG_MS = 500; // Spotify can report the old play state this long after a command lands
 // played_at is when a play ended, the same moment we see a track leave: closer than this = same play
@@ -72,7 +79,8 @@ const state = {
 const isCode = (e, code) => String(e).startsWith(code);
 /** A line in the app log file (<app dir>/logs/needle.log). Never throws. */
 const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
-const reason = (e) => String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
+const reason = (e) =>
+  rateLimitedSecs(e) ? `Spotify paused library access for ${waitText(rateLimitedSecs(e))}` : String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
 
 /** Run a player command and log one line: what, the path (local or remote, the device), ok or the error. */
 async function logged(what, fn) {
@@ -119,6 +127,68 @@ function toast(msg) {
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (el.hidden = true), 3200);
+}
+
+// ---------- Spotify's rate limit on the Web API (see lib/quota.js, Rust quota.rs) ----------
+
+let blockedUntil = 0; // performance.now() when the Web API block ends; 0 = open
+let quotaToasted = false; // the toast shows once per block
+// disk-cache reads in flight: a blocked call fails only after them, so a cached copy lands before the error
+const diskPending = new Set();
+
+const blockedMs = () => (blockedUntil ? Math.max(0, blockedUntil - performance.now()) : 0);
+
+/** The RATE_LIMITED rejection of a blocked Web API command, after the disk reads already asked for. */
+function blockedReject(cmd, sess) {
+  const err = rateLimitedError(blockedMs() / 1000);
+  // me_id: the disk reads wait for the account, so it must not wait for them
+  const wait = cmd === "me_id" ? Promise.resolve() : Promise.allSettled([...diskPending]);
+  return wait.then(() => (sess === authSession ? Promise.reject(err) : STALE));
+}
+
+/** A RATE_LIMITED error from Rust: block every Web API call from here for that long. */
+function noteRateLimited(e) {
+  const secs = rateLimitedSecs(e);
+  if (!secs) return;
+  const was = blockedMs() > 0;
+  blockedUntil = performance.now() + secs * 1000;
+  if (was) return;
+  applog("warn", `Web API rate-limited for ${secs} s: the UI makes no Web API calls until then; playback here keeps working`);
+  renderQuota();
+  if (!quotaToasted && !$("stage").hidden) {
+    quotaToasted = true;
+    toast(quotaNotice(secs));
+  }
+}
+
+/** The block ran out: allowed again. Called every loop tick. */
+function syncQuota() {
+  if (blockedUntil && blockedMs() === 0) {
+    blockedUntil = 0;
+    quotaToasted = false;
+    applog("info", "Web API block over: polling allowed again");
+  }
+  renderQuota();
+}
+
+/** The calm notice (under the device chip, in the Library and Search): shown while blocked. */
+function renderQuota() {
+  const ms = blockedMs();
+  const text = ms > 0 ? quotaNotice(ms / 1000) : "";
+  for (const el of document.querySelectorAll("[data-quota]")) {
+    if (el.textContent !== text) el.textContent = text;
+    el.hidden = !text;
+  }
+}
+
+/** Rust's block at startup (it survives a relaunch: state.json `apiBlockedUntil`). */
+async function loadQuota() {
+  try {
+    const st = await invoke("api_status");
+    if (st && st.blockedForSecs > 0) noteRateLimited(rateLimitedError(st.blockedForSecs));
+  } catch {
+    /* unknown: the first Web API call tells */
+  }
 }
 
 // ---------- login ----------
@@ -243,7 +313,6 @@ let polling = false;
 let pollTimer = null;
 let inFlight = false;
 let pollAgain = false;
-let tick = 0;
 let failures = 0; // polls failed in a row: retried quietly until gaveUp()
 let pollEpoch = 0; // bumped on every start/stop: a poll from an older epoch must not touch state
 let seenDevice = null; // the active device the last poll saw (for the log: switches only)
@@ -255,7 +324,6 @@ function startPolling() {
   polling = true;
   inFlight = false;
   pollAgain = false;
-  tick = 0;
   failures = 0;
   state.loaded = false; // full fetch and render: a stopped poll may have skipped one
   state.now = null; // unknown what played during the gap: don't record the old track as played
@@ -299,18 +367,21 @@ async function poll() {
     if (epoch !== pollEpoch) return; // stale: the session it belonged to is gone
     inFlight = false;
     if (isCode(e, "AUTH_EXPIRED")) return expire();
-    failures++;
-    state.error = reason(e);
-    if (failures === GIVE_UP_FAILURES) applog("warn", `poll: ${failures} failures in a row, last: ${e}`);
-    // a blip retries quietly (the last view stays, or a loader before the first load); only a
-    // run of failures is an error worth showing
-    if (failures === GIVE_UP_FAILURES && state.loaded) toast("Can't reach Spotify. Retrying.");
+    // rate-limited: not a failure; the next tick runs blocked (no requests) and shows the notice
+    if (!isCode(e, "RATE_LIMITED")) {
+      failures++;
+      state.error = reason(e);
+      if (failures === GIVE_UP_FAILURES) applog("warn", `poll: ${failures} failures in a row, last: ${e}`);
+      // a blip retries quietly (the last view stays, or a loader before the first load); only a
+      // run of failures is an error worth showing
+      if (failures === GIVE_UP_FAILURES && state.loaded) toast("Can't reach Spotify. Retrying.");
+    }
     renderNow();
   }
   inFlight = false;
   if (!polling) return;
-  // hidden: 3s while something plays (Now Playing, media keys), 10s when idle; visible again restarts
-  let delay = pollDelay({ hidden: document.hidden, mode: state.mode, failures });
+  // events: a local re-render each second; another device: 5 s (30 s hidden); blocked: no requests
+  let delay = pollDelay({ hidden: document.hidden, mode: loopMode(), failures });
   if (pollAgain) {
     pollAgain = false;
     delay = 0;
@@ -318,13 +389,117 @@ async function poll() {
   schedule(delay);
 }
 
+// ---------- where the state comes from: player-state events (this Mac) or the Web API ----------
+
+let local = null; // the last player-state payload from Rust (this Mac's player): {s, at}
+let distrust = false; // a Web API check showed another device active since that payload
+let lastSanityAt = 0; // events mode: the last playback_state check
+let shownMode = null; // the loop's mode the log last named
+
+/** Rust's player-state: this Mac's player changed (track, play/pause, seek, volume, modes, active). */
+function onPlayerState(p) {
+  if (!p || typeof p !== "object") return;
+  const wasActive = Boolean(local && local.s.engine_active);
+  local = { s: p, at: performance.now() };
+  // this Mac just became the active device (picked here, or from a phone): trust it again
+  if (p.engine_active && !wasActive) distrust = false;
+  if (!$("stage").hidden) kick();
+}
+
+/** The first paint: this Mac's state before its next event. */
+async function loadLocal() {
+  try {
+    const p = await invoke("local_state");
+    if (p && !local) onPlayerState(p);
+  } catch {
+    /* an older backend without it: polls only */
+  }
+}
+
+const loopMode = () => pollMode({ local: local && local.s, distrust, blockedMs: blockedMs() });
+
+/** One log line when the loop switches between events, polling and blocked. */
+function noteMode(mode) {
+  if (mode === shownMode) return;
+  applog("info", `state source: ${shownMode || "start"} → ${mode} (${modeReason({ mode, blockedMs: blockedMs(), distrust })})`);
+  shownMode = mode;
+}
+
+/** The last player-state, its position moved on by the time since it came. */
+function localSnapshot() {
+  const s = { ...local.s };
+  if (s.is_playing && s.track) {
+    const p = (s.progress_ms || 0) + (performance.now() - local.at);
+    s.progress_ms = s.track.duration_ms ? Math.min(p, s.track.duration_ms) : p;
+  }
+  return s;
+}
+
+/** Up next from the player-state (this Mac's own queue), or null when it doesn't carry one. */
+const queueOf = (s) => (s && Array.isArray(s.queue) ? s.queue.filter((t) => t && t.uri) : null);
+
+/**
+ * The state for this tick. Events: the last player-state (no request), and once a minute a
+ * playback_state to catch a missed hand-over. Poll: playback_state. Blocked: null (no request).
+ */
+async function readState(epoch, mode, startedAt) {
+  // blocked: only this Mac's own state can still be read (a hand-over to another device shows as idle)
+  if (mode === "blocked") return local && state.device && engine && state.device.id === engine.device_id ? localSnapshot() : null;
+  if (mode === "poll") {
+    const s = await invoke("playback_state");
+    // the Web API shows this Mac active again: its events are the source from here
+    if (distrust && s && s.active && engine && s.device_id && s.device_id === engine.device_id) distrust = false;
+    return s;
+  }
+  if (sanityDue({ lastAt: lastSanityAt, now: startedAt, blockedMs: blockedMs() })) {
+    lastSanityAt = startedAt;
+    let remote = null;
+    try {
+      remote = await invoke("playback_state");
+    } catch (e) {
+      if (isCode(e, "AUTH_EXPIRED")) throw e;
+    }
+    if (epoch !== pollEpoch) return null;
+    const here = engine && engine.device_id;
+    if (remote && remote.active && here && remote.device_id && remote.device_id !== here) {
+      distrust = true; // another device took over and no event said so: poll from here
+      noteMode(loopMode());
+      return remote;
+    }
+  }
+  return localSnapshot();
+}
+
+// a list (queue, recently played, devices) waits this long between fetches; a skipped need is kept
+const listAt = { get_queue: 0, get_recently_played: 0, list_devices: 0 };
+const listWant = { get_queue: false, get_recently_played: false, list_devices: false };
+
+/**
+ * A list from Spotify when it's due: the result (null on failure), or undefined when skipped
+ * (not needed, fetched under 30 s ago, or blocked). A skipped need is fetched once it's due.
+ */
+function fetchList(cmd, { need = false, force = false } = {}) {
+  if (need) listWant[cmd] = true;
+  const now = performance.now();
+  if (!listDue({ lastAt: listAt[cmd], now, need: listWant[cmd], force, blockedMs: blockedMs() })) return undefined;
+  listAt[cmd] = now;
+  listWant[cmd] = false;
+  return fetchOr(cmd).then((v) => {
+    if (v === null) listWant[cmd] = true; // failed: again once it's due
+    return v;
+  });
+}
+
 async function refresh(epoch) {
   const startedAt = performance.now();
-  const s = await invoke("playback_state");
+  syncQuota();
+  const source = loopMode();
+  noteMode(source);
+  const s = await readState(epoch, source, startedAt);
   if (epoch !== pollEpoch) return; // a newer session took over while this one waited
+  if (s === null) return blockedTick();
   // the in-app player restarts for a quality change and plays nothing for a moment: keep the song on screen
   if (restartHoldUntil > performance.now() && !(s && s.active)) return;
-  tick++;
   listen(); // close the old "now"'s listening time before this poll overwrites it
   const active = Boolean(s && s.active);
   const track = active && s.track && s.track.uri ? s.track : null;
@@ -395,30 +570,37 @@ async function refresh(epoch) {
       if (track) paint(track.cover);
       syncDockArt();
     }
-    // a song needs its queue; with no song, the device list says who could play
+    // a song needs its queue (this Mac's comes with its state); with no song, the device list says
+    // who could play. Each list at most every 30 s: a skipped one is fetched once it's due.
+    const own = queueOf(s);
     const [queue, recent, devices] = await Promise.all([
-      track ? fetchOr("get_queue") : [],
-      fetchOr("get_recently_played"),
-      track ? null : fetchOr("list_devices"),
+      track ? own || fetchList("get_queue", { need: true, force: queueDirty }) : [],
+      fetchList("get_recently_played", { need: true }),
+      track ? undefined : fetchList("list_devices", { need: true }),
     ]);
     if (epoch !== pollEpoch) return;
     if (queue) state.queue = queue;
     if (queue) queueDirty = false;
     if (recent) state.recent = recent;
     if (recent) noteContexts([state.contextUri, ...recent.map((r) => r.context_uri)]);
-    state.historyOk = Boolean(recent);
+    if (recent !== undefined) state.historyOk = Boolean(recent);
     if (devices) setDevices(devices, startedAt);
     state.loaded = true;
     renderNow();
     renderRun();
-  } else if ((tick % QUEUE_EVERY === 0 || queueDirty) && mode !== "other") {
-    // between changes only the queue (song) or the device list (idle) can move
-    queueDirty = false;
+  } else if (mode !== "other") {
+    // between changes only the queue (song) or the device list (idle) can move: this Mac's queue
+    // comes with its state; a remote queue only while the panel shows it (or after an add), the
+    // device list only while its menu is open; each at most every 30 s
+    const own = track ? queueOf(s) : null;
+    const force = queueDirty;
+    if (own) queueDirty = false;
     const [fresh, recent] = await Promise.all([
-      fetchOr(track ? "get_queue" : "list_devices"),
-      state.historyOk ? null : fetchOr("get_recently_played"),
+      own || (track ? fetchList("get_queue", { need: panelOpen, force }) : fetchList("list_devices", { need: devicesOpen })),
+      fetchList("get_recently_played", { need: !state.historyOk }),
     ]);
     if (epoch !== pollEpoch) return;
+    if (track && fresh) queueDirty = false;
     if (recent) {
       state.recent = recent;
       state.historyOk = true;
@@ -436,7 +618,19 @@ async function refresh(epoch) {
   renderChrome();
 }
 
-const LISTEN_STEP_CAP_MS = ERROR_POLL_MS + 1000; // a longer step is a stall, not listening
+/**
+ * Blocked, and nothing of this Mac's to show: no request. The last view stays; with nothing
+ * known, this Mac is the device, so a play from the Library (its disk copy) still starts here.
+ */
+function blockedTick() {
+  const here = engine && engine.state === "ready" && engine.device_id;
+  if (!state.device && here && state.mode === "idle") state.device = { id: engine.device_id, name: "This Mac" };
+  state.loaded = true;
+  renderNow();
+  renderChrome();
+}
+
+const LISTEN_STEP_CAP_MS = HIDDEN_POLL_MS + 1000; // a longer step is a stall, not listening
 
 /** Add the time since the last call to listenedMs, if a song was playing. */
 function listen() {
@@ -486,6 +680,8 @@ function setDevices(list, startedAt = performance.now()) {
 /** Fetch devices for a transport command: this Mac first (see preferredDevice), or null. */
 async function discover() {
   const list = await fetchOr("list_devices");
+  // rate-limited: no device list, but this Mac's player needs none
+  if (!list && blockedMs() > 0 && engine && engine.state === "ready" && engine.device_id) return { id: engine.device_id, name: "This Mac" };
   if (!list) return null;
   setDevices(list);
   const d = preferredDevice(list, engine);
@@ -1210,15 +1406,22 @@ let lastSrc = null;
 let restoring = null;
 const RESTORE_WAIT_MS = 20000; // the player connects and loads it; longer = it isn't coming
 
+const ACCOUNT_KEY = "account"; // the last /me id, for the disk cache while the Web API is rate-limited
+
 /** The signed-in account's id (scopes the list cache), or null on failure. */
 function accountId() {
   if (!accountP) {
     const p = invoke("me_id").then(
-      (id) => (accountNow = id || null),
+      (id) => {
+        if (id) storeSet(ACCOUNT_KEY, id);
+        return (accountNow = id || null);
+      },
       (e) => {
         if (isCode(e, "AUTH_EXPIRED")) expire();
-        if (accountP === p) accountP = null; // retry on the next ask
-        return null;
+        // rate-limited: the account this Mac last saw, so the disk cache still shows
+        const known = isCode(e, "RATE_LIMITED") ? storeGet(ACCOUNT_KEY) : null;
+        if (accountP === p && !known) accountP = null; // retry on the next ask
+        return (accountNow = known || null);
       },
     );
     accountP = p;
@@ -1383,7 +1586,12 @@ async function toggleShuffle() {
   if (state.mode !== "track") return;
   const want = (state.shuffle = !state.shuffle);
   renderChrome();
-  await sendIntent("shuffle", () => logged(`shuffle ${want ? "on" : "off"} remote`, () => invoke("set_shuffle", { on: want })), () => (state.shuffle = !want));
+  const dev = state.device && state.device.id;
+  await sendIntent(
+    "shuffle",
+    () => routed(dev, () => invoke("local_shuffle", { on: want }), () => invoke("set_shuffle", { on: want }), `shuffle ${want ? "on" : "off"}`),
+    () => (state.shuffle = !want),
+  );
 }
 
 /** off → context → track → off. */
@@ -1392,7 +1600,12 @@ async function cycleRepeat() {
   const before = state.repeat;
   const mode = (state.repeat = nextRepeat(before));
   renderChrome();
-  await sendIntent("repeat", () => logged(`repeat ${mode} remote`, () => invoke("set_repeat", { mode })), () => (state.repeat = before));
+  const dev = state.device && state.device.id;
+  await sendIntent(
+    "repeat",
+    () => routed(dev, () => invoke("local_repeat", { mode }), () => invoke("set_repeat", { mode }), `repeat ${mode}`),
+    () => (state.repeat = before),
+  );
 }
 
 // ---------- volume: the UI moves at once, one command after 200ms of quiet (30ms on the in-app player) ----------
@@ -2684,14 +2897,20 @@ const listInvoke = (cmd, args) =>
   CACHED_CMDS.has(cmd) ? accountId().then((account) => invoke(cmd, { ...args, account })) : invoke(cmd, args);
 
 /** The disk-cached copy of a list for this account, or null. Never read before the account is known. */
-async function diskGet(key) {
-  const account = await accountId();
-  if (!account) return null;
-  try {
-    return await invoke("cache_get", { account, key });
-  } catch {
-    return null;
-  }
+function diskGet(key) {
+  const p = (async () => {
+    const account = await accountId();
+    if (!account) return null;
+    try {
+      return await invoke("cache_get", { account, key });
+    } catch {
+      return null;
+    }
+  })();
+  // a rate-limited list call waits for this read, so the copy shows instead of its error
+  diskPending.add(p);
+  p.finally(() => diskPending.delete(p));
+  return p;
 }
 
 function libGet(key, cmd, args) {
@@ -3755,7 +3974,10 @@ function startStage() {
   $("stage").classList.toggle("is-solo", soloRun());
   renderNow();
   renderChrome();
-  startPolling();
+  // first: a rate limit from the last run (no Web API calls), and this Mac's player state (no
+  // playback_state needed when it plays here); then the loop
+  const sess = authSession;
+  Promise.all([loadQuota(), loadLocal()]).finally(() => sess === authSession && !$("stage").hidden && startPolling());
   refreshEngine();
   accountId(); // the list cache is per account: ask once, early
   loadRestored();
@@ -3882,6 +4104,8 @@ async function boot() {
     kick();
   });
   listenEvent("media-command", onMediaCommand);
+  // this Mac's player: what plays, from librespot (no Web API); the loop renders from it
+  listenEvent("player-state", onPlayerState);
 
   await loadStore(); // settings and known mixes are read from it
   let status = "login";
