@@ -84,7 +84,34 @@ The included client ID belongs to a Spotify developer app in development mode. S
 - **Two layouts.** A row of covers that shows what played and what comes next, or a single centred cover (Settings → Show cover row).
 - **Native feel.** Media keys and Now Playing, the current album cover as the Dock icon, a smooth volume ramp, and instant skip and pause.
 - **Audio quality.** Choose 96, 160 or 320 kbps.
+- **AI control.** A built-in MCP server lets Claude Code and other AI tools find and play music for you.
 - **Low on network.** While Needle is the active speaker, it reads the player state from the speaker itself instead of polling Spotify.
+
+## Control Needle from AI tools (MCP)
+
+Needle includes a local [Model Context Protocol](https://modelcontextprotocol.io) server. AI tools on your Mac, such as Claude Code, Claude Desktop, Cursor or opencode, can then search your music, start playlists and mixes, and control playback in the open app.
+
+1. In Needle, open **Settings** (the cog) and turn on **MCP server**.
+2. Click **Claude Code** or **JSON config** to copy the connect text, and paste it into your client.
+3. Ask, for example: *"Play my Bonobo Radio"*, *"Find Kerala by Bonobo and play it"*, *"Turn the volume down a bit"*.
+
+Claude Code:
+
+```sh
+claude mcp add --scope user --transport http needle http://127.0.0.1:5590/mcp --header "Authorization: Bearer <key>"
+```
+
+Other clients (`mcpServers` in their config file):
+
+```json
+{ "mcpServers": { "needle": { "type": "http", "url": "http://127.0.0.1:5590/mcp", "headers": { "Authorization": "Bearer <key>" } } } }
+```
+
+The copied text already contains your key. **Copy skill** gives a short instruction file for agents; save it as `~/.claude/skills/needle/SKILL.md`.
+
+**Tools (31):** `now_playing`, `search`, `play`, `pause`, `resume`, `next`, `previous`, `seek`, `set_volume`, `volume_step`, `mute`, `unmute`, `set_shuffle`, `set_repeat`, `queue_add`, `get_queue`, `list_playlists`, `list_mixes`, `playlist_tracks`, `list_albums`, `album_tracks`, `list_artists`, `liked_songs`, `recently_played`, `top`, `artist`, `devices`, `transfer`, `like`, `unlike`, `open_link`. Names such as a playlist or a mix are matched against your library first, then against Spotify search.
+
+**Security:** the server listens on `127.0.0.1` only and runs only while Needle is open with the setting on. Every request must carry the key; requests without it get `401`. Requests from web pages (with a browser `Origin`) get `403`. **Reset key** in Settings makes a new key and disconnects old clients. Details: [docs/mcp.md](docs/mcp.md).
 
 ## How it works
 
