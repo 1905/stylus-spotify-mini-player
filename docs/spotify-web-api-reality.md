@@ -21,7 +21,7 @@ The official reference and the February 2026 migration guide are wrong or stale 
 
 - Date: 2026-10-02.
 - App mode: development (Client ID in Development Mode, post-March-2026 rules).
-- Account: `317bkemv5qe6bgqfm3c2uxrvpqmy`, `product: premium`, `country: ID` (from `GET /me`).
+- Account: `<user id>`, `product: premium`, `country: ID` (from `GET /me`).
 - Granted scopes (all 19): `user-read-private user-read-email playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public user-read-playback-state user-modify-playback-state user-read-currently-playing user-read-recently-played user-read-playback-position user-library-read user-library-modify user-top-read user-follow-read user-follow-modify ugc-image-upload app-remote-control streaming`.
 - Client: Python stdlib `urllib`, ≤4 req/s, ~340 requests, no 429 seen.
 - Writes were limited to reversible actions on items the user had not saved/followed, plus one temporary playlist that was deleted. Final state checked: liked tracks 135, saved albums 12, shows 2, episodes 26, followed artists 11, playlists 5. All equal to the starting values.
