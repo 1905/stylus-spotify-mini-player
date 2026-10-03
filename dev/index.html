@@ -68,6 +68,14 @@
                 <span id="coverRowLabel" class="set-label">Show cover row</span>
                 <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
               </div>
+              <div class="set-row">
+                <span id="menuBarLabel" class="set-label">Show in menu bar</span>
+                <button id="menuBarSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="menuBarLabel"></button>
+              </div>
+              <div class="set-row">
+                <span id="menuBarTitleLabel" class="set-label">Show song in menu bar</span>
+                <button id="menuBarTitleSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="menuBarTitleLabel"></button>
+              </div>
               <div class="set-group">
                 <span id="qualityLabel" class="set-label">Audio quality</span>
                 <div id="qualityOpts" class="seg" role="radiogroup" aria-labelledby="qualityLabel">
@@ -181,7 +189,7 @@
       <div class="backdrop" data-close></div>
       <aside id="sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Library" tabindex="-1">
         <header class="sheet-bar">
-          <h2 id="libTitle" class="sheet-title">Library</h2>
+          <h2 id="libTitle" class="sheet-title" hidden>Library</h2>
           <button id="libBack" class="btn btn-ghost btn-back" type="button" hidden>
             <svg class="ic ic-back" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.75 5.5 8.25 12l6.5 6.5"/></svg>
             <span class="back-label">Library</span>

@@ -21,6 +21,7 @@ mod session;
 mod settings;
 mod spotify;
 mod store;
+mod tray;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -45,6 +46,10 @@ pub fn run() {
             tauri::async_runtime::spawn(async move { engine.restart(None).await });
             // one Web API usage line every 10 minutes (quota.rs)
             tauri::async_runtime::spawn(quota::summaries());
+            // the menu-bar icon and its mini player (tray.rs); the app runs fine without them
+            if let Err(e) = tray::init(app.handle()) {
+                log::warn!("menu bar: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -117,14 +122,26 @@ pub fn run() {
             mcp::mcp_set_enabled,
             mcp::mcp_reset_key,
             mcp::mcp_connect_text,
-            mcp::mcp_skill_text
+            mcp::mcp_skill_text,
+            tray::mini_push,
+            tray::mini_get,
+            tray::mini_command,
+            tray::mini_hide,
+            tray::tray_config
         ])
-        // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits.
+        // The mini player hides when it loses focus (a click outside it).
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                let _ = window.hide();
+                if window.label() == tray::MINI {
+                    tray::hide_mini(window.app_handle());
+                } else {
+                    let _ = window.hide();
+                }
             }
+            tauri::WindowEvent::Focused(false) if window.label() == tray::MINI => tray::hide_mini(window.app_handle()),
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -136,10 +153,7 @@ pub fn run() {
         // Dock icon clicked while the window is hidden: bring it back
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            tray::show_main(app);
         }
         _ => {}
     });

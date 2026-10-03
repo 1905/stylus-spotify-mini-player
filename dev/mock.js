@@ -32,10 +32,12 @@
 // isn't listed: engine_login lists it. The local_* commands model librespot's Spirc: they act at once, but
 // only while the player is the active device (an inactive Spirc ignores them); local_load activates it
 // first. ENGINE_NOT_READY before ready. engine_set_quality restarts it (starting → ready, playback dropped).
-// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, store, emit, setEngine }.
+// QA hook: window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, mini, calls, cache, store, emit, setEngine }.
 //   store: the in-memory key-value store behind store_all / store_set; logs: app_log lines ("level msg").
 //   media: recorded media_update / media_clear calls ({cmd, args, at}).
 //   dockArt: recorded set_dock_art urls (null = the app's own icon), oldest first.
+//   mini: recorded mini_push payloads and tray_config calls ({cmd, args}), oldest first; emit("mini-command", {action})
+//     plays a menu-bar button.
 //   calls: every invoke, oldest first ({cmd, args, at}): local_* vs Web API routing shows here.
 //   cache: the in-memory list cache ("<account>/<key>" → value) behind cache_get.
 //   emit(event, payload): fires listeners from __TAURI__.event.listen (media-command, engine-status).
@@ -243,6 +245,7 @@
     is_active: false, is_restricted: false, supports_volume: true, volume_percent: 50,
   };
   const dockArt = []; // set_dock_art urls, oldest first
+  const mini = []; // mini_push / tray_config calls, oldest first
   function setEngine(st, reason) {
     const device_id = st === "ready" ? RUN_ID : null; // the stable id, once ready
     state.engine = reason ? { state: st, name: RUN_NAME, reason, device_id } : { state: st, name: RUN_NAME, device_id };
@@ -631,6 +634,8 @@
       return null;
     },
     set_dock_art: ({ url }) => { dockArt.push(url == null ? null : String(url)); return null; },
+    mini_push: (args) => { mini.push({ cmd: "mini_push", args: clone(args) }); return null; },
+    tray_config: (args) => { mini.push({ cmd: "tray_config", args: clone(args) }); return null; },
     media_update: (args) => { media.push({ cmd: "media_update", args: clone(args), at: Date.now() }); return null; },
     media_clear: () => { media.push({ cmd: "media_clear", args: null, at: Date.now() }); return null; },
 
@@ -698,7 +703,7 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$|api_status$|mcp_|links_list$|link_remove$)/;
+  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|api_status$|mcp_|links_list$|link_remove$)/;
   // commands with no source but the Web API (Rust's spotify.rs; src/lib/quota.js WEB_ONLY)
   const WEB_ONLY = /^(playback_state|transfer_playback|set_volume|set_shuffle|set_repeat|play_context|play_on_device|resume|resume_at|pause|next_track|previous_track|seek)$/;
   // commands that can change what the in-app player plays: a player-state follows them
@@ -782,7 +787,7 @@
     }
   }, 500);
   if (hereLike) localSeen = true; // the player is up and playing: it has spoken
-  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, calls, cache, store, logs, emit, setEngine, emitLocal };
+  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, mini, calls, cache, store, logs, emit, setEngine, emitLocal };
 
   // resume: Rust loads the saved session back (paused) once the player is up, then tells the UI
   if (scenario === "resume" && savedSession) {

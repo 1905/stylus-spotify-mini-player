@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mini",
+  "description": "The menu-bar mini player: listens to mini-state, calls the mini_* commands",
+  "windows": ["mini"],
+  "permissions": ["core:event:default"]
+}

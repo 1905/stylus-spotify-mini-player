@@ -494,6 +494,10 @@ body:has(.stage:not(.is-playing)) .bg {
   outline-offset: 2px;
 }
 
+.switch:disabled {
+  opacity: 0.4;
+}
+
 /* a segmented choice: three options in one rounded strip */
 .seg {
   display: grid;
@@ -2261,35 +2265,10 @@ body:has(.stage:not(.is-playing)) .bg {
 
 /* ---------- a play starting: the clicked song shows at once, alive until Spotify confirms it ---------- */
 
-@keyframes load-sweep {
-  from { background-position: 160% 0; }
-  to { background-position: -60% 0; }
-}
-
-@keyframes load-breathe {
-  50% { transform: scale(0.985); filter: brightness(0.82) saturate(0.9); }
-}
-
+/* the cover itself stays still (user: the dimmed text, running bar and play spinner are enough) */
 @keyframes load-bar {
   from { left: -32%; }
   to { left: 100%; }
-}
-
-.stage.is-loading .cover[data-role="now"] .art {
-  position: relative;
-  overflow: hidden;
-  animation: load-breathe 1.8s ease-in-out infinite;
-}
-
-/* a soft light passing over the cover */
-.stage.is-loading .cover[data-role="now"] .art::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.2) 50%, transparent 65%);
-  background-size: 250% 100%;
-  animation: load-sweep 1.5s ease-in-out infinite;
-  pointer-events: none;
 }
 
 .stage.is-loading :is(.now-title, .now-artist, .now-album) {

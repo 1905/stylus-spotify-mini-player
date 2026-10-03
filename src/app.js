@@ -21,6 +21,7 @@ import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 import { parseLink, looksLikeLink } from "./lib/links.js";
 import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
+import { miniPayload, miniChanged } from "./lib/mini.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -102,6 +103,7 @@ async function logged(what, fn) {
 // ---------- the store: Rust's state.json, read once at startup, written through ----------
 
 let stored = {}; // every stored key → value (store_all), kept in step with each write
+let storeLoaded = false; // settings read before this would cache the defaults
 
 /** Read the whole store once, before anything reads a key. A failure leaves it empty: the defaults. */
 async function loadStore() {
@@ -112,6 +114,7 @@ async function loadStore() {
     stored = {};
     applog("warn", `store_all failed: ${e}`);
   }
+  storeLoaded = true;
 }
 
 const storeGet = (key) => (Object.prototype.hasOwnProperty.call(stored, key) ? stored[key] : null);
@@ -295,6 +298,7 @@ function showLogin(kind) {
   $("loginError").hidden = true;
   $("stage").hidden = true;
   $("login").hidden = false;
+  syncMini(); // the mini player says to log in
 }
 
 async function onLogin() {
@@ -398,7 +402,7 @@ async function poll() {
   inFlight = false;
   if (!polling) return;
   // events: a local re-render each second; another device: 5 s (30 s hidden); blocked: no requests
-  let delay = pollDelay({ hidden: document.hidden, mode: loopMode(), failures });
+  let delay = pollDelay({ hidden: document.hidden && !miniOpen, mode: loopMode(), failures });
   if (pollAgain) {
     pollAgain = false;
     delay = 0;
@@ -1086,6 +1090,7 @@ function renderChrome() {
   renderProgress();
   startFrames();
   syncMedia();
+  syncMini();
 }
 
 const REPEAT_LABEL = { off: "Repeat", context: "Repeat: on", track: "Repeat: this song" };
@@ -2093,6 +2098,84 @@ function onMediaCommand(cmd) {
   }
 }
 
+// ---------- the menu-bar mini player (Rust tray.rs, src/mini.js): a summary out, commands back ----------
+
+let lastMini = null; // the payload the mini player has
+let miniOpen = false; // its popover is open: polls run at the visible rate
+
+/** Send the mini player what the stage shows, when it changed (or force). Not from frames. */
+function syncMini(force = false) {
+  if (!storeLoaded || !getSettings().menuBar) return;
+  let next;
+  if ($("stage").hidden) {
+    next = miniPayload({ mode: "idle", status: "Log in to Spotify in Needle" });
+  } else {
+    const t = shownTrack();
+    const heart = $("heartBtn");
+    const dev = state.device ? labelOf(state.device) : null;
+    next = miniPayload({
+      mode: state.mode,
+      now: t,
+      status: t ? "" : $("nowTitle").textContent,
+      isPlaying: state.isPlaying,
+      pending: playPending(),
+      skipping: skipWait ? (skipWait.btn.id === "nextBtn" ? "next" : "previous") : null,
+      loading: isLoading(),
+      positionMs: progress(),
+      volume: $("volume").hidden ? null : state.volume,
+      heart: heart.hidden ? null : state.saved === null ? "unknown" : state.saved,
+      device: dev === HERE ? null : dev,
+    });
+  }
+  if (!force && !miniChanged(lastMini, next)) return;
+  lastMini = next;
+  window.__TAURI__.core.invoke("mini_push", { state: next }).catch(() => {});
+}
+
+/** A mini player button or a menu-bar menu item: the stage's own handlers, so their guards apply. */
+function onMiniCommand(cmd) {
+  if ($("stage").hidden || !cmd) return;
+  const act = cmd.action;
+  if (act === "toggle") togglePlay();
+  else if (act === "next") skip("next_track");
+  else if (act === "previous") skip("previous_track");
+  else if (act === "volume" && Number.isFinite(cmd.value)) setVolume(cmd.value);
+  else if (act === "mute") toggleMute();
+  else if (act === "heart" && !$("heartBtn").hidden) toggleSaved();
+}
+
+/** The popover opened (fresh state, visible poll rate) or closed. */
+function onMiniVisible(p) {
+  miniOpen = Boolean(p && p.open);
+  syncMini(true);
+  if (miniOpen && !$("stage").hidden) kick();
+}
+
+/** The menu-bar settings to Rust: the icon, the song next to it. */
+function applyTray() {
+  const s = getSettings();
+  window.__TAURI__.core.invoke("tray_config", { show: s.menuBar, title: s.menuBarTitle }).catch(() => {});
+  syncMini(true);
+}
+
+function toggleMenuBar() {
+  const s = getSettings();
+  s.menuBar = !s.menuBar;
+  saveSettings();
+  applog("info", `setting: menu bar ${s.menuBar ? "on" : "off"}`);
+  renderSettings();
+  applyTray();
+}
+
+function toggleMenuBarTitle() {
+  const s = getSettings();
+  s.menuBarTitle = !s.menuBarTitle;
+  saveSettings();
+  applog("info", `setting: song in menu bar ${s.menuBarTitle ? "on" : "off"}`);
+  renderSettings();
+  applyTray();
+}
+
 const deviceRows = () => [...$("deviceList").querySelectorAll('.device-row:not([aria-disabled="true"])')];
 
 /** Focus the row step rows away from the focused one; 0 = the active row (or the first). */
@@ -2184,6 +2267,7 @@ function startSkip(btn) {
   skipWait = wait;
   $("stage").classList.add("is-skipping");
   renderProgress();
+  syncMini();
   return wait;
 }
 
@@ -2195,6 +2279,7 @@ function endSkip() {
   skipWait = null;
   $("stage").classList.remove("is-skipping");
   renderProgress();
+  syncMini();
 }
 
 async function skip(cmd) {
@@ -2538,6 +2623,10 @@ const engineReady = () => Boolean(engine && engine.state === "ready");
 function renderSettings() {
   $("dockArtSwitch").setAttribute("aria-checked", String(getSettings().dockArt));
   $("coverRowSwitch").setAttribute("aria-checked", String(getSettings().coverRow));
+  $("menuBarSwitch").setAttribute("aria-checked", String(getSettings().menuBar));
+  const titleSwitch = $("menuBarTitleSwitch");
+  titleSwitch.setAttribute("aria-checked", String(getSettings().menuBarTitle));
+  titleSwitch.disabled = !getSettings().menuBar; // no icon, no song next to it
   const ready = engineReady();
   for (const b of $("qualityOpts").querySelectorAll("[data-kbps]")) {
     const kbps = Number(b.dataset.kbps);
@@ -2964,8 +3053,7 @@ function showList() {
   $("libDetail").hidden = true;
   $("libBack").hidden = true;
   $("libLevel1").hidden = false;
-  $("libTitle").hidden = false;
-  $("libTabs").hidden = false;
+  $("libTabs").hidden = false; // no "Library" heading: the tabs say where you are
   renderLibTabs();
   $("sheetBody").scrollTop = listScroll;
 }
@@ -4288,6 +4376,8 @@ async function boot() {
   $("settingsBtn").addEventListener("click", toggleSettings);
   $("dockArtSwitch").addEventListener("click", toggleDockArt);
   $("coverRowSwitch").addEventListener("click", toggleCoverRow);
+  $("menuBarSwitch").addEventListener("click", toggleMenuBar);
+  $("menuBarTitleSwitch").addEventListener("click", toggleMenuBarTitle);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onQualityKey);
   $("mcpSwitch").addEventListener("click", toggleMcp);
@@ -4400,12 +4490,15 @@ async function boot() {
     kick();
   });
   listenEvent("media-command", onMediaCommand);
+  listenEvent("mini-command", onMiniCommand);
+  listenEvent("mini-visible", onMiniVisible);
   // this Mac's player: what plays, from librespot (no Web API); the loop renders from it
   listenEvent("player-state", onPlayerState);
   // an add or remove in the app's own library (also from MCP): the Library redraws
   listenEvent("library-changed", () => loadLinks());
 
   await loadStore(); // settings and known mixes are read from it
+  applyTray();
   let status = "login";
   try {
     status = await invoke("auth_status");
