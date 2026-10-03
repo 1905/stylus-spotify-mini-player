@@ -122,10 +122,12 @@ svg {
   --g3y: 0;
   --g3r: 1;
   position: fixed;
-  inset: 0;
+  inset: -5%; /* room for the drift: no edge shows while it moves */
   z-index: 0;
   opacity: 0;
-  transition: opacity 900ms ease;
+  transition: opacity 1000ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: glow-drift 28s ease-in-out infinite alternate;
+  will-change: transform, opacity;
   background:
     radial-gradient(
       calc(var(--now) * var(--g1r)) calc(var(--now) * var(--g1r) * 0.85) at calc(var(--ax) + var(--now) * var(--g1x)) calc(var(--ay) + var(--now) * var(--g1y)),
@@ -154,6 +156,19 @@ body:has(.stage.is-solo) .bg {
 
 .bg.is-on {
   opacity: 1;
+}
+
+/* the glow breathes slowly while a track plays: a small drift and swell, never a visible move */
+@keyframes glow-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  35% { transform: translate3d(1.6%, -1.1%, 0) scale(1.035); }
+  70% { transform: translate3d(-1.2%, 0.9%, 0) scale(1.02); }
+  100% { transform: translate3d(0.8%, 1.4%, 0) scale(1.045); }
+}
+
+/* paused or idle: the glow holds still */
+body:has(.stage:not(.is-playing)) .bg {
+  animation-play-state: paused;
 }
 
 .grain {

@@ -1189,7 +1189,7 @@ async function paint(url) {
   document.documentElement.style.setProperty("--v", vars["--v"]);
   setTimeout(() => {
     if (activeBg !== old) old.classList.remove("is-on");
-  }, 950);
+  }, 1050); // after the 1 s crossfade (styles.css .bg)
 }
 
 // ---------- transport ----------

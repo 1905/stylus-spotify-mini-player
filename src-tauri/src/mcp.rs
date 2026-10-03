@@ -11,7 +11,7 @@ use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use rmcp::model::{CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool};
+use rmcp::model::{CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool};
 use rmcp::service::RequestContext;
 use rmcp::transport::streamable_http_server::{session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData, RoleServer, ServerHandler};
@@ -142,7 +142,12 @@ impl ServerHandler for Needle {
             .into_iter()
             .map(|(name, description, schema)| Tool::new(name, description, Arc::new(schema.as_object().cloned().unwrap_or_default())))
             .collect();
-        Ok(ListToolsResult::with_all_items(tools))
+        // protocol 2026-07-28 (what current clients negotiate) requires ttlMs and cacheScope on the
+        // list; with_all_items leaves them empty and Claude Code then drops every tool
+        let mut result = ListToolsResult::with_all_items(tools);
+        result.ttl_ms = Some(60_000);
+        result.cache_scope = Some(CacheScope::Private);
+        Ok(result)
     }
 
     async fn call_tool(&self, request: CallToolRequestParams, _context: RequestContext<RoleServer>) -> Result<CallToolResponse, ErrorData> {
