@@ -16,6 +16,11 @@ describe("icons", () => {
     expect(new Set(classes).size).toBe(classes.length);
   });
 
+  it("have the cover's info and close glyphs", () => {
+    expect(ICONS.info).toContain('class="ic ic-info"');
+    expect(ICONS.close).toContain('class="ic ic-close"');
+  });
+
   it("are the only svgs in index.html (one source of truth)", () => {
     const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
     const used = html.match(/<svg\b.*?<\/svg>/gs) || [];

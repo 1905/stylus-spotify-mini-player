@@ -463,6 +463,64 @@ pub async fn get_album_tracks(album_id: String, account: Option<String>) -> Resu
     Ok(all)
 }
 
+/// The album-info card's details (`parse::album_info`) of `album_id`, or of the album
+/// `track_id` is on (the now-playing track carries no album id). With an `account`, cached
+/// forever under `album-info:<id>` (and the track's album under `album-of:<track id>`).
+#[tauri::command]
+pub async fn get_album_info(album_id: Option<String>, track_id: Option<String>, account: Option<String>) -> Result<Value, String> {
+    let is_id = |s: &String| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric());
+    let album_id = match album_id.filter(is_id) {
+        Some(id) => id,
+        None => album_of_track(&track_id.filter(is_id).ok_or("BAD_ARGS: no album or track id")?, &account).await?,
+    };
+    let key = format!("album-info:{album_id}");
+    if let Some(hit) = cached(&account, &key).await {
+        return Ok(hit);
+    }
+    let id = album_id.as_str();
+    let info = serve("get_album_info", vec![with_api(Primary, move |api| async move { api.album_info(id).await }), web(web_album_info(id))]).await?;
+    cache_store(&account, key, &info);
+    Ok(info)
+}
+
+/// The id of the album `track_id` is on, cached under `album-of:<track id>`.
+async fn album_of_track(track_id: &str, account: &Option<String>) -> Result<String, String> {
+    let key = format!("album-of:{track_id}");
+    if let Some(Value::String(hit)) = cached(account, &key).await {
+        return Ok(hit);
+    }
+    let web_lookup = async move { get(&format!("/tracks/{track_id}")).await?["album"]["id"].as_str().map(str::to_string).ok_or_else(|| "no album on this track".to_string()) };
+    let id = serve("album_of_track", vec![with_api(Primary, move |api| async move { api.album_id_of_track(track_id).await }), web(web_lookup)]).await?;
+    cache_store(account, key, &json!(id));
+    Ok(id)
+}
+
+async fn web_album_info(album_id: &str) -> Result<Value, String> {
+    let a = get(&format!("/albums/{album_id}")).await?;
+    let tracks = all_items(a["tracks"].clone()).await?;
+    Ok(web_album_info_shape(&a, &tracks))
+}
+
+/// A Web API album + all its tracks → `parse::album_info`'s shape.
+fn web_album_info_shape(a: &Value, tracks: &[Value]) -> Value {
+    let copyrights: Vec<Value> = a["copyrights"].as_array().into_iter().flatten().map(|c| json!({ "text": c["text"], "type": c["type"] })).collect();
+    json!({
+        "id": a["id"],
+        "uri": a["uri"],
+        "name": a["name"],
+        "artists": join_artists(&a["artists"]),
+        // "album" | "single" | "compilation": the Web API files EPs as singles
+        "type": a["album_type"].as_str().unwrap_or("").to_ascii_lowercase(),
+        "release_date": a["release_date"],
+        "release_precision": a["release_date_precision"],
+        "total_tracks": a["total_tracks"],
+        "duration_ms": tracks.iter().filter_map(|t| t["duration_ms"].as_u64()).sum::<u64>(),
+        "label": a["label"].as_str().filter(|l| !l.trim().is_empty()),
+        "copyrights": copyrights,
+        "cover": first_image(&a["images"]),
+    })
+}
+
 async fn web_album_tracks(album_id: &str) -> Result<Value, String> {
     let album = get(&format!("/albums/{album_id}")).await?;
     let cover = first_image(&album["images"]);
@@ -1064,6 +1122,22 @@ mod tests {
         let t = simplify_track(&json!({"id":"x","album":{"name":"N","images":[]}}));
         assert!(t["cover"].is_null());
         assert_eq!(t["artist_list"], json!([]));
+    }
+
+    #[test]
+    fn web_album_info_matches_the_internal_shape() {
+        let a = json!({"id": "al", "uri": "spotify:album:al", "name": "N", "album_type": "single",
+            "artists": [{"name": "A"}, {"name": "B"}], "release_date": "2021-03", "release_date_precision": "month",
+            "total_tracks": 2, "label": "L", "copyrights": [{"text": "2021 L", "type": "P"}],
+            "images": [{"url": "https://i.scdn.co/x"}]});
+        let info = web_album_info_shape(&a, &[json!({"duration_ms": 1000}), json!({"duration_ms": 2500})]);
+        assert_eq!(info["type"], "single");
+        assert_eq!(info["artists"], "A, B");
+        assert_eq!(info["release_precision"], "month");
+        assert_eq!(info["duration_ms"], 3500);
+        assert_eq!(info["copyrights"], json!([{"text": "2021 L", "type": "P"}]));
+        assert_eq!(info["cover"], "https://i.scdn.co/x");
+        assert!(web_album_info_shape(&json!({"label": ""}), &[])["label"].is_null());
     }
 
     #[test]

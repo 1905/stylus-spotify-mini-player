@@ -2681,3 +2681,10 @@ body:has(.stage:not(.is-playing)) .bg {
 .detail-save[aria-busy="true"] {
   opacity: 0.6;
 }
+
+/* ---------- the current cover's sleeve: album details on the back (WIP: styles not written yet, button hidden) ---------- */
+
+.cover-info,
+.sleeve-back {
+  display: none;
+}

@@ -298,6 +298,60 @@ pub fn album_tracks(data: &Value) -> (Vec<Value>, u64) {
     (tracks, a["tracksV2"]["totalCount"].as_u64().unwrap_or(0))
 }
 
+/// `getAlbum` → the sleeve's back (the album-info card): `{id, uri, name, artists, type,
+/// release_date, release_precision, total_tracks, duration_ms, label, copyrights:[{text,type}],
+/// cover}`. `type`: "album" | "single" | "ep" | "compilation". `release_date` is cut to its
+/// precision ("1997-05-28", "1997-05", "1997"), as the Web API sends it. `duration_ms` covers the
+/// tracks on this page only (`album_page_ms` adds the rest).
+pub fn album_info(data: &Value) -> Option<Value> {
+    let a = &data["albumUnion"];
+    let uri = a["uri"].as_str().filter(|u| u.starts_with("spotify:album:"))?;
+    let precision = a["date"]["precision"].as_str().unwrap_or("").to_ascii_lowercase();
+    let iso = a["date"]["isoString"].as_str().unwrap_or("");
+    let release_date = match precision.as_str() {
+        "year" => iso.get(..4),
+        "month" => iso.get(..7),
+        _ => iso.get(..10),
+    }
+    .unwrap_or("");
+    let copyrights: Vec<Value> = a["copyright"]["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| {
+            let text = c["text"].as_str().map(str::trim).filter(|t| !t.is_empty())?;
+            Some(json!({ "text": text, "type": c["type"].as_str().unwrap_or("") }))
+        })
+        .collect();
+    let label = a["label"].as_str().map(str::trim).filter(|l| !l.is_empty());
+    Some(json!({
+        "id": id_of(uri),
+        "uri": uri,
+        "name": a["name"],
+        "artists": join_names(&artist_list(&a["artists"])),
+        "type": a["type"].as_str().unwrap_or("").to_ascii_lowercase(),
+        "release_date": release_date,
+        "release_precision": if precision.is_empty() { Value::Null } else { json!(precision) },
+        "total_tracks": a["tracksV2"]["totalCount"],
+        "duration_ms": album_page_ms(data),
+        "label": label,
+        "copyrights": copyrights,
+        "cover": best_source(&a["coverArt"]["sources"]),
+    }))
+}
+
+/// The summed length of the tracks on one `getAlbum` page, ms.
+pub fn album_page_ms(data: &Value) -> u64 {
+    data["albumUnion"]["tracksV2"]["items"].as_array().into_iter().flatten().filter_map(|i| i["track"]["duration"]["totalMilliseconds"].as_u64()).sum()
+}
+
+/// `fetchEntitiesForRecentlyPlayed` with one track uri → its album's id.
+pub fn album_id_of_track(data: &Value) -> Option<String> {
+    let uri = data["lookup"].as_array()?.first()?["data"]["albumOfTrack"]["uri"].as_str()?;
+    let id = id_of(uri);
+    (uri.starts_with("spotify:album:") && !id.is_empty()).then(|| id.to_string())
+}
+
 // ---- artists ---------------------------------------------------------------------------
 
 /// `queryArtistOverview` → `{id, name, image, top_tracks: [Track]}`. The top tracks' album has
@@ -469,6 +523,52 @@ mod tests {
         assert_eq!(a["artists"], "Radiohead");
         assert_eq!(a["total"], 12);
         assert!(a["uri"].as_str().unwrap().starts_with("spotify:album:"));
+    }
+
+    #[test]
+    fn album_info_from_live_fixture() {
+        let data = fx("getAlbumInfo");
+        let a = album_info(&data).unwrap();
+        assert_eq!(a["id"], "6dVIqQ8qmQ5GBnJ9shOYGE");
+        assert_eq!(a["name"], "OK Computer");
+        assert_eq!(a["artists"], "Radiohead");
+        assert_eq!(a["type"], "album");
+        assert_eq!(a["release_date"], "1997-05-28");
+        assert_eq!(a["release_precision"], "day");
+        assert_eq!(a["total_tracks"], 12);
+        // the fixture holds the first 3 tracks: Airbag, Paranoid Android, Subterranean Homesick Alien
+        assert_eq!(a["duration_ms"], 942786);
+        assert_eq!(album_page_ms(&data), 942786);
+        assert_eq!(a["label"], "XL Recordings");
+        assert_eq!(a["copyrights"], json!([{"text": "1997 XL Recordings Ltd", "type": "C"}, {"text": "1997 XL Recordings Ltd", "type": "P"}]));
+        assert!(a["cover"].as_str().unwrap().contains("ab67616d0000b273"));
+    }
+
+    #[test]
+    fn album_info_precision_and_gaps() {
+        let mut data = fx("getAlbumInfo");
+        let a = &mut data["albumUnion"];
+        a["date"] = json!({"isoString": "1971-01-01T00:00:00Z", "precision": "YEAR"});
+        a["type"] = json!("EP");
+        a["label"] = json!("  ");
+        a["copyright"] = json!({"items": [{"text": "", "type": "C"}]});
+        let info = album_info(&data).unwrap();
+        assert_eq!(info["release_date"], "1971");
+        assert_eq!(info["release_precision"], "year");
+        assert_eq!(info["type"], "ep");
+        assert!(info["label"].is_null());
+        assert_eq!(info["copyrights"], json!([]));
+        data["albumUnion"]["date"] = json!({"isoString": "2001-06-01T00:00:00Z", "precision": "MONTH"});
+        assert_eq!(album_info(&data).unwrap()["release_date"], "2001-06");
+        assert!(album_info(&json!({"albumUnion": {"uri": "spotify:track:x"}})).is_none());
+        assert_eq!(album_page_ms(&json!({})), 0);
+    }
+
+    #[test]
+    fn album_of_a_track() {
+        assert_eq!(album_id_of_track(&fx("entitiesTracks")).as_deref(), Some("3gBVdu4a1MMJVMy6vwPEb8"));
+        assert_eq!(album_id_of_track(&json!({"lookup": []})), None);
+        assert_eq!(album_id_of_track(&json!({"lookup": [{"data": {"albumOfTrack": {"uri": "spotify:playlist:x"}}}]})), None);
     }
 
     fn assert_track_shape(t: &Value) {

@@ -73,6 +73,7 @@ pub fn run() {
             spotify::search,
             spotify::search_page,
             spotify::get_album_tracks,
+            spotify::get_album_info,
             spotify::get_queue,
             spotify::get_recently_played,
             spotify::list_devices,

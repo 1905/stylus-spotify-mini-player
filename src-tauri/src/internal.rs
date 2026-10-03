@@ -515,6 +515,30 @@ impl Api {
         Ok(tracks)
     }
 
+    /// The album-info card (`parse::album_info`), its total length summed over every track page.
+    pub async fn album_info(&self, album_id: &str) -> Result<Value, String> {
+        const PAGE: u64 = 50;
+        let uri = format!("spotify:album:{album_id}");
+        let page = |offset: u64| self.pathfinder("getAlbum", json!({"uri": uri, "locale": "", "offset": offset, "limit": PAGE}));
+        let first = page(0).await?;
+        let mut info = crate::parse::album_info(&first).ok_or("Spotify didn't return this album")?;
+        let total = info["total_tracks"].as_u64().unwrap_or(0);
+        let mut ms = info["duration_ms"].as_u64().unwrap_or(0);
+        let mut offset = PAGE;
+        while offset < total {
+            ms += crate::parse::album_page_ms(&page(offset).await?);
+            offset += PAGE;
+        }
+        info["duration_ms"] = json!(ms);
+        Ok(info)
+    }
+
+    /// The id of the album a track is on.
+    pub async fn album_id_of_track(&self, track_id: &str) -> Result<String, String> {
+        let data = self.pathfinder("fetchEntitiesForRecentlyPlayed", json!({"uris": [format!("spotify:track:{track_id}")]})).await?;
+        crate::parse::album_id_of_track(&data).ok_or_else(|| "fetchEntitiesForRecentlyPlayed: no album".into())
+    }
+
     /// Fallback: ALBUM_V4 + TRACK_V4, the album's name and cover stamped on each track.
     pub async fn album_pb(&self, album_id: &str) -> Result<Vec<Value>, String> {
         let uri = format!("spotify:album:{album_id}");
@@ -973,6 +997,12 @@ mod live {
         }
         if want("album") {
             dump("getAlbum", &pf("getAlbum", json!({"uri": ALBUM, "locale": "", "offset": 0, "limit": 50})).await);
+        }
+        if want("albuminfo") {
+            // the album-info card: a 3-track page for the fixture, then the real ops
+            dump("getAlbumInfo", &pf("getAlbum", json!({"uri": ALBUM, "locale": "", "offset": 0, "limit": 3})).await);
+            dump("album_info", &api.album_info("6dVIqQ8qmQ5GBnJ9shOYGE").await);
+            dump("album_id_of_track", &api.album_id_of_track("70LcF31zb1H0PyJoS1Sx1r").await.map(Value::String));
         }
         if want("artist") {
             dump("queryArtistOverview", &pf("queryArtistOverview", json!({"uri": ARTIST, "locale": "", "includePrerelease": true})).await);

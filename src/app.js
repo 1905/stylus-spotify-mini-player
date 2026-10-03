@@ -22,6 +22,7 @@ import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 import { parseLink, looksLikeLink } from "./lib/links.js";
 import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
+import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -722,10 +723,13 @@ function makeCover(item) {
   el.className = "cover";
   el.dataset.key = item.key;
   // crossorigin: the colour picker loads the same URL with CORS, so both share one cached copy
-  // the play button shows on hover/focus for past and next covers (CSS hides it on "now")
+  // the play button shows on hover/focus for past and next covers (CSS hides it on "now");
+  // the info button only on "now": it turns the sleeve over (the back is added when opened)
+  const local = isLocalFile(t.uri);
   el.innerHTML =
-    `<div class="art">${artHtml(t.cover, t.name, 'crossorigin="anonymous"')}</div>` +
-    (isLocalFile(t.uri) ? "" : `<button class="cover-play" type="button" aria-label="${esc(`Play ${t.name}`)}">${ICONS.play}</button>`) +
+    `<div class="sleeve"><div class="art">${artHtml(t.cover, t.name, 'crossorigin="anonymous"')}</div></div>` +
+    (local ? "" : `<button class="cover-play" type="button" aria-label="${esc(`Play ${t.name}`)}">${ICONS.play}</button>`) +
+    (local ? "" : `<button class="cover-info" type="button" aria-label="Album details" aria-expanded="false">${ICONS.info}</button>`) +
     `<figcaption><span class="ct">${esc(t.name)}</span><span class="ca">${esc(t.artists)}</span></figcaption>`;
   return el;
 }
@@ -755,6 +759,8 @@ function renderRun() {
   if (!shownTrack()) els.splice(items.filter((i) => i.role === "past").length, 0, slot);
 
   track.replaceChildren(...els);
+  // the turned-over sleeve belongs to the song it was opened on: anything else turns it back
+  if (sleeve && !(sleeve.el.isConnected && sleeve.el.dataset.role === "now")) closeSleeve();
   // another song: back to rest (FLIP animates the covers there); the same song keeps a pan
   const nowUri = state.now ? state.now.uri : null;
   if (nowUri !== runNowUri) resetPan();
@@ -933,9 +939,87 @@ function onRunClick(e) {
     dragged = false;
     return;
   }
+  const info = e.target.closest(".cover-info");
+  if (info) return void toggleSleeve(info.closest(".cover"));
   const btn = e.target.closest(".cover-play");
   const cover = btn && btn.closest(".cover");
   if (cover) playCover(runItems.get(cover.dataset.key));
+}
+
+// ---------- the current cover's sleeve: the info button turns it over to the album's details ----------
+
+let sleeve = null; // the turned-over cover: {el, token}
+let sleeveToken = 0;
+const albumInfos = new Map(); // track id → Promise of get_album_info's answer (a failure isn't kept)
+
+/** The album details of a track's album; the backend finds the album and caches both on disk. */
+function albumInfoOf(track) {
+  const trackId = String(track.uri).split(":")[2] || "";
+  let p = albumInfos.get(trackId);
+  if (!p) {
+    p = accountId().then((account) => invoke("get_album_info", { trackId, account }));
+    albumInfos.set(trackId, p);
+    p.catch(() => {
+      if (albumInfos.get(trackId) === p) albumInfos.delete(trackId);
+    });
+  }
+  return p;
+}
+
+function toggleSleeve(el) {
+  if (!el) return;
+  if (sleeve && sleeve.el === el) closeSleeve();
+  else openSleeve(el);
+}
+
+function openSleeve(el) {
+  const item = runItems.get(el.dataset.key);
+  if (!item || el.dataset.role !== "now") return;
+  closeSleeve();
+  const token = ++sleeveToken;
+  sleeve = { el, token };
+  let back = el.querySelector(".sleeve-back");
+  if (!back) {
+    back = Object.assign(document.createElement("div"), { className: "sleeve-back" });
+    back.setAttribute("role", "group");
+    back.setAttribute("aria-label", "Album details");
+    el.querySelector(".sleeve").append(back);
+  }
+  back.innerHTML = SLEEVE_LOADING;
+  back.classList.add("is-loading");
+  el.classList.add("is-flipped");
+  setSleeveButton(el, true);
+  albumInfoOf(item.track).then(
+    (info) => {
+      if (token !== sleeveToken) return;
+      back.classList.remove("is-loading");
+      back.innerHTML = info ? sleeveBackHtml(info) : SLEEVE_ERROR;
+    },
+    (e) => {
+      if (token !== sleeveToken) return;
+      applog("warn", `album info: ${e}`);
+      back.classList.remove("is-loading");
+      back.innerHTML = SLEEVE_ERROR;
+    },
+  );
+}
+
+/** Turn the sleeve back to the cover. */
+function closeSleeve() {
+  if (!sleeve) return;
+  const { el } = sleeve;
+  sleeve = null;
+  sleeveToken++;
+  el.classList.remove("is-flipped");
+  setSleeveButton(el, false);
+}
+
+function setSleeveButton(el, open) {
+  const btn = el.querySelector(".cover-info");
+  if (!btn) return;
+  btn.innerHTML = open ? ICONS.close : ICONS.info;
+  btn.setAttribute("aria-label", open ? "Back to the cover" : "Album details");
+  btn.setAttribute("aria-expanded", String(open));
 }
 
 /** Play a run item ({role, offset, track}) from a cover or a panel row (row: the clicked row, for its spinner). */

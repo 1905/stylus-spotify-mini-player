@@ -47,4 +47,7 @@ export const ICONS = {
   close: svg("close", LINE, '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
   back: svg("back", LINE, '<path d="M14.75 5.5 8.25 12l6.5 6.5"/>'),
   plus: svg("plus", LINE, '<path d="M12 5.5v13M5.5 12h13"/>'),
+
+  // the current cover: turn the sleeve over (close turns it back)
+  info: svg("info", LINE, '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.25"/><circle cx="12" cy="7.75" r="1.1" fill="currentColor" stroke="none"/>'),
 };
