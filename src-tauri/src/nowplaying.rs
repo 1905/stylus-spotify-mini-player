@@ -493,14 +493,19 @@ impl NowPlaying {
                 .buffered(META_CONCURRENCY)
                 .collect()
                 .await;
-            let mut fetching = lock(&this.fetching);
-            for (uri, info) in got {
-                fetching.remove(&uri);
+            // one lock at a time: fetch_missing takes meta then fetching, so holding fetching
+            // while remember() takes meta could deadlock against it
+            {
+                let mut fetching = lock(&this.fetching);
+                for (uri, _) in &got {
+                    fetching.remove(uri);
+                }
+            }
+            for (_, info) in got {
                 if let Some(t) = info {
                     this.remember(t);
                 }
             }
-            drop(fetching);
             this.emit();
         });
     }

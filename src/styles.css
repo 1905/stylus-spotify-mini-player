@@ -98,16 +98,58 @@ svg {
 
 /* ---------- background: two art layers + grain ---------- */
 
+/* glow v2 (src/lib/glow.js): up to 3 blobs placed where their colour sits on the cover, a wash, a base tint.
+   Blob offsets and radii are in cover sizes (--now) from the cover's centre (--ax, --ay).
+   Stops follow 1 − smoothstep (glow.js falloff), so a blob has no visible rim. */
 .bg {
+  --ax: calc(var(--gutter) + var(--now) / 2); /* the cover row: the current cover sits at the left gutter */
+  --ay: 42%;
+  --w: var(--v);
+  --wa: 0.22;
+  --g1: var(--v);
+  --g1a: 0;
+  --g1x: 0;
+  --g1y: 0;
+  --g1r: 1;
+  --g2: var(--v);
+  --g2a: 0;
+  --g2x: 0;
+  --g2y: 0;
+  --g2r: 1;
+  --g3: var(--v);
+  --g3a: 0;
+  --g3x: 0;
+  --g3y: 0;
+  --g3r: 1;
   position: fixed;
   inset: 0;
   z-index: 0;
   opacity: 0;
   transition: opacity 900ms ease;
   background:
-    radial-gradient(64% 58% at 50% 38%, rgb(var(--v) / 0.22), transparent 72%),
+    radial-gradient(
+      calc(var(--now) * var(--g1r)) calc(var(--now) * var(--g1r) * 0.85) at calc(var(--ax) + var(--now) * var(--g1x)) calc(var(--ay) + var(--now) * var(--g1y)),
+      rgb(var(--g1) / var(--g1a)), rgb(var(--g1) / calc(var(--g1a) * 0.84)) 25%,
+      rgb(var(--g1) / calc(var(--g1a) * 0.5)) 50%, rgb(var(--g1) / calc(var(--g1a) * 0.16)) 75%, rgb(var(--g1) / 0)
+    ),
+    radial-gradient(
+      calc(var(--now) * var(--g2r)) calc(var(--now) * var(--g2r) * 0.85) at calc(var(--ax) + var(--now) * var(--g2x)) calc(var(--ay) + var(--now) * var(--g2y)),
+      rgb(var(--g2) / var(--g2a)), rgb(var(--g2) / calc(var(--g2a) * 0.84)) 25%,
+      rgb(var(--g2) / calc(var(--g2a) * 0.5)) 50%, rgb(var(--g2) / calc(var(--g2a) * 0.16)) 75%, rgb(var(--g2) / 0)
+    ),
+    radial-gradient(
+      calc(var(--now) * var(--g3r)) calc(var(--now) * var(--g3r) * 0.85) at calc(var(--ax) + var(--now) * var(--g3x)) calc(var(--ay) + var(--now) * var(--g3y)),
+      rgb(var(--g3) / var(--g3a)), rgb(var(--g3) / calc(var(--g3a) * 0.84)) 25%,
+      rgb(var(--g3) / calc(var(--g3a) * 0.5)) 50%, rgb(var(--g3) / calc(var(--g3a) * 0.16)) 75%, rgb(var(--g3) / 0)
+    ),
+    radial-gradient(64% 58% at 50% 38%, rgb(var(--w) / var(--wa)), transparent 72%),
     radial-gradient(140% 70% at 50% 125%, rgb(0 0 0 / 0.4), transparent 62%),
     rgb(var(--i));
+}
+
+/* the focus layout (cover row off): the cover is centred */
+body:has(.stage.is-solo) .bg {
+  --ax: 50%;
 }
 
 .bg.is-on {
@@ -2510,4 +2552,138 @@ svg {
 
 .set-quota[hidden] {
   display: none;
+}
+
+/* ---------- Settings: the MCP server (switch, status, copy buttons, reset key asked inline) ---------- */
+
+.set-mcp .set-note {
+  margin-top: 0;
+}
+
+.set-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.set-actions-label {
+  width: 100%;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+.chip {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.chip:hover {
+  background: rgba(246, 244, 248, 0.15);
+}
+
+.chip-quiet {
+  margin-left: auto;
+  color: var(--fg-2);
+  background: none;
+}
+
+.chip-quiet:hover {
+  color: var(--fg);
+}
+
+.chip-danger {
+  color: var(--ink);
+  background: #ff8f84;
+}
+
+.chip-danger:hover {
+  background: #ffaaa1;
+}
+
+/* ---------- Library: "Add" a pasted Spotify link (Playlists and Mixes tabs) ---------- */
+
+.lib-add {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.lib-add-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 620px;
+}
+
+.lib-add-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+  font-size: 14px;
+}
+
+.lib-add-input::placeholder {
+  color: var(--fg-3);
+}
+
+.lib-add-go {
+  height: 36px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+.lib-add-go[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.lib-add-msg {
+  width: 100%;
+  max-width: 620px;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.added-mark {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+/* the detail head: Play, then Add to library / Save to Mixes */
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.detail-actions .btn-play {
+  margin-top: 0;
+}
+
+.detail-save {
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--hair);
+}
+
+.detail-save[aria-busy="true"] {
+  opacity: 0.6;
 }

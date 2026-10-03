@@ -104,10 +104,14 @@ pub fn artist(d: &Value) -> Option<Value> {
 
 // ---- search ----------------------------------------------------------------------
 
-/// `searchDesktop` → `{tracks, albums}` (`search`'s shape).
+/// `searchDesktop` → `{tracks, albums, artists, playlists}` (`search`'s shape; the UI reads the
+/// first two, MCP's `search` all four).
 pub fn search(data: &Value) -> Value {
     let s = &data["searchV2"];
-    json!({ "tracks": search_tracks(s), "albums": search_albums(s) })
+    let items = |k: &str| s[k]["items"].as_array().cloned().unwrap_or_default();
+    let artists: Vec<Value> = items("artists").iter().filter_map(|i| artist(&i["data"])).collect();
+    let playlists: Vec<Value> = items("playlists").iter().filter_map(|i| playlist(&i["data"], 0)).collect();
+    json!({ "tracks": search_tracks(s), "albums": search_albums(s), "artists": artists, "playlists": playlists })
 }
 
 fn search_tracks(s: &Value) -> Vec<Value> {
@@ -206,6 +210,67 @@ pub fn playlist_info(data: &Value) -> Option<Value> {
     let name = p["name"].as_str().filter(|n| !n.is_empty())?;
     let cover = images(&p["images"]).first().and_then(|i| i["url"].as_str().map(str::to_string));
     Some(json!({ "name": name, "cover": cover }))
+}
+
+/// `fetchPlaylist` → `{id, uri, name, cover, owner, owner_id, total, format, following}` for a link
+/// the user pastes (any playlist, theirs or not). None when it has no name.
+pub fn playlist_meta(data: &Value) -> Option<Value> {
+    let p = &data["playlistV2"];
+    let uri = p["uri"].as_str().filter(|u| u.starts_with("spotify:playlist:"))?;
+    let name = p["name"].as_str().filter(|n| !n.is_empty())?;
+    let owner = &p["ownerV2"]["data"];
+    Some(json!({
+        "id": id_of(uri),
+        "uri": uri,
+        "name": name,
+        "cover": images(&p["images"]).first().and_then(|i| i["url"].as_str().map(str::to_string)),
+        "owner": owner["name"],
+        "owner_id": owner["username"],
+        "total": p["content"]["totalCount"],
+        "format": p["format"],
+        "following": p["following"],
+    }))
+}
+
+/// `getAlbum` → `{id, uri, name, artists, cover, total}`.
+pub fn album_meta(data: &Value) -> Option<Value> {
+    let a = &data["albumUnion"];
+    let mut out = album(a)?;
+    out["uri"] = a["uri"].clone();
+    out["total"] = a["tracksV2"]["totalCount"].clone();
+    Some(out)
+}
+
+/// The `home` feed's Made For You mixes, in feed order, each once: Spotify's personal playlists
+/// (Daily Mix, Discover Weekly, Release Radar, artist and genre radios and mixes, daylist).
+/// Editorial lists, "This Is", albums, artists and the DJ are left out.
+/// `[{id, uri, name, cover, description, format}]`.
+pub fn home_mixes(data: &Value) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let sections = data["home"]["sectionContainer"]["sections"]["items"].as_array().into_iter().flatten();
+    for item in sections.flat_map(|s| s["sectionItems"]["items"].as_array().into_iter().flatten()) {
+        let d = &item["content"]["data"];
+        if d["__typename"] != "Playlist" {
+            continue;
+        }
+        let Some(uri) = d["uri"].as_str().filter(|u| u.starts_with("spotify:playlist:")) else { continue };
+        let id = id_of(uri);
+        let format = d["format"].as_str().unwrap_or("");
+        let name = d["name"].as_str().unwrap_or("");
+        let spotify_owned = d["ownerV2"]["data"]["uri"] == "spotify:user:spotify";
+        if !spotify_owned || !crate::links::is_personal_mix(id) || format.is_empty() || name.is_empty() || out.iter().any(|m| m["id"] == id) {
+            continue;
+        }
+        out.push(json!({
+            "id": id,
+            "uri": uri,
+            "name": name,
+            "cover": images(&d["images"]).first().and_then(|i| i["url"].as_str().map(str::to_string)),
+            "description": d["description"],
+            "format": format,
+        }));
+    }
+    out
 }
 
 /// One `fetchLibraryTracks` page → `(tracks, totalCount)`.
@@ -375,6 +440,37 @@ mod tests {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))).unwrap()
     }
 
+    #[test]
+    fn home_mixes_personal_only_in_feed_order() {
+        let mut home = fx("home");
+        // an editorial list owned by Spotify: not a mix
+        let editorial = json!({"uri": "spotify:playlist:37i9dQZF1DXblmY5UIU3v3", "content": {"__typename": "PlaylistResponseWrapper", "data": {
+            "__typename": "Playlist", "uri": "spotify:playlist:37i9dQZF1DXblmY5UIU3v3", "name": "DOWN LOW", "format": "editorial",
+            "ownerV2": {"data": {"uri": "spotify:user:spotify"}}}}});
+        home["home"]["sectionContainer"]["sections"]["items"][1]["sectionItems"]["items"].as_array_mut().unwrap().push(editorial);
+        let m = home_mixes(&home);
+        let names: Vec<&str> = m.iter().map(|x| x["name"].as_str().unwrap()).collect();
+        // DJ (no format), the album, the editorial list and the repeats are left out
+        assert_eq!(names, ["Bonobo Radio", "Discover Weekly", "Daily Mix 1", "Release Radar"]);
+        assert_eq!(m[0]["uri"], "spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
+        assert_eq!(m[0]["format"], "inspiredby-mix");
+        assert!(m[0]["cover"].as_str().unwrap().starts_with("https://"));
+        assert!(home_mixes(&json!({})).is_empty());
+    }
+
+    #[test]
+    fn playlist_and_album_meta() {
+        let p = playlist_meta(&fx("fetchPlaylist")).unwrap();
+        assert_eq!(p["owner_id"], "spotify");
+        assert!(p["total"].as_u64().unwrap() > 0);
+        assert!(p["uri"].as_str().unwrap().ends_with(p["id"].as_str().unwrap()));
+        assert!(playlist_meta(&json!({"playlistV2": {"uri": "spotify:playlist:x", "name": ""}})).is_none());
+        let a = album_meta(&fx("getAlbum")).unwrap();
+        assert_eq!(a["artists"], "Radiohead");
+        assert_eq!(a["total"], 12);
+        assert!(a["uri"].as_str().unwrap().starts_with("spotify:album:"));
+    }
+
     fn assert_track_shape(t: &Value) {
         for k in ["id", "uri", "name", "artists", "artist_list", "album", "cover", "duration_ms"] {
             assert!(t.get(k).is_some(), "{k} missing in {t}");
@@ -409,6 +505,8 @@ mod tests {
         assert!(t[0]["duration_ms"].as_u64().unwrap() > 0);
         assert_eq!(a[0]["artists"], "Radiohead");
         assert!(a[0]["cover"].as_str().unwrap().starts_with("https://i.scdn.co/"));
+        assert_eq!(r["artists"][0]["name"], "Radiohead");
+        assert!(r["playlists"].as_array().unwrap().is_empty(), "none in the trimmed fixture");
     }
 
     #[test]

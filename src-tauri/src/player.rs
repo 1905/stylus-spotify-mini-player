@@ -666,15 +666,36 @@ async fn restore(engine: Engine, device_id: String) {
         log::info!(target: LOG, "restore skipped: the player already has a track");
         return;
     }
-    // optional check with the app's token; a failure (app logged out, offline) doesn't block
-    match crate::spotify::get("/me/player").await {
-        Ok(p) if p["is_playing"].as_bool() == Some(true) && p["device"]["id"].as_str() != Some(device_id.as_str()) => {
-            let name = p["device"]["name"].as_str().unwrap_or("another device");
-            log::info!(target: LOG, "restore skipped: {name} is playing");
+    // another device playing must not be interrupted. Spotify's own device state (the Connect
+    // cluster) answers first: it works while the Web API is rate-limited, and the first update
+    // arrives within seconds of connecting. Without an answer from either, don't restore.
+    let mut cluster = None;
+    for _ in 0..12 {
+        cluster = engine.0.now.cluster();
+        if cluster.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    if let Some(c) = cluster {
+        let state = &c.player_state;
+        if !c.active_device_id.is_empty() && c.active_device_id != device_id && state.is_playing && !state.is_paused {
+            log::info!(target: LOG, "restore skipped: another device is playing (Connect state)");
             return;
         }
-        Ok(_) => {}
-        Err(e) => log::info!(target: LOG, "playback check failed ({e}), restoring anyway"),
+    } else {
+        match crate::spotify::get("/me/player").await {
+            Ok(p) if p["is_playing"].as_bool() == Some(true) && p["device"]["id"].as_str() != Some(device_id.as_str()) => {
+                let name = p["device"]["name"].as_str().unwrap_or("another device");
+                log::info!(target: LOG, "restore skipped: {name} is playing");
+                return;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::info!(target: LOG, "restore skipped: can't tell whether another device is playing ({e})");
+                return;
+            }
+        }
     }
     if tracker.has_track() {
         log::info!(target: LOG, "restore skipped: the player got a track meanwhile");
@@ -774,10 +795,7 @@ pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Resul
         return Err(format!("BAD_ARGS: quality must be 96, 160 or 320 kbps, got {kbps}"));
     }
     let saved = tokio::task::spawn_blocking(move || {
-        let mut settings = crate::settings::load();
-        let old = settings.bitrate;
-        settings.bitrate = kbps;
-        crate::settings::save(&settings).map(|()| old)
+        crate::settings::update(|s| std::mem::replace(&mut s.bitrate, kbps)).map(|(old, _)| old)
     })
     .await
     .map_err(|e| e.to_string())
@@ -861,71 +879,149 @@ fn logged(what: &str, r: Result<(), String>) -> Result<(), String> {
     r
 }
 
+/// The in-app player's transport, for the UI's `local_*` commands and for control.rs (MCP).
+/// Each queues a Spirc command: Err `ENGINE_NOT_READY` when the engine isn't ready.
+impl Engine {
+    /// True while the engine is ready (Spirc running, session up).
+    pub fn is_ready(&self) -> bool {
+        self.state() == State::Ready
+    }
+
+    pub fn play(&self) -> Result<(), String> {
+        logged("play", self.with_spirc(Spirc::play))
+    }
+
+    pub fn pause(&self) -> Result<(), String> {
+        logged("pause", self.with_spirc(Spirc::pause))
+    }
+
+    pub fn next(&self) -> Result<(), String> {
+        crate::audio_out::flush();
+        logged("next", self.with_spirc(Spirc::next))
+    }
+
+    pub fn prev(&self) -> Result<(), String> {
+        crate::audio_out::flush();
+        logged("prev", self.with_spirc(Spirc::prev))
+    }
+
+    pub fn seek(&self, position_ms: u32) -> Result<(), String> {
+        crate::audio_out::flush();
+        logged(&format!("seek {position_ms}"), self.with_spirc(|s| s.set_position_ms(position_ms)))
+    }
+
+    /// `percent` 0–100.
+    pub fn set_volume(&self, percent: u8) -> Result<(), String> {
+        logged(&format!("volume {percent}"), self.with_spirc(|s| s.set_volume(volume_from_percent(percent))))
+    }
+
+    pub fn set_shuffle(&self, on: bool) -> Result<(), String> {
+        logged(&format!("shuffle {on}"), self.with_spirc(|s| s.shuffle(on)))
+    }
+
+    /// `mode` is "off", "context" or "track".
+    pub fn set_repeat(&self, mode: &str) -> Result<(), String> {
+        let (context, track) = match mode {
+            "off" => (false, false),
+            "context" => (true, false),
+            "track" => (true, true),
+            _ => return Err(format!("BAD_ARGS: bad repeat mode: {mode}")),
+        };
+        logged(&format!("repeat {mode}"), self.with_spirc(|s| {
+            s.repeat(context)?;
+            s.repeat_track(track)
+        }))
+    }
+
+    /// What plays here now (the `player-state` payload), None before the player's first event.
+    pub fn now_state(&self) -> Option<serde_json::Value> {
+        self.0.now.snapshot()
+    }
+
+    /// Loads a context or a track list here. Activates the device first: Spirc ignores every
+    /// command, Load included, while inactive. Ok only means queued.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load(
+        &self,
+        context_uri: Option<String>,
+        uris: Option<Vec<String>>,
+        track_uri: Option<String>,
+        position_ms: u32,
+        play: bool,
+        shuffle: Option<bool>,
+        repeat: Option<String>,
+    ) -> Result<(), String> {
+        let source = load_source(context_uri, uris)?;
+        let m = modes(shuffle, repeat);
+        let saved = match &source {
+            LoadSource::Context(c) => Source::Context { context_uri: c.clone() },
+            LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
+        };
+        log::info!(target: "needle::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
+        let request = load_request(source, track_uri.clone(), position_ms, play, m);
+        crate::audio_out::flush();
+        self.with_spirc(|s| {
+            s.activate()?;
+            s.load(request)
+        })?;
+        self.0.session.loaded(saved, track_uri, position_ms, m.shuffle, Repeat::from_flags(m.repeat, m.repeat_track));
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub fn local_play(engine: Managed<'_, Engine>) -> Result<(), String> {
-    logged("play", engine.with_spirc(Spirc::play))
+    engine.play()
 }
 
 #[tauri::command]
 pub fn local_pause(engine: Managed<'_, Engine>) -> Result<(), String> {
-    logged("pause", engine.with_spirc(Spirc::pause))
+    engine.pause()
 }
 
 #[tauri::command]
 pub fn local_next(engine: Managed<'_, Engine>) -> Result<(), String> {
-    crate::audio_out::flush();
-    logged("next", engine.with_spirc(Spirc::next))
+    engine.next()
 }
 
 #[tauri::command]
 pub fn local_prev(engine: Managed<'_, Engine>) -> Result<(), String> {
-    crate::audio_out::flush();
-    logged("prev", engine.with_spirc(Spirc::prev))
+    engine.prev()
 }
 
 #[tauri::command]
 pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), String> {
-    crate::audio_out::flush();
-    logged(&format!("seek {position_ms}"), engine.with_spirc(|s| s.set_position_ms(position_ms)))
+    engine.seek(position_ms)
 }
 
 /// `percent` 0–100.
 #[tauri::command]
 pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), String> {
-    logged(&format!("volume {percent}"), engine.with_spirc(|s| s.set_volume(volume_from_percent(percent))))
+    engine.set_volume(percent)
 }
 
 #[tauri::command]
 pub fn local_shuffle(engine: Managed<'_, Engine>, on: bool) -> Result<(), String> {
-    logged(&format!("shuffle {on}"), engine.with_spirc(|s| s.shuffle(on)))
+    engine.set_shuffle(on)
 }
 
 /// `mode` is "off", "context" or "track".
 #[tauri::command]
 pub fn local_repeat(engine: Managed<'_, Engine>, mode: String) -> Result<(), String> {
-    let (context, track) = match mode.as_str() {
-        "off" => (false, false),
-        "context" => (true, false),
-        "track" => (true, true),
-        _ => return Err(format!("BAD_ARGS: bad repeat mode: {mode}")),
-    };
-    logged(&format!("repeat {mode}"), engine.with_spirc(|s| {
-        s.repeat(context)?;
-        s.repeat_track(track)
-    }))
+    engine.set_repeat(&mode)
 }
 
 /// What plays on this Mac now, from librespot: the latest `player-state` payload (see
 /// nowplaying.rs), for the UI's first paint. Null before the player's first event.
 #[tauri::command]
 pub fn local_state(engine: Managed<'_, Engine>) -> Option<serde_json::Value> {
-    engine.0.now.snapshot()
+    engine.now_state()
 }
 
-/// Loads a context or a track list on this Mac's speaker. Activates the device first: Spirc
-/// ignores every command, Load included, while inactive. Both go down the same
-/// ordered channel. Ok only means queued; the UI confirms the track from the poll.
+/// Loads a context or a track list on this Mac's speaker (`Engine::load`). Ok only means
+/// queued; the UI confirms the track from the player-state events.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn local_load(
     engine: Managed<'_, Engine>,
     context_uri: Option<String>,
@@ -936,21 +1032,7 @@ pub fn local_load(
     shuffle: Option<bool>,
     repeat: Option<String>,
 ) -> Result<(), String> {
-    let source = load_source(context_uri, uris)?;
-    let m = modes(shuffle, repeat);
-    let saved = match &source {
-        LoadSource::Context(c) => Source::Context { context_uri: c.clone() },
-        LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
-    };
-    log::info!(target: "needle::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
-    let request = load_request(source, track_uri.clone(), position_ms, play, m);
-    crate::audio_out::flush();
-    engine.with_spirc(|s| {
-        s.activate()?;
-        s.load(request)
-    })?;
-    engine.0.session.loaded(saved, track_uri, position_ms, m.shuffle, Repeat::from_flags(m.repeat, m.repeat_track));
-    Ok(())
+    engine.load(context_uri, uris, track_uri, position_ms, play, shuffle, repeat)
 }
 
 /// The saved playback session of the player's account, for the UI to show before its first

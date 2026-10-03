@@ -1,0 +1,224 @@
+<!doctype html>
+<!-- Glow lab: old (v1, one radial from the most saturated pixel) vs new (v2, src/lib/glow.js) per cover.
+     Serve the project root (npm run dev:web) and open /dev/glow.html  (?layout=focus for the centred cover) -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Needle — glow lab</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../src/styles.css" />
+    <style>
+      html,
+      body {
+        height: auto;
+        overflow: auto;
+      }
+      body {
+        padding: 20px;
+        background: #0c0b10;
+        -webkit-user-select: text;
+        user-select: text;
+      }
+      .head {
+        display: flex;
+        gap: 18px;
+        align-items: baseline;
+        margin-bottom: 16px;
+        color: var(--fg-2);
+      }
+      .head h1 {
+        font-size: 20px;
+        color: var(--fg);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(620px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 10px;
+        border-radius: 8px;
+        background: #16151b;
+      }
+      .card header {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--fg-2);
+      }
+      .card header b {
+        color: var(--fg);
+      }
+      .mini {
+        --now: 92px;
+        --gutter: 16px;
+        position: relative;
+        height: 210px;
+        overflow: hidden;
+        border-radius: 6px;
+        isolation: isolate;
+      }
+      .mini .bg {
+        position: absolute;
+        opacity: 1;
+        transition: none;
+      }
+      .focus .mini .bg {
+        --ax: 50%;
+      }
+      .mini img {
+        position: absolute;
+        z-index: 1;
+        left: var(--gutter);
+        top: calc(42% - var(--now) / 2);
+        width: var(--now);
+        height: var(--now);
+        border-radius: 4px;
+      }
+      .focus .mini img {
+        left: calc(50% - var(--now) / 2);
+      }
+      .mini .t {
+        position: absolute;
+        z-index: 1;
+        left: var(--gutter);
+        right: var(--gutter);
+        bottom: 34px;
+        font-size: 22px;
+        font-weight: 700;
+        font-stretch: 80%;
+        line-height: 1;
+      }
+      .mini .t small {
+        display: block;
+        margin-top: 3px;
+        font-size: 11px;
+        font-weight: 450;
+        color: var(--fg-2);
+      }
+      .focus .mini .t {
+        text-align: center;
+      }
+      .mini .tag {
+        position: absolute;
+        z-index: 1;
+        right: 6px;
+        top: 5px;
+        font-size: 10px;
+        color: var(--fg-3);
+      }
+      .swatches {
+        grid-column: 1 / -1;
+        display: flex;
+        height: 22px;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .swatches span {
+        position: relative;
+        min-width: 3px;
+      }
+      .swatches span.pick::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0;
+        height: 4px;
+        background: var(--fg);
+      }
+      .regions {
+        display: grid;
+        grid-template-columns: repeat(3, 8px);
+        gap: 1px;
+      }
+      .regions i {
+        width: 8px;
+        height: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <h1>Glow lab</h1>
+      <span id="sum"></span>
+      <a href="?" style="color: var(--fg-2)">row</a>
+      <a href="?layout=focus" style="color: var(--fg-2)">focus</a>
+    </div>
+    <div id="grid" class="grid"></div>
+    <script type="module">
+      import { extractColors } from "../src/lib/color.js";
+      import { inspectCover, glowVars, fallbackVars } from "../src/lib/glow.js";
+
+      // public cover CDNs (i.scdn.co; mzstatic for Mire. — not in the fixtures). Named by look, not title.
+      const COVERS = [
+        ["younger-brother (white wall, blue right)", "https://i.scdn.co/image/ab67616d0000b27348a5185195990d92e4dd47eb"],
+        ["mire. (pastel waves, white frame)", "https://is1-ssl.mzstatic.com/image/thumb/Music111/v4/8f/a8/62/8fa862ab-d485-6dee-16dc-9bc12e1d6745/artwork.jpg/640x640bb.jpg"],
+        ["white + small orange", "https://i.scdn.co/image/ab67616d0000b27336e0f29bd75b796101726eaf"],
+        ["white + iridescent X", "https://i.scdn.co/image/ab67616d0000b27304c08e20ca41f804c7472e41"],
+        ["pastel pink/lilac", "https://i.scdn.co/image/ab67616d0000b2734dcb6c5df15cf74596ab25a4"],
+        ["mono: white X on black", "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a"],
+        ["mono: b/w spiral", "https://i.scdn.co/image/ab67616d0000b273b3aa5176106a556e5274642f"],
+        ["neon lines on black", "https://i.scdn.co/image/ab67616d0000b273f7cfa83f783cb98c355abec9"],
+        ["neon magenta flowers", "https://i.scdn.co/image/ab67616d0000b2739b9d8aff37035a197bb06ca7"],
+        ["orange/purple + blue top", "https://i.scdn.co/image/ab67616d0000b2739e2f95ae77cf436017ada9cb"],
+        ["earthy: campfire", "https://i.scdn.co/image/ab67616d0000b273683812adb2b4eb20fb688c9d"],
+        ["earthy: gold on black", "https://i.scdn.co/image/ab67616d0000b273a24eb1aa0c049e3ca5f0b162"],
+        ["red room", "https://i.scdn.co/image/ab67616d0000b273915a5f6f13382f416369f239"],
+        ["pastel gradient", "https://i.scdn.co/image/ab67616d0000b273ecec6ec082ed977d6d0315d2"],
+        ["blue + red accent", "https://i.scdn.co/image/ab67616d0000b27323fad8bd3a0351c0e183f075"],
+        ["colour splash on white", "https://i.scdn.co/image/ab67616d0000b273535749cdd3ac5452d99289be"],
+        ["muted forest", "https://i.scdn.co/image/ab67616d0000b2739c72445324a38f73ba0fbb4a"],
+        ["deep blue", "https://i.scdn.co/image/ab67616d0000b273dc20397b139223620af148f6"],
+        ["teal disc on black", "https://i.scdn.co/image/ab67616d0000b27380880074a2fbe44dc123ca88"],
+      ];
+
+      if (new URLSearchParams(location.search).get("layout") === "focus") document.body.classList.add("focus");
+      const grid = document.getElementById("grid");
+      const css = (rgb) => `rgb(${rgb.join(" ")})`;
+      const deg = (h) => Math.round(((h * 180) / Math.PI + 360) % 360);
+
+      function mini(tag, url, vars) {
+        const m = document.createElement("div");
+        m.className = "mini";
+        m.innerHTML = `<div class="bg"></div><img alt="" src="${url}" crossorigin="anonymous"><div class="t">Track title<small>Artist name</small></div><span class="tag">${tag}</span>`;
+        const bg = m.querySelector(".bg");
+        for (const [k, v] of Object.entries(vars)) bg.style.setProperty(k, v);
+        return m;
+      }
+
+      const times = [];
+      window.__lab = { done: false, results: [] };
+      for (const [name, url] of COVERS) {
+        const card = document.createElement("section");
+        card.className = "card";
+        grid.append(card);
+        try {
+          const [old, r] = await Promise.all([extractColors(url), inspectCover(url)]);
+          const { pal, glow } = r;
+          times.push(r.drawMs + r.analyseMs);
+          const regions = pal.regions.map((i) => `<i style="background:${i < 0 ? "#000" : css(pal.colors[i].rgb)}"></i>`).join("");
+          card.innerHTML = `<header><b>${name}</b><span>${pal.mono ? "mono · " : ""}${pal.colors.length} colours · ${glow.blobs.length} blobs · text ${glow.textContrast.toFixed(1)}:1, peak ${glow.contrast.toFixed(1)}:1 · ${(r.drawMs + r.analyseMs).toFixed(1)} ms</span><span class="regions" title="dominant colour per 3×3 region">${regions}</span></header>`;
+          card.append(mini("old", url, fallbackVars(old || { vivid: [139, 124, 240], ink: [21, 19, 27] })), mini("new", url, glowVars(glow)));
+          const sw = document.createElement("div");
+          sw.className = "swatches";
+          sw.innerHTML = [...pal.colors]
+            .sort((a, b) => b.share - a.share)
+            .map((c) => `<span class="${c.picked ? "pick" : ""}" style="flex:${c.share};background:${css(c.rgb)}" title="L${c.L.toFixed(2)} C${c.C.toFixed(3)} h${deg(c.h)} · ${(c.share * 100).toFixed(1)}% · score ${c.score.toFixed(3)}"></span>`)
+            .join("");
+          card.append(sw);
+          window.__lab.results.push({ name, ms: r.drawMs + r.analyseMs, contrast: glow.contrast, mono: pal.mono, blobs: glow.blobs.map((b) => [css(b.rgb), +b.a.toFixed(2), +b.x.toFixed(2), +b.y.toFixed(2)]) });
+        } catch (e) {
+          card.textContent = `${name}: ${e}`;
+          console.error(name, e);
+        }
+      }
+      times.sort((a, b) => a - b);
+      document.getElementById("sum").textContent = `${times.length} covers · main thread per cover: median ${times[times.length >> 1].toFixed(1)} ms, max ${times[times.length - 1].toFixed(1)} ms`;
+      window.__lab.done = true;
+    </script>
+  </body>
+</html>

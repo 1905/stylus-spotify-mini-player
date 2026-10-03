@@ -2,9 +2,15 @@ mod applog;
 mod audio_out;
 mod auth;
 mod cache;
+pub mod control;
 mod dock;
 mod hashes;
 mod internal;
+mod library;
+pub mod links;
+pub mod mcp;
+mod mcp_app;
+pub mod mcp_tools;
 mod media;
 mod nowplaying;
 mod parse;
@@ -30,6 +36,9 @@ pub fn run() {
         .setup(|app| {
             // setup runs on the main thread: the media controls live there (see media.rs)
             media::init(app.handle());
+            library::attach(app.handle().clone());
+            // the local MCP server, when it's on in Settings
+            tauri::async_runtime::spawn(mcp::start_if_enabled());
             // the speaker "This Mac" starts with the app (or waits in needs_login)
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
@@ -98,7 +107,17 @@ pub fn run() {
             spotify::get_artist,
             spotify::get_artist_albums,
             spotify::get_followed_artists,
-            spotify::add_to_queue
+            spotify::add_to_queue,
+            library::mixes_list,
+            library::links_list,
+            library::link_resolve,
+            library::link_save,
+            library::link_remove,
+            mcp::mcp_status,
+            mcp::mcp_set_enabled,
+            mcp::mcp_reset_key,
+            mcp::mcp_connect_text,
+            mcp::mcp_skill_text
         ])
         // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits
         .on_window_event(|window, event| {

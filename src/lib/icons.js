@@ -46,4 +46,5 @@ export const ICONS = {
   addToQueue: svg("add-to-queue", LINE, '<path d="M4 6.5h14M4 11.5h9M4 16.5h6.5M17.5 13v7M14 16.5h7"/>'),
   close: svg("close", LINE, '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>'),
   back: svg("back", LINE, '<path d="M14.75 5.5 8.25 12l6.5 6.5"/>'),
+  plus: svg("plus", LINE, '<path d="M12 5.5v13M5.5 12h13"/>'),
 };

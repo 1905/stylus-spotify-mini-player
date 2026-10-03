@@ -27,6 +27,7 @@ const DEFAULTS: &[(&str, &str)] = &[
     ("fetchEntitiesForRecentlyPlayed", "cf5d2e94ffd82788470788ae1f6090cc3e9e774fb8fd383580634c6e6f50f7be"),
     ("areEntitiesInLibrary", "134337999233cc6fdd6b1e6dbf94841409f04a946c5c7b744b09ba0dfe5a85ed"),
     ("userTopContent", "49ee15704de4a7fdeac65a02db20604aa11e46f02e809c55d9a89f6db9754356"),
+    ("home", "76243c78b0e20ecdbe41b794dec8cbe73f75e585b0a7201b8d2e84578412847a"),
 ];
 
 /// A sha256 in hex: what a persisted-query hash looks like.

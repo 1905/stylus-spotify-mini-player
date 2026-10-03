@@ -74,6 +74,25 @@
                 </div>
                 <p id="qualityNote" class="set-note">Changing restarts the player for a moment.</p>
               </div>
+              <div class="set-group set-mcp">
+                <div class="set-row">
+                  <span id="mcpLabel" class="set-label">MCP server</span>
+                  <button id="mcpSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="mcpLabel" aria-describedby="mcpStatus"></button>
+                </div>
+                <p id="mcpStatus" class="set-note set-mcp-status" role="status"></p>
+                <div id="mcpActions" class="set-actions" hidden>
+                  <span class="set-actions-label">Copy connect</span>
+                  <button class="chip" type="button" data-copy="json">JSON config</button>
+                  <button class="chip" type="button" data-copy="claude">Claude Code</button>
+                  <button class="chip" type="button" data-copy="skill">Copy skill</button>
+                  <button id="mcpReset" class="chip chip-quiet" type="button">Reset key</button>
+                </div>
+                <div id="mcpResetAsk" class="set-actions set-confirm" hidden>
+                  <span class="set-actions-label">The copied connect text stops working.</span>
+                  <button id="mcpResetYes" class="chip chip-danger" type="button">Reset key</button>
+                  <button id="mcpResetNo" class="chip" type="button">Cancel</button>
+                </div>
+              </div>
               <p id="quotaStatus" class="set-note set-quota" role="status" hidden></p>
             </div>
           </div>
@@ -178,6 +197,18 @@
         </div>
         <div id="sheetBody" class="sheet-body">
           <div id="libLevel1">
+            <div id="libAdd" class="lib-add" hidden>
+              <button id="libAddBtn" class="btn btn-ghost lib-add-btn" type="button" aria-expanded="false" aria-controls="libAddForm">
+                <svg class="ic ic-plus" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"/></svg>
+                <span>Add</span>
+              </button>
+              <form id="libAddForm" class="lib-add-form" hidden>
+                <input id="libAddInput" class="lib-add-input" type="text" placeholder="Paste a Spotify link" aria-label="Spotify link of a playlist, album or artist" autocomplete="off" spellcheck="false" />
+                <button id="libAddGo" class="btn btn-solid lib-add-go" type="submit">Add</button>
+                <button id="libAddCancel" class="btn btn-ghost" type="button">Cancel</button>
+              </form>
+              <p id="libAddMsg" class="lib-add-msg" role="status" hidden></p>
+            </div>
             <section id="libPlaylists" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-playlists">
               <p id="listStatus" class="status" role="status" hidden></p>
               <div id="libList" class="rows"></div>
@@ -217,7 +248,10 @@
               <div class="detail-meta">
                 <h2 id="detailName" class="sheet-title detail-name"></h2>
                 <p id="detailSub" class="detail-sub"></p>
-                <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
+                <div class="detail-actions">
+                  <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
+                  <button id="detailSave" class="btn btn-ghost detail-save" type="button" hidden></button>
+                </div>
               </div>
             </div>
             <p id="detailNote" class="detail-note" hidden></p>
@@ -233,7 +267,7 @@
       <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
         <label class="palette-field">
           <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
-          <input id="searchInput" type="text" placeholder="Songs or albums" aria-label="Search songs or albums" autocomplete="off" spellcheck="false" />
+          <input id="searchInput" type="text" placeholder="Songs, albums or a Spotify link" aria-label="Search songs or albums, or paste a Spotify link" autocomplete="off" spellcheck="false" />
         </label>
         <div id="searchResults" class="palette-results" hidden></div>
       </div>

@@ -411,6 +411,36 @@ pub fn next_track_uris(c: &Cluster, max: usize) -> Vec<String> {
     crate::nowplaying::next_uris(c.player_state.next_tracks.iter().map(|t| t.uri.as_str())).into_iter().take(max).collect()
 }
 
+/// What the cluster's active device plays, at `now_ms` (unix ms): `{device_id, track_uri,
+/// context_uri, is_playing, position_ms, duration_ms, shuffle, repeat}`. None when no device is active.
+pub fn cluster_state(c: &Cluster, now_ms: i64) -> Option<Value> {
+    if c.active_device_id.is_empty() {
+        return None;
+    }
+    let p = &c.player_state;
+    let playing = p.is_playing && !p.is_paused;
+    // a speed of 0 while playing is a missing field: real time
+    let speed = if p.playback_speed > 0.0 { p.playback_speed.min(4.0) } else { 1.0 };
+    let elapsed = if playing && p.timestamp > 0 { ((now_ms - p.timestamp).max(0) as f64 * speed) as i64 } else { 0 };
+    let mut position = p.position_as_of_timestamp.max(0) + elapsed;
+    if p.duration > 0 {
+        position = position.min(p.duration);
+    }
+    let o = &p.options;
+    let repeat = if o.repeating_track { "track" } else if o.repeating_context { "context" } else { "off" };
+    let track_uri = Some(p.track.uri.as_str()).filter(|u| !u.is_empty());
+    Some(json!({
+        "device_id": c.active_device_id,
+        "track_uri": track_uri,
+        "context_uri": Some(p.context_uri.as_str()).filter(|u| !u.is_empty()),
+        "is_playing": playing,
+        "position_ms": position,
+        "duration_ms": p.duration,
+        "shuffle": o.shuffling_context,
+        "repeat": repeat,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,6 +450,39 @@ mod tests {
     fn fx(name: &str) -> Vec<u8> {
         let path = format!("{}/src/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
+    }
+
+    #[test]
+    fn cluster_state_position() {
+        use librespot_protocol::player::ContextPlayerOptions;
+        let mut c = Cluster::new();
+        assert!(cluster_state(&c, 0).is_none(), "no active device");
+        c.active_device_id = "phone".into();
+        let mut ps = PlayerState::new();
+        ps.timestamp = 1_000;
+        ps.position_as_of_timestamp = 5_000;
+        ps.duration = 6_000;
+        ps.playback_speed = 1.0;
+        ps.is_playing = true;
+        ps.context_uri = "spotify:playlist:p".into();
+        let mut t = ProvidedTrack::new();
+        t.uri = "spotify:track:t".into();
+        ps.track = Some(t).into();
+        let mut o = ContextPlayerOptions::new();
+        o.repeating_context = true;
+        ps.options = Some(o).into();
+        c.player_state = Some(ps).into();
+        let s = cluster_state(&c, 1_500).unwrap();
+        assert_eq!(s["position_ms"], 5_500);
+        assert_eq!(s["repeat"], "context");
+        assert_eq!(s["track_uri"], "spotify:track:t");
+        assert_eq!(s["device_id"], "phone");
+        // past the end: capped at the duration
+        assert_eq!(cluster_state(&c, 9_000).unwrap()["position_ms"], 6_000);
+        // paused: the position stands still
+        c.player_state.mut_or_insert_default().is_paused = true;
+        let s = cluster_state(&c, 3_000).unwrap();
+        assert_eq!((s["position_ms"].as_i64(), s["is_playing"].as_bool()), (Some(5_000), Some(false)));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 // Needle — stage UI: boot, sequential poll loop, the run of covers, transport.
 import { fmtTime, esc } from "./lib/format.js";
-import { FALLBACK, extractColors } from "./lib/color.js";
+import { FALLBACK } from "./lib/color.js";
+import { extractGlow, glowVars, fallbackVars } from "./lib/glow.js";
 import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeline.js";
 import { panelRows } from "./lib/playlist.js";
 import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
@@ -18,6 +19,8 @@ import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
 import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
+import { parseLink, looksLikeLink } from "./lib/links.js";
+import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -1157,27 +1160,33 @@ function startFrames() {
 let activeBg = null;
 let colorToken = 0;
 
-function setLayer(el, { vivid, ink }) {
-  el.style.setProperty("--v", vivid.join(" "));
-  el.style.setProperty("--i", ink.join(" "));
+/** vars: CSS custom properties from glow.js (glowVars / fallbackVars) */
+function setLayer(el, vars) {
+  for (const [k, v] of Object.entries(vars)) el.style.setProperty(k, v);
 }
 
 async function paint(url) {
   const token = ++colorToken;
-  const c = await extractColors(url);
-  if (token !== colorToken || !c) return; // keep previous colours on failure
-  const key = `${c.vivid}|${c.ink}`;
+  const g = await extractGlow(url);
+  if (token !== colorToken || !g) return; // keep previous colours on failure
+  const vars = glowVars(g);
+  const key = Object.values(vars).join("|");
   if (activeBg.dataset.colors === key) return;
   const next = activeBg === $("bgA") ? $("bgB") : $("bgA");
   const old = activeBg;
-  setLayer(next, c);
+  // a skip within the fade: the layer coming back is still on, so restart its fade from 0 (no jump cut)
+  if (next.classList.contains("is-on")) {
+    next.classList.remove("is-on");
+    void next.offsetWidth;
+  }
+  setLayer(next, vars);
   next.dataset.colors = key;
   next.style.zIndex = "1";
   old.style.zIndex = "0";
   next.classList.add("is-on");
   activeBg = next;
-  document.documentElement.style.setProperty("--i", c.ink.join(" "));
-  document.documentElement.style.setProperty("--v", c.vivid.join(" "));
+  document.documentElement.style.setProperty("--i", vars["--i"]);
+  document.documentElement.style.setProperty("--v", vars["--v"]);
   setTimeout(() => {
     if (activeBg !== old) old.classList.remove("is-on");
   }, 950);
@@ -2512,11 +2521,13 @@ function openSettings() {
   renderSettings();
   $("dockArtSwitch").focus();
   loadQuality();
+  loadMcp();
 }
 
 function closeSettings(refocus = false) {
   if (!settingsOpen) return;
   settingsOpen = false;
+  $("mcpResetAsk").hidden = true;
   $("settingsPop").hidden = true;
   $("settingsBtn").setAttribute("aria-expanded", "false");
   if (refocus) $("settingsBtn").focus();
@@ -2543,6 +2554,76 @@ function renderSettings() {
     : ready
       ? "Changing restarts the player for a moment."
       : "Available once the player here is ready.";
+}
+
+// ---------- settings: the local MCP server (Rust mcp.rs) for AI tools on this Mac ----------
+
+let mcp = null; // mcp_status: {enabled, running, port, error, callsToday}; null = not known
+let mcpBusy = false; // a switch flip is on its way
+
+async function loadMcp() {
+  try {
+    mcp = await invoke("mcp_status");
+  } catch {
+    mcp = null;
+  }
+  if (settingsOpen) renderMcp();
+}
+
+function renderMcp() {
+  const on = Boolean(mcp && mcp.enabled);
+  const asking = !$("mcpResetAsk").hidden;
+  $("mcpSwitch").setAttribute("aria-checked", String(on));
+  $("mcpSwitch").disabled = mcpBusy;
+  setText("mcpStatus", mcpBusy ? (on ? "Stopping…" : "Starting…") : mcpStatusLine(mcp));
+  $("mcpActions").hidden = !on || asking;
+  if (!on) $("mcpResetAsk").hidden = true;
+}
+
+async function toggleMcp() {
+  if (mcpBusy) return;
+  const on = !(mcp && mcp.enabled);
+  mcpBusy = true;
+  renderMcp();
+  try {
+    mcp = await invoke("mcp_set_enabled", { on });
+    applog("info", `mcp server ${on ? "on" : "off"}: ${mcpStatusLine(mcp)}`);
+  } catch (e) {
+    toast(`Couldn't turn the MCP server ${on ? "on" : "off"}: ${reason(e)}`);
+  } finally {
+    mcpBusy = false;
+    if (settingsOpen) renderMcp();
+  }
+}
+
+/** Copy a connect text or the skill (Rust makes them, with the key) to the clipboard. */
+async function copyMcp(kind) {
+  const [cmd, args, what] = MCP_COPY[kind] || [];
+  if (!cmd) return;
+  try {
+    const text = await invoke(cmd, args);
+    await navigator.clipboard.writeText(text);
+    toast(`Copied: ${what}`);
+  } catch (e) {
+    toast(`Couldn't copy: ${reason(e)}`);
+  }
+}
+
+/** Reset key asks first, inline: the copied connect texts stop working. */
+function askResetKey(ask) {
+  $("mcpResetAsk").hidden = !ask;
+  renderMcp();
+  (ask ? $("mcpResetNo") : $("mcpReset")).focus();
+}
+
+async function resetMcpKey() {
+  try {
+    mcp = await invoke("mcp_reset_key");
+    toast("New key made: copy the connect text again");
+  } catch (e) {
+    toast(`Couldn't reset the key: ${reason(e)}`);
+  }
+  askResetKey(false);
 }
 
 async function loadQuality() {
@@ -2940,6 +3021,7 @@ function libGet(key, cmd, args) {
 
 function loadGroups() {
   libOpened = true;
+  loadLinks();
   loadPlaylists(); // every open: the list on screen stays, and redraws only if a playlist changed
   fillLiked();
   fillTop();
@@ -3001,16 +3083,16 @@ const shelfSkeleton = (group) => () => {
 // A Library tab shows its whole group: tiles in a grid that wraps, never a sideways-scrolling strip.
 const SHELVES = {
   topArtists: { list: () => topArtistList, el: "topArtists" },
-  albums: { list: () => savedAlbums, el: "libAlbums" },
-  following: { list: () => followed, el: "libFollowing" },
+  albums: { list: () => albumShelf(), el: "libAlbums" },
+  following: { list: () => artistShelf(), el: "libFollowing" },
   mixes: { list: () => mixList, el: "libMixes" },
 };
 
 /** One shelf item's tile: artists round, albums and mixes square. */
 function shelfTile(kind, it, i) {
-  if (kind === "albums") return tile(it, i, { sub: esc(it.artists) });
-  if (kind === "mixes") return tile(it, i, { attrs: ` data-mix="${esc(it.id)}"` });
-  return tile({ name: it.name, cover: it.image }, i, { round: true });
+  if (kind === "mixes") return tile(it, i, { attrs: ` data-mix="${esc(it.id)}"`, sub: it.source === "added" ? "Added" : "" });
+  if (kind === "albums") return tile(it, i, { sub: esc(it.added ? `Added · ${it.artists || ""}` : it.artists) });
+  return tile({ name: it.name, cover: it.image }, i, { round: true, sub: it.added ? "Added" : "" });
 }
 
 const shelfGrid = (kind) => {
@@ -3043,6 +3125,7 @@ function libTabShown() {
 /** Tabs follow their groups (hidden with them); the current one is marked and its group shown. */
 function renderLibTabs() {
   const shown = libTabShown();
+  $("libAdd").hidden = shown !== "playlists" && shown !== "mixes";
   for (const b of $("libTabs").querySelectorAll("[data-tab]")) {
     const t = b.dataset.tab;
     const on = t === shown;
@@ -3123,7 +3206,7 @@ function fillAlbums() {
     () => libGet("albums", "get_saved_albums"),
     (list) => {
       savedAlbums = (list || []).filter((a) => a && a.id);
-      group.hidden = !savedAlbums.length;
+      group.hidden = !albumShelf().length;
       renderShelf("albums");
     },
     "your albums",
@@ -3141,7 +3224,7 @@ function fillFollowing() {
     () => libGet("following", "get_followed_artists"),
     (list) => {
       followed = (list || []).filter((a) => a && a.id);
-      group.hidden = !followed.length;
+      group.hidden = !artistShelf().length;
       renderShelf("following");
     },
     "the artists you follow",
@@ -3220,15 +3303,16 @@ function onTopTab(e) {
   fillTop();
 }
 
-// ---------- Spotify mixes: Spotify doesn't list its own playlists, so remember the ones seen playing ----------
+// ---------- Spotify mixes: Rust lists them (library.rs): the Made For You mixes on the user's Spotify home,
+// the ones added by link, and the ones seen playing here (noted below, store key knownMixes) ----------
 
 const MIXES_KEY = "knownMixes";
-const MIX_NOTE = "Spotify doesn't share the track list of its own mixes.";
+const MIX_NOTE = "Spotify didn't share this mix's track list. Play still starts it.";
 let knownMixes = null; // [{id, seen}], newest first; null = not read from storage yet
 let notedContext = null; // the last playback context noted, so a poll doesn't note it every second
 const refusedMixes = new Set(); // mixes Spotify wouldn't start this session: history must not bring them back
 const mixInfo = new Map(); // playlist id → promise of {name, cover} or null
-let mixList = []; // the tiles on screen: {id, name, cover}
+let mixList = []; // the tiles on screen: {id, name, cover, source}
 let mixesGen = 0;
 
 function mixes() {
@@ -3264,15 +3348,21 @@ function mixInfoFor(id) {
   return p;
 }
 
-async function renderMixes() {
+/** The Mixes tab from Rust's mixes_list ({id, uri, name, cover, source}); refresh asks Spotify's home feed now. */
+async function renderMixes(refresh = false) {
   const gen = ++mixesGen;
-  const own = new Set(ownIds()); // the playlists may have loaded after a mix was noted
-  const list = mixes().filter((m) => !own.has(m.id));
-  const infos = await Promise.all(list.map((m) => mixInfoFor(m.id)));
+  let list;
+  try {
+    list = await invoke("mixes_list", { refresh });
+  } catch (e) {
+    if (gen === mixesGen && !overlayFailed(e)) applog("warn", `mixes_list failed: ${e}`);
+    return; // the tiles on screen stay
+  }
   if (gen !== mixesGen) return;
-  mixList = list.map((m, i) => ({ id: m.id, name: (infos[i] && infos[i].name) || "Spotify mix", cover: (infos[i] && infos[i].cover) || null }));
-  const group = $("libMixes");
-  group.hidden = !mixList.length;
+  const own = new Set(ownIds()); // a playlist of the user's own isn't a mix
+  mixList = (list || []).filter((m) => m && m.id && !own.has(m.id)).map((m) => ({ id: m.id, name: m.name || "Spotify mix", cover: m.cover || null, source: m.source }));
+  for (const m of mixList) if (!mixInfo.has(m.id)) mixInfo.set(m.id, Promise.resolve({ name: m.name, cover: m.cover }));
+  $("libMixes").hidden = !mixList.length;
   renderShelf("mixes");
 }
 
@@ -3367,20 +3457,188 @@ async function loadPlaylists() {
 }
 
 function renderPlaylists() {
-  setText("listStatus", playlists.length ? "" : "No playlists yet.");
-  $("libList").innerHTML = playlists
-    .map(
-      (p, i) =>
-        `<button class="row row-playlist" type="button" data-id="${esc(p.id)}" data-i="${i}">` +
-        `<span class="art row-art">${artHtml(pickImage(p.images), p.name)}</span>` +
-        `<span class="row-text"><span class="row-title">${esc(p.name)}</span>` +
-        `<span class="row-sub">${plural((p.tracks && p.tracks.total) || 0, "track", "tracks")}</span></span></button>`,
-    )
-    .join("");
+  const added = addedIn("playlists", playlists);
+  setText("listStatus", playlists.length || added.length ? "" : "No playlists yet.");
+  $("libList").innerHTML =
+    playlists
+      .map(
+        (p, i) =>
+          `<button class="row row-playlist" type="button" data-id="${esc(p.id)}" data-i="${i}">` +
+          `<span class="art row-art">${artHtml(pickImage(p.images), p.name)}</span>` +
+          `<span class="row-text"><span class="row-title">${esc(p.name)}</span>` +
+          `<span class="row-sub">${plural((p.tracks && p.tracks.total) || 0, "track", "tracks")}</span></span></button>`,
+      )
+      .join("") +
+    // playlists added by link: someone else's, kept in the app (Rust savedLinks), marked "Added"
+    added
+      .map(
+        (l, i) =>
+          `<button class="row row-playlist is-added" type="button" data-added="${i}">` +
+          `<span class="art row-art">${artHtml(l.cover, l.name)}</span>` +
+          `<span class="row-text"><span class="row-title">${esc(l.name)}</span>` +
+          `<span class="row-sub"><span class="added-mark">Added</span>${esc(l.owner ? ` · ${l.owner}` : "")}${l.total ? ` · ${plural(l.total, "track", "tracks")}` : ""}</span></span></button>`,
+      )
+      .join("");
   noteContexts([]); // own playlists noted before this load aren't mixes
   renderMixes();
 }
 
+
+// ---------- links added in the app: a pasted Spotify link kept in Rust's savedLinks (library.rs) ----------
+
+let appLinks = []; // [{kind, id, uri, name, cover, owner, artists, total, tab}], newest first
+const LINK_TAB_NAMES = { playlists: "Playlists", albums: "Albums", artists: "Artists", mixes: "Mixes" };
+const LINK_LIB_TAB = { playlists: "playlists", albums: "albums", artists: "following", mixes: "mixes" }; // savedLinks tab → Library tab
+
+/** Added links of one tab that the Spotify list (own) doesn't have already. */
+const addedIn = (tab, own) => appLinks.filter((l) => l.tab === tab && !(own || []).some((x) => x && x.id === l.id));
+const albumShelf = () => [...savedAlbums, ...addedIn("albums", savedAlbums).map((l) => ({ id: l.id, name: l.name, artists: l.artists, cover: l.cover, added: true }))];
+const artistShelf = () => [...followed, ...addedIn("artists", followed).map((l) => ({ id: l.id, name: l.name, image: l.cover, added: true }))];
+
+/** Read the added links and redraw what shows them. Also on `library-changed` (an add from MCP too). */
+async function loadLinks() {
+  try {
+    const list = await invoke("links_list");
+    appLinks = Array.isArray(list) ? list.filter((l) => l && l.uri && l.id) : [];
+  } catch {
+    return;
+  }
+  if (playlists) renderPlaylists(); // it redraws the mixes too
+  else renderMixes();
+  if (albumShelf().length) $("libAlbums").hidden = false;
+  if (artistShelf().length) $("libFollowing").hidden = false;
+  renderShelf("albums");
+  renderShelf("following");
+  if (curDetail) renderDetailSave();
+}
+
+/** A detail view for a link's info (link_resolve) or a stored link. */
+function detailSrcOf(info) {
+  if (info.kind === "album") return { kind: "album", id: info.id, name: info.name, cover: info.cover, sub: info.artists || "Album" };
+  if (info.kind === "artist") return { kind: "artist", id: info.id, name: info.name, cover: info.cover, sub: "Artist" };
+  const own = (playlists || []).find((p) => p.id === info.id);
+  if (own) return { kind: "playlist", id: own.id, name: own.name, cover: pickImage(own.images), sub: plural((own.tracks && own.tracks.total) || 0, "track", "tracks"), snapshotId: own.snapshot_id || null };
+  if (info.tab === "mixes") return { kind: "mix", id: info.id, name: info.name, cover: info.cover, sub: "Made by Spotify" };
+  return { kind: "playlist", id: info.id, name: info.name, cover: info.cover, sub: info.owner ? `Playlist · ${info.owner}` : "Playlist" };
+}
+
+/** The uri a detail view can be added under, or null (Liked Songs). */
+function detailUri(src) {
+  const kind = src && { playlist: "playlist", mix: "playlist", album: "album", artist: "artist" }[src.kind];
+  return kind && src.id ? `spotify:${kind}:${src.id}` : null;
+}
+
+const isMixId = (id) => /^37i9/.test(String(id || ""));
+
+/** The detail head's Add/Remove button: shown for what isn't already in the user's Spotify library. */
+function renderDetailSave() {
+  const btn = $("detailSave");
+  const src = curDetail;
+  const uri = detailUri(src);
+  const saved = Boolean(uri && appLinks.some((l) => l.uri === uri));
+  const inSpotify =
+    src &&
+    ((src.kind === "playlist" && (playlists || []).some((p) => p.id === src.id)) ||
+      (src.kind === "album" && savedAlbums.some((a) => a.id === src.id)) ||
+      (src.kind === "artist" && followed.some((a) => a.id === src.id)));
+  btn.hidden = !uri || (inSpotify && !saved);
+  if (btn.hidden) return;
+  const mix = src.kind === "mix" || (src.kind === "playlist" && isMixId(src.id));
+  btn.textContent = saved ? (mix ? "Remove from Mixes" : "Remove from library") : mix ? "Save to Mixes" : "Add to library";
+  btn.dataset.saved = saved ? "1" : "";
+}
+
+async function onDetailSave() {
+  const btn = $("detailSave");
+  const uri = detailUri(curDetail);
+  if (!uri || btn.getAttribute("aria-busy")) return;
+  btn.setAttribute("aria-busy", "true");
+  btn.disabled = true;
+  try {
+    if (btn.dataset.saved) {
+      await invoke("link_remove", { uri });
+      toast("Removed from your library");
+    } else {
+      const r = await invoke("link_save", { link: uri });
+      toast(r.already ? "Already in your library" : `Added to ${LINK_TAB_NAMES[r.item.tab] || "your library"}`);
+    }
+    applog("info", `library: ${btn.dataset.saved ? "removed" : "added"} ${uri}`);
+    await loadLinks();
+  } catch (e) {
+    if (!overlayFailed(e)) toast(reason(e));
+  } finally {
+    btn.removeAttribute("aria-busy");
+    btn.disabled = false;
+    renderDetailSave();
+  }
+}
+
+/** The Library's Add field: paste a link, Add fetches it (Rust) and keeps it in the app. */
+function showAddForm(show) {
+  $("libAddForm").hidden = !show;
+  $("libAddBtn").hidden = show;
+  $("libAddBtn").setAttribute("aria-expanded", String(show));
+  setText("libAddMsg", "");
+  if (show) {
+    $("libAddInput").value = "";
+    $("libAddInput").focus();
+  } else {
+    $("libAddBtn").focus();
+  }
+}
+
+async function onAddSubmit(e) {
+  e.preventDefault();
+  const go = $("libAddGo");
+  if (go.getAttribute("aria-busy")) return;
+  const link = parseLink($("libAddInput").value);
+  if (!link) return void setText("libAddMsg", "That link isn't a Spotify playlist, album or artist");
+  if (link.kind === "track") return void setText("libAddMsg", "That's a song: paste it into Search to play it");
+  setText("libAddMsg", "");
+  go.setAttribute("aria-busy", "true");
+  go.disabled = true;
+  go.textContent = "Adding…";
+  try {
+    const r = await invoke("link_save", { link: link.uri });
+    applog("info", `library: add ${link.uri}: ${r.already ? "already there" : "added"}`);
+    await loadLinks();
+    showAddForm(false);
+    if (r.already) {
+      toast("Already in your library");
+      openDetail(detailSrcOf(r.item));
+    } else {
+      selectLibTab(LINK_LIB_TAB[r.item.tab]);
+      toast(`Added to ${LINK_TAB_NAMES[r.item.tab] || "your library"}`);
+    }
+  } catch (err) {
+    if (!overlayFailed(err)) setText("libAddMsg", reason(err));
+  } finally {
+    go.removeAttribute("aria-busy");
+    go.disabled = false;
+    go.textContent = "Add";
+  }
+}
+
+/** Search got a Spotify link: a song plays, a playlist/album/artist opens. */
+async function openLink(link, gen) {
+  const box = $("searchResults");
+  searchMessage("Opening the link…");
+  box.setAttribute("aria-busy", "true");
+  let info;
+  try {
+    info = await invoke("link_resolve", { link: link.uri });
+  } catch (e) {
+    if (gen !== state.gen.search) return;
+    box.removeAttribute("aria-busy");
+    if (!overlayFailed(e)) searchMessage(reason(e));
+    return;
+  }
+  if (gen !== state.gen.search) return;
+  box.removeAttribute("aria-busy");
+  applog("info", `search: link ${link.uri} (${info.kind})`);
+  if (info.kind === "track") return void playFrom([info.track], 0);
+  openDetail(detailSrcOf(info));
+}
 
 const openArtist = (link) => openDetail({ kind: "artist", id: link.dataset.artist, name: link.textContent, cover: null, sub: "Artist" });
 const openArtistTile = (a) => a && openDetail({ kind: "artist", id: a.id, name: a.name, cover: a.image, sub: "Artist" });
@@ -3425,17 +3683,13 @@ async function openDetail(src, push = true) {
   cover.innerHTML = src.kind === "liked" ? ICONS.heartFilled : artHtml(src.cover, src.name);
   $("detailName").textContent = src.name;
   setText("detailSub", src.sub);
-  setText("detailNote", src.kind === "mix" ? MIX_NOTE : "");
+  setText("detailNote", "");
   $("detailPlay").hidden = src.kind === "artist";
-  $("detailPlay").disabled = src.kind !== "mix"; // a mix plays by its uri: nothing to load
+  $("detailPlay").disabled = src.kind !== "mix"; // a mix plays by its uri, its tracks loaded or not
+  renderDetailSave();
   const rows = $("detailRows");
   setText("detailStatus", "");
   $("sheetBody").scrollTop = 0;
-  if (src.kind === "mix") {
-    rows.innerHTML = "";
-    rows.removeAttribute("aria-busy");
-    return;
-  }
   rows.setAttribute("aria-busy", "true");
   if (src.kind === "artist") {
     rows.innerHTML = `<div class="albums is-grid">${skeletonTiles(4)}</div>`;
@@ -3469,7 +3723,8 @@ async function openDetail(src, push = true) {
     rows.removeAttribute("aria-busy");
     if (shown !== null) return; // keep the cached rows
     rows.innerHTML = "";
-    setText("detailStatus", `Couldn't load tracks — ${libReason(e)}`);
+    if (src.kind === "mix") setText("detailNote", MIX_NOTE);
+    else setText("detailStatus", `Couldn't load tracks — ${libReason(e)}`);
     return;
   }
   fresh = true;
@@ -3500,16 +3755,18 @@ function showDetail(src, data) {
   if (ctx) knownRows.set(ctx, detailTracks.map((t) => t.uri)); // a cover click can trust a track is in it
   const n = detailTracks.length;
   if (src.kind === "playlist") setText("detailSub", plural(n, "track", "tracks"));
+  if (src.kind === "mix" && n) setText("detailSub", `Made by Spotify · ${plural(n, "track", "tracks")}`);
   if (src.kind === "liked") {
     total = Math.max(total || 0, n);
     setText("detailSub", plural(total, "song", "songs"));
     setText("detailNote", total > n ? `Showing your newest ${n} of ${total}` : "");
   }
   if (src.kind === "album") setHtml($("detailSub"), albumArtistsHtml(src.sub, detailTracks));
-  const empty = { album: "This album is empty.", liked: "No liked songs yet." }[src.kind] || "This playlist is empty.";
+  const empty = { album: "This album is empty.", liked: "No liked songs yet.", mix: "" }[src.kind] ?? "This playlist is empty.";
   setText("detailStatus", n ? "" : empty);
+  if (src.kind === "mix") setText("detailNote", n ? "" : MIX_NOTE);
   $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album" })).join("");
-  $("detailPlay").disabled = !detailTracks.some((t) => !isLocalFile(t.uri));
+  $("detailPlay").disabled = src.kind !== "mix" && !detailTracks.some((t) => !isLocalFile(t.uri));
 }
 
 /**
@@ -3524,7 +3781,8 @@ function albumArtistsHtml(sub, tracks) {
 }
 
 /** A detail view as a play's origin: playlists and albums only. */
-const originOf = (src) => (src && (src.kind === "playlist" || src.kind === "album") ? { kind: src.kind, id: src.id } : null);
+const originOf = (src) =>
+  src && (src.kind === "playlist" || src.kind === "album" || src.kind === "mix") ? { kind: src.kind === "mix" ? "playlist" : src.kind, id: src.id } : null;
 
 const kindLabel = (k) => (k ? k[0].toUpperCase() + k.slice(1) : "Album");
 
@@ -3677,6 +3935,9 @@ function onSearchInput() {
   clearTimeout(searchTimer);
   const gen = ++state.gen.search;
   const q = $("searchInput").value.trim();
+  const link = parseLink(q);
+  if (link) return void openLink(link, gen);
+  if (looksLikeLink(q)) return void searchMessage("Needle opens Spotify links to playlists, albums, artists and songs. This one isn't one of those.");
   if (!q) {
     searchHits = NO_HITS;
     $("searchResults").innerHTML = "";
@@ -4005,8 +4266,8 @@ function startStage() {
 
 async function boot() {
   activeBg = $("bgA");
-  setLayer($("bgA"), FALLBACK);
-  setLayer($("bgB"), FALLBACK);
+  setLayer($("bgA"), fallbackVars(FALLBACK));
+  setLayer($("bgB"), fallbackVars(FALLBACK));
 
   $("loginBtn").addEventListener("click", onLogin);
   $("playBtn").addEventListener("click", togglePlay);
@@ -4029,6 +4290,14 @@ async function boot() {
   $("coverRowSwitch").addEventListener("click", toggleCoverRow);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onQualityKey);
+  $("mcpSwitch").addEventListener("click", toggleMcp);
+  $("mcpActions").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-copy]");
+    if (b) copyMcp(b.dataset.copy);
+  });
+  $("mcpReset").addEventListener("click", () => askResetKey(true));
+  $("mcpResetNo").addEventListener("click", () => askResetKey(false));
+  $("mcpResetYes").addEventListener("click", resetMcpKey);
   $("panelBtn").addEventListener("click", togglePanel);
   $("panelList").addEventListener("click", onPanelClick);
   $("panel").addEventListener("error", onImgError, true);
@@ -4046,6 +4315,9 @@ async function boot() {
   }
   $("libBack").addEventListener("click", goBack);
   $("libList").addEventListener("click", (e) => {
+    const added = e.target.closest("[data-added]");
+    const l = added && addedIn("playlists", playlists || [])[Number(added.dataset.added)];
+    if (l) return void openDetail(detailSrcOf(l));
     const row = e.target.closest("[data-id]");
     const p = row && playlists && playlists[Number(row.dataset.i)];
     if (p) {
@@ -4065,9 +4337,9 @@ async function boot() {
   $("topTabs").addEventListener("click", onTopTab);
   $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row) => playFrom(topTrackList, i, { row, name: "Your top songs" })));
   $("topArtists").addEventListener("click", (e) => openArtistTile(tileAt(e, topArtistList)));
-  $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, followed)));
+  $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, artistShelf())));
   $("libAlbums").addEventListener("click", (e) => {
-    const a = tileAt(e, savedAlbums);
+    const a = tileAt(e, albumShelf());
     if (a) openAlbum(a);
   });
   $("libMixes").addEventListener("click", (e) => openMix(tileAt(e, mixList)));
@@ -4088,6 +4360,10 @@ async function boot() {
     if (link) openArtist(link);
   });
   $("detailPlay").addEventListener("click", onDetailPlay);
+  $("detailSave").addEventListener("click", onDetailSave);
+  $("libAddBtn").addEventListener("click", () => showAddForm(true));
+  $("libAddCancel").addEventListener("click", () => showAddForm(false));
+  $("libAddForm").addEventListener("submit", onAddSubmit);
   $("nowArtist").addEventListener("click", (e) => {
     const link = e.target.closest(".artist-link");
     if (link) openArtist(link);
@@ -4126,6 +4402,8 @@ async function boot() {
   listenEvent("media-command", onMediaCommand);
   // this Mac's player: what plays, from librespot (no Web API); the loop renders from it
   listenEvent("player-state", onPlayerState);
+  // an add or remove in the app's own library (also from MCP): the Library redraws
+  listenEvent("library-changed", () => loadLinks());
 
   await loadStore(); // settings and known mixes are read from it
   let status = "login";

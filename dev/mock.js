@@ -22,6 +22,10 @@
 // player-state: emitted after every command that changes what the in-app player plays, and when its
 //   track ends; local_state returns the same payload (playback_state's shape + engine_active + queue).
 // The store (store_all / store_set, Rust's state.json) is in memory: ?store=solo seeds settings with the cover row off.
+// Mixes and added links (Rust library.rs): mixes_list = added (store savedLinks) + 5 Made For You + seen playing (knownMixes);
+//   link_resolve / link_save know the two share-link test playlists (Discover Weekly, Moderat Radio), one other user's
+//   playlist (1A2b3C4d5E6f7G8h9I0jKl), the fixture's albums, followed artists and search songs; saves emit library-changed.
+// MCP (Rust mcp.rs): mcp_* commands keep an in-memory state; ?mcp=busy makes the server fail with "port 5590 is in use".
 // search_page pages through a pool built from the fixture (search hits first, then every other known
 // track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
 // The in-app player (Spotify Connect name "This Mac", shown as "Here") needs its login by default and
@@ -152,6 +156,56 @@
   if (limited) store.account = ME; // the last run saw the account
 
   const iso = () => new Date().toISOString();
+
+  // the MCP server's state (Rust mcp.rs)
+  const mcp = { enabled: false, key: null, calls: 3, busy: new URLSearchParams(location.search).get("mcp") === "busy" };
+  const mcpStatus = () => ({
+    enabled: mcp.enabled, running: mcp.enabled && !mcp.busy, port: 5590,
+    error: mcp.enabled && mcp.busy ? "port 5590 is in use" : null, callsToday: mcp.enabled && !mcp.busy ? mcp.calls : 0,
+  });
+
+  // Made For You on the home feed (Rust: pathfinder home), and what pasted links resolve to (library.rs)
+  const albumCover = ((fx.savedAlbums || [])[0] || {}).cover || null;
+  const HOME_MIXES = [
+    { id: "37i9dQZF1E4yLltmVk3nyb", name: "Bonobo Radio", cover: ((fx.mixInfo || {})["37i9dQZF1E4yLltmVk3nyb"] || {}).cover || null },
+    { id: "37i9dQZEVXcVV9hd3iqSgp", name: "Discover Weekly", cover: albumCover },
+    { id: "37i9dQZF1E383PNAIaEkqr", name: "Daily Mix 1", cover: null },
+    { id: "37i9dQZF1E38wXcuDypD19", name: "Daily Mix 2", cover: null },
+    { id: "37i9dQZEVXbqEuNs4QsXYB", name: "Release Radar", cover: null },
+  ];
+  const LINKED = {
+    "playlist:37i9dQZEVXcVV9hd3iqSgp": { name: "Discover Weekly", cover: albumCover, owner: "Spotify", owner_id: "spotify", total: 30 },
+    "playlist:37i9dQZF1E4qxgJU46pFLr": { name: "Moderat Radio", cover: null, owner: "Spotify", owner_id: "spotify", total: 50 },
+    "playlist:1A2b3C4d5E6f7G8h9I0jKl": { name: "Alex's road trip", cover: null, owner: "Alex", owner_id: "alex", total: 12 },
+  };
+  /** A pasted link → link_resolve's answer, like Rust's (errors are the same sentences). */
+  function resolveLink(text) {
+    const m = /(playlist|album|artist|track)[/:]([A-Za-z0-9]{22})/.exec(String(text || ""));
+    if (!m) throw "That link isn't a Spotify playlist, album, artist or song";
+    const [, kind, id] = m;
+    const uri = `spotify:${kind}:${id}`;
+    const saved = (store.savedLinks || []).some((l) => l.uri === uri);
+    if (kind === "playlist") {
+      const own = (fx.playlists || []).find((p) => p.id === id);
+      const info = own ? { name: own.name, cover: ((own.images || [])[0] || {}).url || null, owner: "You", owner_id: ME, total: (own.tracks || {}).total || 0 } : LINKED[`playlist:${id}`];
+      if (!info) throw "Spotify didn't return this playlist";
+      const tab = /^37i9/.test(id) || info.owner_id === "spotify" ? "mixes" : "playlists";
+      return { kind, id, uri, ...clone(info), tab, saved };
+    }
+    if (kind === "album") {
+      const a = (fx.savedAlbums || []).find((x) => x.id === id) || (((fx.search || {}).albums) || []).find((x) => x.id === id);
+      if (!a) throw "Spotify didn't return this album";
+      return { kind, id, uri, name: a.name, cover: a.cover, artists: a.artists, total: a.total_tracks || null, tab: "albums", saved };
+    }
+    if (kind === "artist") {
+      const a = (fx.followed || []).find((x) => x.id === id);
+      if (!a) throw "Spotify didn't return this artist";
+      return { kind, id, uri, name: a.name, cover: a.image, tab: "artists", saved };
+    }
+    const t = [...(((fx.search || {}).tracks) || []), ...(fx.queue || [])].find((x) => x.id === id);
+    if (!t) throw "Spotify didn't return this song";
+    return { kind, id, uri, name: t.name, track: clone(t) };
+  }
   const progress = () => {
     if (!state.now) return 0;
     const p = state.progressBase + (state.isPlaying ? Date.now() - state.progressAt : 0);
@@ -585,10 +639,66 @@
       if (!info) throw "mock: 404 Not Found (playlist " + playlistId + ")";
       return clone(info);
     },
+
+    // the Mixes tab (Rust library.rs): added links (tab mixes), the home feed's Made For You, then seen playing
+    mixes_list: () => {
+      const out = [];
+      const push = (id, name, cover, source) => {
+        if (id && !out.some((m) => m.id === id)) out.push({ id, uri: "spotify:playlist:" + id, name, cover, source });
+      };
+      for (const l of store.savedLinks || []) if (l.tab === "mixes") push(l.id, l.name, l.cover, "added");
+      for (const m of HOME_MIXES) push(m.id, m.name, m.cover, "made_for_you");
+      for (const m of store.knownMixes || []) {
+        const info = (fx.mixInfo || {})[m.id] || {};
+        push(m.id, info.name || "Spotify mix", info.cover || null, "played");
+      }
+      return out;
+    },
+    links_list: () => clone(store.savedLinks || []),
+    link_resolve: ({ link }) => resolveLink(link),
+    link_save: ({ link }) => {
+      const info = resolveLink(link);
+      if (info.kind === "track") throw "A song can't be added to the library here: open it or play it instead";
+      const list = store.savedLinks || [];
+      const old = list.find((l) => l.uri === info.uri);
+      if (old) return { item: clone(old), already: true };
+      const item = { kind: info.kind, id: info.id, uri: info.uri, name: info.name, cover: info.cover, owner: info.owner || null,
+        owner_id: info.owner_id || null, artists: info.artists || null, total: info.total || null, tab: info.tab, added: Math.floor(Date.now() / 1000) };
+      store.savedLinks = [item, ...list];
+      setTimeout(() => emit("library-changed", null), 0);
+      return { item: clone(item), already: false };
+    },
+    link_remove: ({ uri }) => {
+      const list = store.savedLinks || [];
+      const next = list.filter((l) => l.uri !== uri);
+      store.savedLinks = next;
+      if (next.length !== list.length) setTimeout(() => emit("library-changed", null), 0);
+      return next.length !== list.length;
+    },
+
+    // the local MCP server (Rust mcp.rs): ?mcp=busy says port 5590 is taken
+    mcp_status: () => mcpStatus(),
+    mcp_set_enabled: ({ on }) => {
+      mcp.enabled = !!on;
+      if (on && !mcp.key) mcp.key = "mock-key-0123456789abcdefghijklmnopqrstuvwxyzAB";
+      return mcpStatus();
+    },
+    mcp_reset_key: () => {
+      mcp.key = "mock-key-" + Math.random().toString(36).slice(2).padEnd(34, "x");
+      return mcpStatus();
+    },
+    mcp_connect_text: ({ format }) => {
+      if (!mcp.key) mcp.key = "mock-key-0123456789abcdefghijklmnopqrstuvwxyzAB";
+      const url = "http://127.0.0.1:5590/mcp";
+      if (format === "json") return JSON.stringify({ mcpServers: { needle: { type: "http", url, headers: { Authorization: "Bearer " + mcp.key } } } }, null, 2);
+      if (format === "claude") return `claude mcp add --scope user --transport http needle ${url} --header "Authorization: Bearer ${mcp.key}"`;
+      throw "BAD_ARGS: unknown format " + format;
+    },
+    mcp_skill_text: () => "---\nname: needle\ndescription: Control the Needle Spotify player (mock)\n---\n",
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$|api_status$)/;
+  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|store_|session_get$|app_log$|api_status$|mcp_|links_list$|link_remove$)/;
   // commands with no source but the Web API (Rust's spotify.rs; src/lib/quota.js WEB_ONLY)
   const WEB_ONLY = /^(playback_state|transfer_playback|set_volume|set_shuffle|set_repeat|play_context|play_on_device|resume|resume_at|pause|next_track|previous_track|seek)$/;
   // commands that can change what the in-app player plays: a player-state follows them

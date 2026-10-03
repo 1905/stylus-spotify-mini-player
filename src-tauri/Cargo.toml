@@ -41,6 +41,13 @@ souvlaki = "0.8.3"
 log = "0.4"
 # the player's output stage (audio_out.rs): the rodio version librespot-playback 0.8.0 uses
 rodio = { version = "0.21", default-features = false, features = ["playback"] }
+# the local MCP server (mcp.rs): streamable HTTP on 127.0.0.1, axum underneath
+rmcp = { version = "3.5.0", features = ["server", "macros", "transport-streamable-http-server"] }
+axum = "0.8"
+# constant-time compare of the MCP bearer key
+subtle = "2"
+# the MCP server's stop signal (CancellationToken); already in the tree via tokio/rmcp
+tokio-util = "0.7"
 
 # Dock icon = album art (dock.rs); the objc2 versions tauri already pulls in
 [target.'cfg(target_os = "macos")'.dependencies]

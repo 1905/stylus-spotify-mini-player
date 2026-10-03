@@ -387,6 +387,24 @@ impl Api {
         crate::parse::playlist_info(&data).ok_or_else(|| "fetchPlaylist: no name".into())
     }
 
+    /// A pasted playlist link's details (`parse::playlist_meta`).
+    pub async fn playlist_meta(&self, playlist_id: &str) -> Result<Value, String> {
+        let data = self.pathfinder("fetchPlaylist", json!({"uri": format!("spotify:playlist:{playlist_id}"), "offset": 0, "limit": 1, "enableWatchFeedEntrypoint": false})).await?;
+        crate::parse::playlist_meta(&data).ok_or_else(|| "Spotify didn't return this playlist".into())
+    }
+
+    /// A pasted album link's details (`parse::album_meta`).
+    pub async fn album_meta(&self, album_id: &str) -> Result<Value, String> {
+        let data = self.pathfinder("getAlbum", json!({"uri": format!("spotify:album:{album_id}"), "locale": "", "offset": 0, "limit": 1})).await?;
+        crate::parse::album_meta(&data).ok_or_else(|| "Spotify didn't return this album".into())
+    }
+
+    /// The Made For You mixes on the user's home feed (`parse::home_mixes`).
+    pub async fn home_mixes(&self) -> Result<Vec<Value>, String> {
+        let vars = json!({"timeZone": "UTC", "sp_t": "", "facet": "", "sectionItemsLimit": 20, "homeEndUserIntegration": "INTEGRATION_WEB_PLAYER"});
+        Ok(crate::parse::home_mixes(&self.pathfinder("home", vars).await?))
+    }
+
     /// One `playlist/v2` page (protobuf).
     async fn playlist_pb_page(&self, playlist_id: &str, from: usize, length: usize) -> Result<crate::pb::PlaylistPage, String> {
         let path = format!("/playlist/v2/playlist/{}?from={from}&length={length}", crate::auth::urlencode(playlist_id));
@@ -612,6 +630,19 @@ pub fn merge_playlists(lib: Vec<Value>, root: &[crate::pb::RootEntry]) -> Vec<Va
 fn connect() -> Result<(librespot_protocol::connect::Cluster, String, u8), String> {
     let engine = ENGINE.get().ok_or_else(|| not_ready("no engine"))?;
     engine.connect_view().ok_or_else(|| not_ready("no Connect cluster yet"))
+}
+
+/// The engine, once `run()` attached it.
+pub fn engine() -> Option<crate::player::Engine> {
+    ENGINE.get().cloned()
+}
+
+/// What the Connect cluster's active device plays now (`pb::cluster_state`); Ok(None) when no
+/// device is active. Err without a cluster (the player isn't up).
+pub fn cluster_state() -> Result<Option<Value>, String> {
+    let (cluster, _, _) = connect()?;
+    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    Ok(crate::pb::cluster_state(&cluster, now_ms))
 }
 
 /// This Mac's id while the engine is ready.
@@ -985,6 +1016,14 @@ mod live {
             dump_raw("extTracks", &pb("/extended-metadata/v0/extended-metadata", crate::pb::ext_request(&uris, K::TRACK_V4), XPB).await);
             dump_raw("extAlbum", &pb("/extended-metadata/v0/extended-metadata", crate::pb::ext_request(&[ALBUM.to_string()], K::ALBUM_V4), XPB).await);
             dump_raw("extArtist", &pb("/extended-metadata/v0/extended-metadata", crate::pb::ext_request(&[ARTIST.to_string()], K::ARTIST_V4), XPB).await);
+        }
+        if want("home") {
+            // the mixes: the home feed (Made For You shelves) and the two share-link test playlists
+            show("home_mixes", api.home_mixes().await.map(Value::Array));
+            for id in ["37i9dQZEVXcVV9hd3iqSgp", "37i9dQZF1E4qxgJU46pFLr"] {
+                show(&format!("playlist_meta {id}"), api.playlist_meta(id).await);
+                show(&format!("playlist_page {id}"), api.playlist_page(id, 0, 3).await.map(|(v, rev)| json!({"total": v["total"], "n": v["items"].as_array().map(Vec::len), "rev": rev})));
+            }
         }
         if want("vars") {
             let mut v = lib_vars("Playlists", 50);
