@@ -2,6 +2,7 @@ mod applog;
 mod audio_out;
 mod auth;
 mod cache;
+mod clipboard;
 pub mod control;
 mod dock;
 mod hashes;
@@ -54,6 +55,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             applog::app_log,
+            clipboard::copy_text,
             store::store_all,
             store::store_set,
             auth::auth_status,

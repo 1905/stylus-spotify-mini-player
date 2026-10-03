@@ -427,6 +427,7 @@
       state.devices.map((d) => ({ ...clone(d), is_active: state.active && d.id === state.deviceId })),
 
     app_log: ({ level, msg }) => { logs.push(`${level} ${msg}`); return null; },
+    copy_text: ({ text }) => { copied.push(text); return null; },
     store_all: () => clone(store),
     store_set: ({ key, value }) => {
       if (typeof key !== "string" || !key) throw "BAD_ARGS: key (mock)";
@@ -703,7 +704,7 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|api_status$|mcp_|links_list$|link_remove$)/;
+  const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|api_status$|mcp_|links_list$|link_remove$)/;
   // commands with no source but the Web API (Rust's spotify.rs; src/lib/quota.js WEB_ONLY)
   const WEB_ONLY = /^(playback_state|transfer_playback|set_volume|set_shuffle|set_repeat|play_context|play_on_device|resume|resume_at|pause|next_track|previous_track|seek)$/;
   // commands that can change what the in-app player plays: a player-state follows them
@@ -726,6 +727,7 @@
 
   const calls = []; // every invoke, oldest first
   const logs = []; // app_log lines, oldest first
+  const copied = []; // copy_text texts, oldest first
 
   async function invoke(cmd, args) {
     args = args || {};

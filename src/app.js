@@ -2691,7 +2691,9 @@ async function copyMcp(kind) {
   if (!cmd) return;
   try {
     const text = await invoke(cmd, args);
-    await navigator.clipboard.writeText(text);
+    // Rust writes the pasteboard: WKWebView's navigator.clipboard needs a fresh click, and the
+    // await above already used it up (NotAllowedError)
+    await invoke("copy_text", { text });
     toast(`Copied: ${what}`);
   } catch (e) {
     toast(`Couldn't copy: ${reason(e)}`);
