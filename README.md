@@ -10,6 +10,19 @@ A small, fast Spotify player for macOS. Needle plays music on your Mac by itself
   <img src="media/screenshot.png" alt="Needle playing a track" width="720" />
 </p>
 
+<table>
+  <tr>
+    <td width="33%"><img src="media/focus.png" alt="Focus layout with the cover row turned off" /></td>
+    <td width="33%"><img src="media/library.png" alt="The Library, Albums tab" /></td>
+    <td width="33%"><img src="media/tint.png" alt="The window tinted to the album cover" /></td>
+  </tr>
+  <tr>
+    <td align="center">Focus layout: one cover, centred</td>
+    <td align="center">Library with tabs</td>
+    <td align="center">Colours follow the album cover</td>
+  </tr>
+</table>
+
 ## Install
 
 ### TL;DR
@@ -68,6 +81,7 @@ The included client ID belongs to a Spotify developer app in development mode. S
 - **Resumes where you stopped.** The playlist, song, position, volume, shuffle and repeat are restored, paused, when you open the app again.
 - **Library and search.** Playlists, Liked Songs, albums, artists with their popular tracks, your top tracks and artists, and search across all of them.
 - **Playlist view.** One panel shows what played before, what plays now and what comes next.
+- **Two layouts.** A row of covers that shows what played and what comes next, or a single centred cover (Settings → Show cover row).
 - **Native feel.** Media keys and Now Playing, the current album cover as the Dock icon, a smooth volume ramp, and instant skip and pause.
 - **Audio quality.** Choose 96, 160 or 320 kbps.
 - **Low on network.** While Needle is the active speaker, it reads the player state from the speaker itself instead of polling Spotify.
