@@ -1,0 +1,68 @@
+# Needle is a macOS app (AppKit, CoreAudio): it builds on a macOS runner, never on the dev Mac
+# (small disk) or Linux. Every push tests and builds; a v* tag also publishes the DMG as a release.
+name: build
+
+# day-to-day builds run on the MacBook Air via `make` (see Makefile); CI is for release tags and manual runs
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Frontend tests
+        run: npx vitest run
+
+      - name: Backend tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Needle.app and DMG
+        run: npx tauri build --bundles app,dmg
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          ditto -c -k --keepParent src-tauri/target/release/bundle/macos/Needle.app out/Needle.app.zip
+          cp src-tauri/target/release/bundle/dmg/*.dmg out/Needle.dmg
+          shasum -a 256 out/Needle.dmg | tee out/Needle.dmg.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: needle-macos
+          path: out/
+          retention-days: 14
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/Needle.dmg
+            out/Needle.dmg.sha256
+          generate_release_notes: true
