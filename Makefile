@@ -16,7 +16,8 @@ install:
 	$(MAKE) stop
 	@if [ -d "$(DEST)" ]; then mkdir -p /tmp/trash && mv "$(DEST)" "/tmp/trash/$(APP_NAME).app.$$(date +%Y%m%d-%H%M%S)"; fi
 	ditto "$(BUNDLE)" "$(DEST)"
-	open "$(DEST)"
+	@# LaunchServices refuses (-600) while the old copy is still exiting: wait, then retry once
+	@sleep 2; open "$(DEST)" || { sleep 3; open "$(DEST)"; }
 
 ## run: fresh release build, run as a bare binary: no .app, so no Dock icon = the dev build
 run:
