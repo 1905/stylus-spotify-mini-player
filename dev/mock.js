@@ -391,6 +391,27 @@
       const at = fx.albumTracks || {};
       return clone(at[albumId] || Object.values(at)[0] || []);
     },
+    // the back of the current cover's sleeve: OK Computer's facts under the song's own album name
+    get_album_info: ({ trackId }) => {
+      if (scenario === "error") throw "network down";
+      const all = [state.now, ...state.queue, ...state.history.map((h) => h.track)];
+      const t = all.find((x) => x && String(x.uri).endsWith(`:${trackId}`)) || {};
+      return {
+        id: "6dVIqQ8qmQ5GBnJ9shOYGE",
+        name: t.album || "OK Computer",
+        artists: t.artists || "Radiohead",
+        type: "album",
+        release_date: "1997-05-21",
+        release_precision: "day",
+        total_tracks: 12,
+        duration_ms: 3221223,
+        label: "XL Recordings",
+        copyrights: [
+          { text: "1997 Radiohead under exclusive licence to XL Recordings Ltd", type: "C" },
+          { text: "1997 Radiohead under exclusive licence to XL Recordings Ltd", type: "P" },
+        ],
+      };
+    },
     search: ({ query }) => {
       if (scenario === "search-empty") return { tracks: [], albums: [] };
       const s = fx.search || {};
@@ -710,7 +731,7 @@
   // commands that can change what the in-app player plays: a player-state follows them
   const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
   // `slow`: lists and plays take 2s more
-  const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
+  const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_album_info|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
 
   // the backend's list cache: what each list command writes (and, for snapshots and albums, reads)
   const cache = new Map();

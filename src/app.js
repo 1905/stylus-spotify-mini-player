@@ -4404,15 +4404,17 @@ function onPageClick(e) {
 const typing = (t) => t && t.closest && t.closest("input, textarea, select, [contenteditable]");
 
 function onKey(e) {
-  // Esc closes the innermost thing: a popover first, then a full page (back), then the overlay
-  if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || panelOpen || settingsOpen || state.overlay)) {
+  // Esc closes the innermost thing: a popover first, then a full page (back), then the overlay,
+  // then the turned-over sleeve
+  if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || panelOpen || settingsOpen || state.overlay || sleeve)) {
     e.preventDefault();
     if (devicesOpen) closeDevices(true);
     else if (volumeOpen) closeVolume(true);
     else if (panelOpen) closePanel(true);
     else if (settingsOpen) closeSettings(true);
     else if (state.overlay === "browse") pageBack(); // a full page returns to where it came from
-    else closeOverlay();
+    else if (state.overlay) closeOverlay();
+    else closeSleeve();
     return;
   }
   if (e.code !== "Space" || $("stage").hidden || typing(e.target)) return;

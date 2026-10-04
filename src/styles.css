@@ -2682,9 +2682,259 @@ body:has(.stage:not(.is-playing)) .bg {
   opacity: 0.6;
 }
 
-/* ---------- the current cover's sleeve: album details on the back (WIP: styles not written yet, button hidden) ---------- */
+/* ---------- the current cover's sleeve: the info button turns it over to the album's details ---------- */
 
-.cover-info,
+/* the sleeve turns in place: the art is its front, .sleeve-back (added by app.js) its back */
+.cover[data-role="now"] {
+  perspective: 1600px;
+}
+
+.sleeve {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 600ms cubic-bezier(0.45, 0.05, 0.25, 1);
+}
+
+.cover.is-flipped .sleeve {
+  transform: rotateY(180deg);
+}
+
+.sleeve > .art,
 .sleeve-back {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* the back: dark card stock tinted with the cover's colour, fine grain, a faint inner rule */
+.sleeve-back {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1em;
+  padding: 7.5% 7.5% 6.5%; /* of the sleeve's width */
+  overflow: hidden;
+  border-radius: 6px;
+  color: var(--fg);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(120% 90% at 0% 0%, rgb(var(--v) / 0.3), transparent 62%),
+    linear-gradient(160deg, rgb(var(--v) / 0.16), rgb(var(--v) / 0.04) 70%),
+    rgb(17 15 22);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.07),
+    0 42px 90px -36px rgb(0 0 0 / 0.75);
+  transform: rotateY(180deg);
+  container-type: inline-size;
+  font-size: clamp(11px, 3.4vmin, 13px);
+  line-height: 1.4;
+  text-align: left;
+}
+
+.sb-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: clamp(9.5px, 2.8cqw, 11px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* the turned cover's ✕ sits at the top right: the catalogue number stays clear of it */
+.sb-head {
+  padding-right: 22px;
+}
+
+.sb-type {
+  color: color-mix(in srgb, rgb(var(--v)) 55%, #fff);
+}
+
+.sb-title {
+  display: grid;
+  gap: 0.3em;
+  padding-bottom: 5cqw;
+  border-bottom: 1px solid var(--hair);
+}
+
+.sb-title p {
+  margin: 0;
+}
+
+.sb-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: clamp(16px, 6.6cqw, 25px);
+  font-weight: 700;
+  font-stretch: 88%;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+}
+
+.sb-artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-2);
+}
+
+.sb-facts {
+  display: grid;
+  gap: 0.45em;
+  margin: 0;
+}
+
+.sb-facts > div {
+  display: grid;
+  grid-template-columns: 5.6em minmax(0, 1fr);
+  gap: 10px;
+}
+
+.sb-facts dt {
+  color: var(--fg-3);
+}
+
+.sb-facts dd {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ℗ and ©: the small print at the foot */
+.sb-legal {
+  margin-top: auto;
+  font-size: clamp(9px, 2.6cqw, 10.5px);
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+
+.sb-legal p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* loading: shimmering lines in the shape of the filled back */
+.sb-line {
+  display: block;
+  width: 45%;
+  height: 0.8em;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgb(246 244 248 / 0.06) 0%, rgb(246 244 248 / 0.14) 50%, rgb(246 244 248 / 0.06) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sb-head .sb-line { width: 28%; }
+.sb-title .sb-line.is-big { width: 78%; height: 1.6em; }
+.sleeve-back.is-loading .sb-facts { gap: 0.8em; }
+.sb-facts .sb-line:nth-child(1) { width: 62%; }
+.sb-facts .sb-line:nth-child(2) { width: 50%; }
+.sb-facts .sb-line:nth-child(3) { width: 38%; }
+
+.sb-error {
+  margin: auto 0;
+  text-align: center;
+  color: var(--fg-2);
+}
+
+/* a small cover (narrow or short window): one line per ℗/© line, no catalogue number */
+@container (max-width: 260px) {
+  .sb-cat {
+    display: none;
+  }
+
+  .sb-title {
+    padding-bottom: 0.9em;
+  }
+
+  .sb-legal p {
+    -webkit-line-clamp: 1;
+  }
+}
+
+/* a very small cover: the facts only */
+@container (max-width: 200px) {
+  .sb-legal {
+    display: none;
+  }
+
+  .sb-facts > div {
+    grid-template-columns: 4.3em minmax(0, 1fr);
+    gap: 6px;
+  }
+}
+
+/* the round button at the top right: on hover or keyboard focus of the current cover, always while turned */
+.cover-info {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  color: rgb(255 255 255 / 0.92);
+  background: rgb(12 11 16 / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+  opacity: 0;
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.cover-info svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cover-info:hover {
+  background: rgb(12 11 16 / 0.68);
+}
+
+.cover[data-role="now"]:hover .cover-info,
+.cover-info:focus-visible,
+.cover.is-flipped .cover-info {
+  opacity: 1;
+}
+
+.cover:not([data-role="now"]) .cover-info,
+.run.is-dragging .cover:not(.is-flipped) .cover-info {
   display: none;
+}
+
+/* reduced motion: the back fades in over the art, no turn */
+@media (prefers-reduced-motion: reduce) {
+  .cover .sleeve,
+  .cover.is-flipped .sleeve,
+  .cover .sleeve-back {
+    transform: none !important;
+  }
+
+  .cover .sleeve > .art,
+  .cover .sleeve-back {
+    transition: opacity 220ms ease !important;
+  }
+
+  .cover .sleeve-back {
+    opacity: 0;
+  }
+
+  .cover.is-flipped .sleeve-back {
+    opacity: 1;
+  }
+
+  .cover.is-flipped .sleeve > .art {
+    opacity: 0;
+  }
 }
