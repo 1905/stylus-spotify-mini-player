@@ -173,6 +173,10 @@ impl Backend for App {
     fn play(&self, src: Source, device: Option<String>) -> Fut<'_> {
         control::play(src, device).boxed()
     }
+    fn album_of_track(&self, track_id: String) -> Fut<'_> {
+        // the internal API (the album-info card's lookup): works while the Web API is rate-limited
+        async move { Ok(json!(format!("spotify:album:{}", crate::internal::Api::current()?.album_id_of_track(&track_id).await?))) }.boxed()
+    }
     fn transport(&self, cmd: Cmd) -> Fut<'_> {
         control::transport(cmd).boxed()
     }

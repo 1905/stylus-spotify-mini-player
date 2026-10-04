@@ -159,16 +159,22 @@ function boot() {
     slider.classList.add("is-dragging");
     setVolume(volumeAt(ev));
   });
+  // a drag moves the level only while the button is down: a lost pointerup (the popover hid
+  // mid-drag) must not leave hovering over the slider changing the volume (the mouse's id is reused)
   slider.addEventListener("pointermove", (ev) => {
-    if (drag === ev.pointerId) setVolume(volumeAt(ev));
-  });
-  const end = (ev) => {
     if (drag !== ev.pointerId) return;
+    if (ev.buttons & 1) setVolume(volumeAt(ev));
+    else endDrag();
+  });
+  const endDrag = () => {
     drag = null;
     slider.classList.remove("is-dragging");
   };
+  const end = (ev) => drag === ev.pointerId && endDrag();
   slider.addEventListener("pointerup", end);
   slider.addEventListener("pointercancel", end);
+  slider.addEventListener("lostpointercapture", end);
+  window.addEventListener("blur", endDrag);
   $("miniCover").addEventListener("error", () => renderCover(null));
   document.addEventListener("keydown", onKey);
   // no focus ring after a click: only keyboard focus shows one (:focus-visible)

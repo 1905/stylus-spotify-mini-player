@@ -1812,7 +1812,8 @@ function volumeDown(ev) {
 }
 
 function volumeMove(ev) {
-  if ($("volSlider").hasPointerCapture(ev.pointerId)) volumeAt(ev);
+  // only while the button is down: a capture left over from a lost pointerup must not make hovering set the level
+  if ((ev.buttons & 1) && $("volSlider").hasPointerCapture(ev.pointerId)) volumeAt(ev);
 }
 
 /** Arrows ±5, Home/End: the ends. */

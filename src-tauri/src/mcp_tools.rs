@@ -85,6 +85,10 @@ pub trait Backend: Send + Sync + 'static {
     fn play(&self, _src: Source, _device: Option<String>) -> Fut<'_> {
         unavailable()
     }
+    /// The uri of the album a track (its id) is on, a string.
+    fn album_of_track(&self, _track_id: String) -> Fut<'_> {
+        unavailable()
+    }
     fn transport(&self, _cmd: Cmd) -> Fut<'_> {
         unavailable()
     }
@@ -690,12 +694,22 @@ async fn find_in_library(b: &dyn Backend, q: &str) -> Result<Value, String> {
     pick(q, &c)?.ok_or_else(|| format!("Nothing called \"{q}\" in your playlists, mixes, albums or artists. Try `search`."))
 }
 
-/// What a uri plays as: a context, or one track.
-fn source_of(uri: &str) -> Source {
+/// What a uri plays as: a context, or one track (`track_source`).
+async fn source_of(b: &dyn Backend, uri: &str) -> Source {
     if uri.starts_with("spotify:track:") {
-        Source { uris: vec![uri.to_string()], ..Source::default() }
+        track_source(b, uri).await
     } else {
         Source { context_uri: Some(uri.to_string()), ..Source::default() }
+    }
+}
+
+/// One track plays inside its album, from that track, so next and previous work as in Spotify.
+/// Just the track when its album can't be found.
+async fn track_source(b: &dyn Backend, uri: &str) -> Source {
+    let id = uri.strip_prefix("spotify:track:").unwrap_or_default().to_string();
+    match b.album_of_track(id).await {
+        Ok(Value::String(album)) if album.starts_with("spotify:album:") => Source { context_uri: Some(album), track_uri: Some(uri.to_string()), ..Source::default() },
+        _ => Source { uris: vec![uri.to_string()], ..Source::default() },
     }
 }
 
@@ -703,7 +717,7 @@ async fn play(b: &dyn Backend, a: &Value) -> Result<Value, String> {
     let device = device_arg(b, a).await?;
     let (src, what) = if let Some(u) = arg_str(a, "uri") {
         let uri = uri_from(u, None).ok_or_else(|| format!("\"{u}\" isn't a Spotify uri or link"))?;
-        (source_of(&uri), json!({ "uri": uri }))
+        (source_of(b, &uri).await, json!({ "uri": uri }))
     } else if let Some(ctx) = arg_str(a, "context_uri") {
         let uri = uri_from(ctx, None).filter(|u| !u.starts_with("spotify:track:")).ok_or("context_uri must be a playlist, album or artist")?;
         let track = arg_str(a, "track_uri").map(|t| uri_from(t, Some(Kind::Track)).ok_or("track_uri isn't a track uri")).transpose()?;
@@ -713,14 +727,15 @@ async fn play(b: &dyn Backend, a: &Value) -> Result<Value, String> {
         if uris.len() != list.len() {
             return Err("uris must all be track uris".into());
         }
-        (Source { uris: uris.clone(), ..Source::default() }, json!({ "tracks": uris.len() }))
+        let src = if let [one] = uris.as_slice() { track_source(b, one).await } else { Source { uris: uris.clone(), ..Source::default() } };
+        (src, json!({ "tracks": uris.len() }))
     } else if let Some(n) = arg_str(a, "name") {
         let it = find_in_library(b, n).await?;
         let uri = it["uri"].as_str().unwrap_or("").to_string();
-        (source_of(&uri), json!({ "name": it["name"], "uri": uri }))
+        (source_of(b, &uri).await, json!({ "name": it["name"], "uri": uri }))
     } else if let Some(q) = arg_str(a, "query") {
         let t = top_track(b, q).await?;
-        (source_of(t["uri"].as_str().unwrap_or("")), slim_track(&t))
+        (source_of(b, t["uri"].as_str().unwrap_or("")).await, slim_track(&t))
     } else {
         return Err("Give uri, name, query, uris or context_uri".into());
     };
@@ -789,7 +804,7 @@ async fn open_link(b: &dyn Backend, a: &Value) -> Result<Value, String> {
     }
     if a["play"].as_bool() == Some(true) {
         let device = device_arg(b, a).await?;
-        b.play(source_of(info["uri"].as_str().unwrap_or("")), device).await?;
+        b.play(source_of(b, info["uri"].as_str().unwrap_or("")).await, device).await?;
         out["playing"] = json!(true);
     }
     Ok(out)
@@ -882,8 +897,15 @@ mod tests {
             Box::pin(async { Ok(json!([{ "id": "mac", "name": "This Mac", "is_active": true, "volume_percent": 40 }, { "id": "tv", "name": "Living Room TV", "is_active": false }])) })
         }
         fn play(&self, src: Source, device: Option<String>) -> Fut<'_> {
-            self.sent.lock().unwrap().push(format!("play {:?} {:?} on {device:?}", src.context_uri, src.uris));
+            self.sent.lock().unwrap().push(format!("play {:?} {:?} at {:?} on {device:?}", src.context_uri, src.uris, src.track_uri));
             Box::pin(async { Ok(json!({ "device_id": "mac" })) })
+        }
+        fn search(&self, _q: String) -> Fut<'_> {
+            Box::pin(async { Ok(json!({ "tracks": [{ "uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR", "name": "Kerala", "album": "Migration" }] })) })
+        }
+        fn album_of_track(&self, id: String) -> Fut<'_> {
+            // Kerala's album is known; any other track's lookup fails
+            Box::pin(async move { if id == "5DAjrJqXqYtgr67pVhmUeR" { Ok(json!("spotify:album:3gBVdu4a1MMJVMy6vwPEb8")) } else { Err("no album".into()) } })
         }
         fn volume(&self, _d: Option<String>) -> Fut<'_> {
             let v = *self.volume.lock().unwrap();
@@ -897,6 +919,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn one_track_plays_inside_its_album() {
+        // the observed bug: play query "Bonobo Kerala" loaded uris:[Kerala]; next then stopped playback
+        let b = Stub::default();
+        call(&b, "play", &json!({ "query": "Bonobo Kerala" })).await.unwrap();
+        call(&b, "play", &json!({ "uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR" })).await.unwrap();
+        call(&b, "play", &json!({ "uris": ["spotify:track:5DAjrJqXqYtgr67pVhmUeR"] })).await.unwrap();
+        call(&b, "play", &json!({ "uris": ["spotify:track:5DAjrJqXqYtgr67pVhmUeR", "spotify:track:7c378mlmubSu7NGkLFa4sN"] })).await.unwrap();
+        let sent = b.sent.lock().unwrap().clone();
+        let in_album = "play Some(\"spotify:album:3gBVdu4a1MMJVMy6vwPEb8\") [] at Some(\"spotify:track:5DAjrJqXqYtgr67pVhmUeR\") on None";
+        assert_eq!(sent[..3], [in_album, in_album, in_album]);
+        assert_eq!(sent[3], "play None [\"spotify:track:5DAjrJqXqYtgr67pVhmUeR\", \"spotify:track:7c378mlmubSu7NGkLFa4sN\"] at None on None", "a list stays a list");
+    }
+
+    #[tokio::test]
     async fn play_by_name_finds_mixes_and_links() {
         let b = Stub::default();
         let r = call(&b, "play", &json!({ "name": "bonobo radio" })).await.unwrap();
@@ -905,9 +941,10 @@ mod tests {
         call(&b, "play", &json!({ "name": "OK Computer", "device": "living room" })).await.unwrap();
         call(&b, "play", &json!({ "uri": "https://open.spotify.com/track/7c378mlmubSu7NGkLFa4sN?si=1" })).await.unwrap();
         let sent = b.sent.lock().unwrap().clone();
-        assert_eq!(sent[0], "play Some(\"spotify:playlist:37i9dQZF1E4yLltmVk3nyb\") [] on None");
-        assert_eq!(sent[1], "play Some(\"spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE\") [] on Some(\"tv\")");
-        assert_eq!(sent[2], "play None [\"spotify:track:7c378mlmubSu7NGkLFa4sN\"] on None");
+        assert_eq!(sent[0], "play Some(\"spotify:playlist:37i9dQZF1E4yLltmVk3nyb\") [] at None on None");
+        assert_eq!(sent[1], "play Some(\"spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE\") [] at None on Some(\"tv\")");
+        // its album can't be found: the track on its own
+        assert_eq!(sent[2], "play None [\"spotify:track:7c378mlmubSu7NGkLFa4sN\"] at None on None");
         let e = call(&b, "play", &json!({ "name": "jazz" })).await.unwrap_err();
         assert!(e.starts_with("Nothing called \"jazz\""), "{e}");
         let e = call(&b, "play", &json!({ "device": "kitchen", "name": "Road trip" })).await.unwrap_err();

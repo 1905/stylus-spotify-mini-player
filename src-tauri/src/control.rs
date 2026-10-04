@@ -14,6 +14,8 @@ use crate::spotify;
 pub const NO_DEVICE: &str = "No device to play on: open Needle or Spotify somewhere";
 pub const NOTHING_PLAYING: &str = "Nothing is playing";
 pub const NOT_READY: &str = "This Mac isn't ready: the player is still connecting";
+pub const NOTHING_AFTER: &str = "Nothing after this track: next would stop playback";
+pub const NOTHING_BEFORE: &str = "Nothing before this track: previous would stop playback";
 
 /// Where a command goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -284,12 +286,32 @@ pub enum Cmd {
     Repeat(String),
 }
 
+/// Under this position `previous` goes to the track before (Spirc: 3 s); a margin for the trip.
+const PREV_RESTARTS_AFTER_MS: u32 = 2_500;
+
+/// Why a next/previous on This Mac would only stop playback (Spirc stops when there is no track
+/// to go to), None when it may go. Only when the cluster's up-next is known for this track and
+/// repeat is off; anything uncertain goes through.
+pub fn skip_blocked(cmd: &Cmd, n: &Now, now: Instant) -> Option<&'static str> {
+    if !n.skips_fresh || n.repeat != crate::session::Repeat::Off {
+        return None;
+    }
+    match cmd {
+        Cmd::Next if n.next.as_ref().is_some_and(Vec::is_empty) => Some(NOTHING_AFTER),
+        Cmd::Previous if n.prev == Some(false) && n.position(now) < PREV_RESTARTS_AFTER_MS => Some(NOTHING_BEFORE),
+        _ => None,
+    }
+}
+
 pub async fn transport(cmd: Cmd) -> Result<Value, String> {
     let v = view().await;
     let path = route_transport(&v, None)?;
     match &path {
         Path::Local => {
             let e = engine()?;
+            if let Some(why) = here().and_then(|n| skip_blocked(&cmd, &n, Instant::now())) {
+                return Err(why.into());
+            }
             match cmd {
                 Cmd::Pause => e.pause(),
                 Cmd::Resume => e.play(),
@@ -482,6 +504,47 @@ mod tests {
         let at = Source { track_uri: Some("spotify:track:b".into()), ..ctx.clone() };
         assert!(!load_confirmed(None, &at, &state("spotify:track:a", true, 0), 500));
         assert!(!load_confirmed(None, &ctx, &json!({ "active": false }), 500));
+    }
+
+    #[test]
+    fn next_and_previous_refuse_only_when_they_would_stop() {
+        let t0 = Instant::now();
+        let at = |next: Option<Vec<&str>>, prev: Option<bool>, fresh: bool, pos: u32| {
+            let mut n = Now::new(t0);
+            n.track_uri = Some("spotify:track:kerala".into());
+            n.next = next.map(|l| l.into_iter().map(String::from).collect());
+            n.prev = prev;
+            n.skips_fresh = fresh;
+            n.position_ms = pos;
+            n
+        };
+        // the observed bug: Kerala played on its own (uris:[track]), next stopped it silently
+        assert_eq!(skip_blocked(&Cmd::Next, &at(Some(vec![]), Some(false), true, 6_000), t0), Some(NOTHING_AFTER));
+        assert_eq!(skip_blocked(&Cmd::Next, &at(Some(vec!["spotify:track:b"]), Some(false), true, 6_000), t0), None);
+        // up-next not known, or from before this track loaded: Spirc decides
+        assert_eq!(skip_blocked(&Cmd::Next, &at(None, None, true, 6_000), t0), None);
+        assert_eq!(skip_blocked(&Cmd::Next, &at(Some(vec![]), Some(false), false, 6_000), t0), None);
+        // repeat on: Spirc wraps or repeats
+        let mut rep = at(Some(vec![]), Some(false), true, 0);
+        rep.repeat = crate::session::Repeat::Context;
+        assert_eq!(skip_blocked(&Cmd::Next, &rep, t0), None);
+        // previous: no track before and under 3 s stops; later it restarts the track
+        assert_eq!(skip_blocked(&Cmd::Previous, &at(Some(vec![]), Some(false), true, 1_000), t0), Some(NOTHING_BEFORE));
+        assert_eq!(skip_blocked(&Cmd::Previous, &at(Some(vec![]), Some(false), true, 6_000), t0), None);
+        assert_eq!(skip_blocked(&Cmd::Previous, &at(Some(vec![]), Some(true), true, 1_000), t0), None);
+        assert_eq!(skip_blocked(&Cmd::Pause, &at(Some(vec![]), Some(false), true, 0), t0), None);
+    }
+
+    #[test]
+    fn a_load_makes_up_next_stale_until_the_cluster_speaks() {
+        let t0 = Instant::now();
+        let mut n = Now::new(t0);
+        n.next = Some(vec![]);
+        n.skips_fresh = true;
+        let id = librespot_core::SpotifyUri::from_uri("spotify:track:5DAjrJqXqYtgr67pVhmUeR").unwrap();
+        n.on_event(&librespot_playback::player::PlayerEvent::Loading { play_request_id: 2, track_id: id, position_ms: 0 }, t0);
+        assert!(!n.skips_fresh, "the old track's up-next must not block the new one");
+        assert_eq!(skip_blocked(&Cmd::Next, &n, t0), None);
     }
 
     #[test]

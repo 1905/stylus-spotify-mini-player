@@ -150,6 +150,11 @@ pub struct Now {
     pub context_uri: Option<String>,
     /// From the cluster: the next track uris. None = not known yet.
     pub next: Option<Vec<String>>,
+    /// From the cluster: there is a track before this one. None = not known yet.
+    pub prev: Option<bool>,
+    /// `next` and `prev` came from a cluster update after the current track started loading:
+    /// they describe this track, not the one before it.
+    pub skips_fresh: bool,
 }
 
 impl Now {
@@ -165,6 +170,8 @@ impl Now {
             repeat: Repeat::Off,
             context_uri: None,
             next: None,
+            prev: None,
+            skips_fresh: false,
         }
     }
 
@@ -199,6 +206,7 @@ impl Now {
             // the position comes with the Loading/Playing/Paused around it (a load can start mid-song)
             PlayerEvent::TrackChanged { audio_item } => self.track_uri = Some(audio_item.uri.clone()),
             PlayerEvent::Loading { track_id, position_ms, .. } => {
+                self.skips_fresh = false;
                 self.set_track(track_id);
                 self.set_position(*position_ms, Some(false), now);
             }
@@ -445,11 +453,14 @@ impl NowPlaying {
         let state = &cluster.player_state;
         let context = crate::session::loadable_context(&state.context_uri).map(str::to_string);
         let next = next_uris(state.next_tracks.iter().map(|t| t.uri.as_str()));
+        let prev = !next_uris(state.prev_tracks.iter().map(|t| t.uri.as_str())).is_empty();
         let changed = {
             let mut now = lock(&self.now);
             let changed = now.context_uri != context || now.next.as_ref() != Some(&next);
             now.context_uri = context;
             now.next = Some(next.clone());
+            now.prev = Some(prev);
+            now.skips_fresh = true;
             changed
         };
         if !changed {
