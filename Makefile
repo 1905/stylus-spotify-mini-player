@@ -46,11 +46,13 @@ run: sync
 	$(MAKE) stop
 	$(BIN)
 
-## dmg: the DMG for a release, built on the Air, copied to $(OUT)
+## dmg: the DMG for a release, built on the Air, copied to $(OUT)/dmg. hdiutil, not Tauri's
+## bundle_dmg.sh: that script drives Finder over AppleScript, which fails in an SSH session.
 dmg: sync
-	ssh $(AIR) '$(AIR_ENV) && npm ci --silent && npx tauri build --bundles dmg'
-	mkdir -p $(OUT)
-	rsync -a "$(AIR):$(REMOTE)/src-tauri/target/release/bundle/dmg/" $(OUT)/dmg/
+	ssh $(AIR) '$(AIR_ENV) && npm ci --silent && npx tauri build --bundles app && rm -rf /tmp/stylus-dmg && mkdir -p /tmp/stylus-dmg/src && cp -R src-tauri/target/release/bundle/macos/$(APP_NAME).app /tmp/stylus-dmg/src/ && ln -s /Applications /tmp/stylus-dmg/src/Applications && hdiutil create -volname $(APP_NAME) -srcfolder /tmp/stylus-dmg/src -ov -format UDZO /tmp/stylus-dmg/$(APP_NAME).dmg'
+	mkdir -p $(OUT)/dmg
+	rsync -a "$(AIR):/tmp/stylus-dmg/$(APP_NAME).dmg" $(OUT)/dmg/
+	shasum -a 256 $(OUT)/dmg/$(APP_NAME).dmg
 
 ## stop: quit every copy, installed (binary may be named Stylus) or dev, new name or old (two copies = two "This Mac" speakers with one device id)
 stop:
