@@ -638,10 +638,13 @@ async fn top_track(b: &dyn Backend, query: &str) -> Result<Value, String> {
     r["tracks"].as_array().and_then(|t| t.iter().find(|t| t["uri"].is_string())).cloned().ok_or_else(|| format!("No song found for \"{query}\""))
 }
 
-/// The devices and This Mac's id (the device named "This Mac").
+/// The devices and This Mac's id: the local player's own device id when it's in the list (every
+/// Stylus is named "This Mac", so the name alone can pick another computer), else the name.
 async fn devices(b: &dyn Backend) -> Result<(Vec<Value>, Option<String>), String> {
     let list = b.devices().await?.as_array().cloned().unwrap_or_default();
-    let own = list.iter().find(|d| d["name"] == crate::player::DEVICE_NAME).and_then(|d| d["id"].as_str().map(str::to_string));
+    let own = crate::internal::own_device_id()
+        .filter(|id| list.iter().any(|d| d["id"].as_str() == Some(id.as_str())))
+        .or_else(|| list.iter().find(|d| d["name"] == crate::player::DEVICE_NAME).and_then(|d| d["id"].as_str().map(str::to_string)));
     Ok((list, own))
 }
 

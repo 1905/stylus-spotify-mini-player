@@ -27,6 +27,7 @@ import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js
 // (still in flight across a logout) never settles, so it can't touch the new one.
 let authSession = 0;
 const STALE = new Promise(() => {});
+const DISK_WAIT_MS = 1500; // longest a rate-limited error waits for cached disk reads to show
 // While Spotify rate-limits the app, Rust refuses a command that needs the Web API at once, without
 // a request (quota.rs): RATE_LIMITED:<secs>: … That error waits for the disk reads already asked
 // for, so a cached copy shows instead of it. Rust tries Spotify's internal API first where it can.
@@ -38,7 +39,10 @@ function invoke(cmd, args) {
       if (sess !== authSession) return STALE;
       noteRateLimited(e);
       // me_id: the disk reads wait for the account, so it must not wait for them
-      if (rateLimitedSecs(e) && cmd !== "me_id") await Promise.allSettled([...diskPending]);
+      // bounded: a read that never settles must not hold the command forever
+      if (rateLimitedSecs(e) && cmd !== "me_id") {
+        await Promise.race([Promise.allSettled([...diskPending]), new Promise((r) => setTimeout(r, DISK_WAIT_MS))]);
+      }
       return sess === authSession ? Promise.reject(e) : STALE;
     },
   );
@@ -228,6 +232,8 @@ function showLogin(kind) {
   const loggedOut = !$("stage").hidden; // leaving a session (not the first screen at launch)
   stopPolling();
   authSession++;
+  // reads from the old session may never settle (STALE): a rate-limited command must not wait on them
+  diskPending.clear();
   playlistsLoading = false; // a load from the old session will never finish
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
   thisMacBusy = "";

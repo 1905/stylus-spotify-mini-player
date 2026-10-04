@@ -923,8 +923,9 @@ impl PendingVolume {
 pub const NOTHING_AFTER: &str = "Nothing after this track: next would stop playback";
 pub const NOTHING_BEFORE: &str = "Nothing before this track: previous would stop playback";
 
-/// Under this position `previous` goes to the track before (Spirc: 3 s); a margin for the trip.
-const PREV_RESTARTS_AFTER_MS: u32 = 2_500;
+/// Under this position `previous` goes to the track before, at or over it restarts the track:
+/// librespot's own threshold (Spirc handle_prev, 3 s). Lower would let a paused press stop playback.
+const PREV_RESTARTS_AFTER_MS: u32 = 3_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Skip {
@@ -1444,6 +1445,10 @@ mod tests {
         // previous: no track before and under 3 s stops; later it restarts the track
         assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, 1_000), t0), Some(NOTHING_BEFORE));
         assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, 6_000), t0), None);
+        // Astra round 4: the boundary matches librespot's 3 s (2.5–3 s used to slip through and stop)
+        for (pos, want) in [(2_500, Some(NOTHING_BEFORE)), (2_700, Some(NOTHING_BEFORE)), (2_999, Some(NOTHING_BEFORE)), (3_000, None)] {
+            assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, pos), t0), want, "{pos}");
+        }
         assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(true), true, 1_000), t0), None);
     }
 
