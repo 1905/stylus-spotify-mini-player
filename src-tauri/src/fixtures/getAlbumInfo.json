@@ -1,0 +1,135 @@
+{
+ "albumUnion": {
+  "__typename": "Album",
+  "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE",
+  "name": "OK Computer",
+  "type": "ALBUM",
+  "date": {
+   "isoString": "1997-05-28T00:00:00Z",
+   "precision": "DAY"
+  },
+  "label": "XL Recordings",
+  "copyright": {
+   "items": [
+    {
+     "text": "1997 XL Recordings Ltd",
+     "type": "C"
+    },
+    {
+     "text": "1997 XL Recordings Ltd",
+     "type": "P"
+    }
+   ],
+   "totalCount": 2
+  },
+  "courtesyLine": "",
+  "artists": {
+   "items": [
+    {
+     "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+     "profile": {
+      "name": "Radiohead"
+     }
+    }
+   ]
+  },
+  "coverArt": {
+   "sources": [
+    {
+     "height": 300,
+     "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856",
+     "width": 300
+    },
+    {
+     "height": 64,
+     "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856",
+     "width": 64
+    },
+    {
+     "height": 640,
+     "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856",
+     "width": 640
+    }
+   ]
+  },
+  "discs": {
+   "items": [
+    {
+     "number": 1,
+     "tracks": {
+      "totalCount": 12
+     }
+    }
+   ],
+   "totalCount": 1
+  },
+  "tracksV2": {
+   "totalCount": 12,
+   "items": [
+    {
+     "track": {
+      "uri": "spotify:track:7c378mlmubSu7NGkLFa4sN",
+      "name": "Airbag",
+      "duration": {
+       "totalMilliseconds": 287880
+      },
+      "trackNumber": 1,
+      "discNumber": 1,
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "track": {
+      "uri": "spotify:track:6LgJvl0Xdtc73RJ1mmpotq",
+      "name": "Paranoid Android",
+      "duration": {
+       "totalMilliseconds": 387213
+      },
+      "trackNumber": 2,
+      "discNumber": 1,
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      }
+     }
+    },
+    {
+     "track": {
+      "uri": "spotify:track:2CVV8PtUYYsux8XOzWkCP0",
+      "name": "Subterranean Homesick Alien",
+      "duration": {
+       "totalMilliseconds": 267693
+      },
+      "trackNumber": 3,
+      "discNumber": 1,
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      }
+     }
+    }
+   ]
+  }
+ }
+}

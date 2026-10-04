@@ -1,0 +1,221 @@
+{
+ "me": {
+  "libraryV3": {
+   "__typename": "LibraryPage",
+   "breadcrumbs": [],
+   "items": [
+    {
+     "addedAt": {
+      "isoString": "2026-10-02T15:16:08Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "LibraryPseudoPlaylistResponseWrapper",
+      "_uri": "spotify:collection:tracks",
+      "data": {
+       "__typename": "PseudoPlaylist",
+       "count": 138,
+       "image": {
+        "sources": [
+         {
+          "height": 64,
+          "url": "https://misc.scdn.co/liked-songs/liked-songs-64.png",
+          "width": 64
+         },
+         {
+          "height": 300,
+          "url": "https://misc.scdn.co/liked-songs/liked-songs-300.png",
+          "width": 300
+         },
+         {
+          "height": 640,
+          "url": "https://misc.scdn.co/liked-songs/liked-songs-640.png",
+          "width": 640
+         }
+        ]
+       },
+       "name": "Liked Songs",
+       "uri": "spotify:collection:tracks"
+      }
+     },
+     "pinnable": true,
+     "pinned": true,
+     "playedAt": null
+    },
+    {
+     "addedAt": {
+      "isoString": "2023-07-24T20:38:13Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "PlaylistResponseWrapper",
+      "_uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq",
+      "data": {
+       "__typename": "Playlist",
+       "description": "All kinds of music, picked by your own AI DJ.",
+       "format": "",
+       "images": {
+        "items": [
+         {
+          "sources": [
+           {
+            "height": null,
+            "url": "https://lexicon-assets.spotifycdn.com/DJ-Beta-CoverArt-300.jpg",
+            "width": null
+           }
+          ]
+         }
+        ]
+       },
+       "name": "DJ",
+       "ownerV2": {
+        "data": {
+         "__typename": "User",
+         "id": "spotify",
+         "name": "Spotify",
+         "socialHandle": null,
+         "uri": "spotify:user:spotify",
+         "username": "spotify"
+        }
+       },
+       "revisionId": "AAAAAa4EtVKKVS3HGZrV4cKQ9b+vdWrY",
+       "uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq"
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": {
+      "isoString": "2026-10-01T14:36:23.116Z"
+     }
+    },
+    {
+     "addedAt": {
+      "isoString": "2024-12-10T14:34:07Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "PlaylistResponseWrapper",
+      "_uri": "spotify:playlist:37i9dQZEVXcVV9hd3iqSgp",
+      "data": {
+       "__typename": "Playlist",
+       "description": "Your shortcut to hidden gems, deep cuts, and future faves, updated every Monday. You’ll know when you hear it.",
+       "format": "discover-weekly",
+       "images": {
+        "items": [
+         {
+          "sources": [
+           {
+            "height": null,
+            "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/dw/cover/en",
+            "width": null
+           }
+          ]
+         }
+        ]
+       },
+       "name": "Discover Weekly",
+       "ownerV2": {
+        "data": {
+         "__typename": "User",
+         "id": "spotify",
+         "name": "Spotify",
+         "socialHandle": null,
+         "uri": "spotify:user:spotify",
+         "username": "spotify"
+        }
+       },
+       "revisionId": "arlLkAAAAABsEWLkDp2ZCe48MJybfMIx",
+       "uri": "spotify:playlist:37i9dQZEVXcVV9hd3iqSgp"
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": {
+      "isoString": "2026-09-28T10:04:10.008Z"
+     }
+    },
+    {
+     "addedAt": {
+      "isoString": "2026-05-11T05:17:07Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "LibraryFolderResponseWrapper",
+      "_uri": "spotify:user:user1:folder:a3de42d4744609c",
+      "data": {
+       "__typename": "Folder",
+       "folderCount": 0,
+       "name": "New Folder",
+       "playlistCount": 1,
+       "uri": "spotify:user:user1:folder:a3de42d4744609c"
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": {
+      "isoString": "2026-08-01T07:51:29.664Z"
+     }
+    },
+    {
+     "addedAt": {
+      "isoString": "2025-12-07T01:38:36Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "PlaylistResponseWrapper",
+      "_uri": "spotify:playlist:37i9dQZEVXcXHWVVT0lfDq",
+      "data": {
+       "__typename": "Playlist",
+       "description": "Spotify Wrapped presents the songs you loved this year",
+       "format": "wrapped-2025-top100",
+       "images": {
+        "items": [
+         {
+          "sources": [
+           {
+            "height": null,
+            "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/wrapped25/yts/id",
+            "width": null
+           }
+          ]
+         }
+        ]
+       },
+       "name": "Your Top Songs 2025",
+       "ownerV2": {
+        "data": {
+         "__typename": "User",
+         "id": "spotify",
+         "name": "Spotify",
+         "socialHandle": null,
+         "uri": "spotify:user:spotify",
+         "username": "spotify"
+        }
+       },
+       "revisionId": "AAAAAD3DdtcFq2PPeJ1VsDnxNzyC3TXn",
+       "uri": "spotify:playlist:37i9dQZEVXcXHWVVT0lfDq"
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": null
+    }
+   ],
+   "pagingInfo": {
+    "limit": 50,
+    "offset": 0
+   },
+   "selectedFilters": [
+    {
+     "id": "Playlists",
+     "name": "Playlists"
+    }
+   ],
+   "selectedSortOrder": {
+    "id": "Recents",
+    "name": "Recents"
+   },
+   "totalCount": 13
+  }
+ }
+}

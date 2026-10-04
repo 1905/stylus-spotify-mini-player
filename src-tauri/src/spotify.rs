@@ -1,10 +1,17 @@
-//! Thin Spotify Web API client: playlists, albums, search, queue, history and
-//! Spotify Connect playback control.
+//! The commands the UI calls for lists, search, library and Spotify Connect playback control.
+//! Library, search and detail commands try Spotify's internal endpoints first (internal.rs,
+//! with the player's own session) and fall back to the public Web API, which is rate-limited
+//! for this app (quota.rs); playback control still uses the Web API.
 //!
-//! Errors starting with `AUTH_EXPIRED` or `NO_ACTIVE_DEVICE` are codes the
+//! Errors starting with `AUTH_EXPIRED`, `NO_ACTIVE_DEVICE` or `RATE_LIMITED` are codes the
 //! frontend matches with `startsWith`.
 
 use crate::auth::{http, urlencode, valid_access_token};
+use crate::internal::{
+    self, serve, web, with_api,
+    Source::{Fallback, Primary},
+};
+use futures_util::FutureExt;
 use reqwest::Method;
 use serde_json::{json, Value};
 
@@ -36,16 +43,24 @@ fn api_path(url: &str) -> &str {
     url.strip_prefix(API).unwrap_or(url)
 }
 
-/// One Spotify request: the response body as text, or a mapped error.
+/// One Spotify request: the response body as text, or a mapped error. Every Web API call
+/// comes through here: while Spotify rate-limits the app it fails at once with
+/// `RATE_LIMITED:<secs>: …` and sends nothing (quota.rs); each request sent is counted.
 async fn request(method: Method, path: &str, body: Option<Value>) -> Result<String, String> {
+    crate::quota::check()?;
     let token = valid_access_token().await?;
     let req = http().request(method, format!("{API}{path}")).bearer_auth(token);
     let req = match body {
         Some(b) => req.json(&b),
         None => req.header("Content-Length", "0"),
     };
+    crate::quota::record(path);
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
+    if status.as_u16() == 429 {
+        let retry_after = resp.headers().get(reqwest::header::RETRY_AFTER).and_then(|v| v.to_str().ok()).map(str::to_string);
+        return Err(crate::quota::on_429(retry_after.as_deref(), path));
+    }
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
         return Err(api_error(status.as_u16(), path, &text));
@@ -91,8 +106,8 @@ async fn items_up_to(mut page: Value, max: usize) -> Result<Vec<Value>, String> 
     }
 }
 
-/// How many page requests a list fetch keeps in flight.
-const PAGE_CONCURRENCY: usize = 4;
+/// How many page requests a list fetch keeps in flight (the internal API's too).
+pub(crate) const PAGE_CONCURRENCY: usize = 4;
 
 /// The offsets still to fetch after the first page (offset 0) of an offset-paged
 /// list holding `total` items, up to `max_items`.
@@ -122,7 +137,7 @@ async fn pages_parallel(
 
 /// `pages_parallel` with the page fetch injected: `fetch(offset)` returns that page.
 /// Items come back in offset order whatever order the pages complete in.
-async fn pages_with<F, Fut>(first: Value, page_size: usize, max_items: usize, concurrency: usize, fetch: F) -> Result<Vec<Value>, String>
+pub(crate) async fn pages_with<F, Fut>(first: Value, page_size: usize, max_items: usize, concurrency: usize, fetch: F) -> Result<Vec<Value>, String>
 where
     F: Fn(usize) -> Fut,
     Fut: std::future::Future<Output = Result<Value, String>>,
@@ -151,7 +166,7 @@ fn cache_store(account: &Option<String>, key: String, value: &Value) {
 }
 
 /// The account's cached `key`, or None without an account.
-async fn cached(account: &Option<String>, key: &str) -> Option<Value> {
+pub(crate) async fn cached(account: &Option<String>, key: &str) -> Option<Value> {
     cache_get(account.clone()?, key.to_string()).await
 }
 
@@ -161,9 +176,14 @@ pub async fn cache_get(account: String, key: String) -> Option<Value> {
     tokio::task::spawn_blocking(move || crate::cache::lists().get(&account, &key)).await.ok().flatten()
 }
 
-/// The signed-in user's Spotify id (`/me` id): the account the cache is scoped to.
+/// The signed-in user's Spotify id (`/me` id): the account the cache is scoped to. The player's
+/// session knows it without a request; the Web API's `/me` while the player isn't up.
 #[tauri::command]
 pub async fn me_id() -> Result<String, String> {
+    serve("me_id", vec![with_api(Primary, |api| async move { Ok(api.username()) }), web(web_me_id())]).await
+}
+
+async fn web_me_id() -> Result<String, String> {
     let me = get("/me").await?;
     me["id"].as_str().map(str::to_string).ok_or_else(|| "Spotify /me has no id".to_string())
 }
@@ -172,8 +192,16 @@ pub async fn me_id() -> Result<String, String> {
 
 /// List the user's available Spotify Connect devices, unchanged:
 /// `[{id, name, type, is_active, is_restricted, supports_volume, volume_percent, …}]`.
+/// From the player's Connect cluster while it's up (this Mac always listed), else the Web API;
+/// with the Web API blocked too, this Mac alone.
 #[tauri::command]
 pub async fn list_devices() -> Result<Value, String> {
+    let cluster = (Primary, async { internal::devices() }.boxed());
+    let own = (Fallback, async { internal::own_device_only() }.boxed());
+    serve("list_devices", vec![cluster, web(web_list_devices()), own]).await
+}
+
+async fn web_list_devices() -> Result<Value, String> {
     let raw = get("/me/player/devices").await?;
     Ok(raw["devices"].clone())
 }
@@ -231,10 +259,16 @@ fn play_context_body(context_uri: String, track_uri: Option<String>) -> Value {
 }
 
 /// Append a track URI to the device's up-next queue.
+/// This Mac: a Connect player command (no Web API); other devices: the Web API.
 #[tauri::command]
 pub async fn add_to_queue(device_id: String, uri: String) -> Result<(), String> {
     let path = format!("/me/player/queue?uri={}&device_id={}", urlencode(&uri), urlencode(&device_id));
-    command(Method::POST, &path, None).await
+    let mut steps = Vec::new();
+    if internal::own_device_id().as_deref() == Some(device_id.as_str()) {
+        steps.push((Primary, internal::add_to_queue(&device_id, &uri).boxed()));
+    }
+    steps.push(web(command(Method::POST, &path, None)));
+    serve("add_to_queue", steps).await
 }
 
 /// Start playback of the given URIs on a specific device.
@@ -283,15 +317,27 @@ pub async fn seek(position_ms: u64) -> Result<(), String> {
 }
 
 /// The user's real up-next queue (excludes the current track).
+/// From the player's Connect cluster (the active device's next tracks) while it's up.
 #[tauri::command]
 pub async fn get_queue() -> Result<Value, String> {
+    serve("get_queue", vec![(Primary, internal::queue().boxed()), web(web_get_queue())]).await
+}
+
+async fn web_get_queue() -> Result<Value, String> {
     let raw = get("/me/player/queue").await?;
     Ok(Value::Array(parse_queue(&raw)))
 }
 
 /// Last 30 played tracks, newest first: `[{track, played_at, context_uri}]`.
+/// Internal: the last track of each recently played context (Spotify's own history keeps
+/// contexts, not every track).
 #[tauri::command]
 pub async fn get_recently_played() -> Result<Value, String> {
+    let internal = with_api(Primary, |api| async move { Ok(Value::Array(api.recently_played().await?)) });
+    serve("get_recently_played", vec![internal, web(web_recently_played())]).await
+}
+
+async fn web_recently_played() -> Result<Value, String> {
     let raw = get("/me/player/recently-played?limit=30").await?;
     Ok(Value::Array(parse_recent(&raw)))
 }
@@ -303,7 +349,20 @@ pub async fn search(query: String) -> Result<Value, String> {
     if query.trim().is_empty() {
         return Ok(json!({ "tracks": [], "albums": [] }));
     }
-    let path = format!("/search?type=track,album&limit=10&q={}", urlencode(&query));
+    let q = query.as_str();
+    serve(
+        "search",
+        vec![
+            with_api(Primary, move |api| async move { api.search(q).await }),
+            with_api(Fallback, move |api| async move { api.search_context(q).await }),
+            web(web_search(q)),
+        ],
+    )
+    .await
+}
+
+async fn web_search(query: &str) -> Result<Value, String> {
+    let path = format!("/search?type=track,album&limit=10&q={}", urlencode(query));
     let raw = get(&path).await?;
     Ok(json!({
         "tracks": search_items(&raw, "track"),
@@ -325,6 +384,15 @@ pub async fn search_page(query: String, kind: String, offset: u32) -> Result<Val
     if query.trim().is_empty() || offset.saturating_add(SEARCH_PAGE) > SEARCH_MAX {
         return Ok(json!({ "items": [], "has_more": false }));
     }
+    let (q, k) = (query.as_str(), kind.as_str());
+    let internal = with_api(Primary, move |api| async move {
+        let (items, got, total) = api.search_page(q, k, offset).await?;
+        Ok(json!({ "items": items, "has_more": search_has_more(got, offset) && u64::from(offset) + (got as u64) < total }))
+    });
+    serve("search_page", vec![internal, web(web_search_page(path, kind.clone(), offset))]).await
+}
+
+async fn web_search_page(path: String, kind: String, offset: u32) -> Result<Value, String> {
     let raw = get(&path).await?;
     // counted before nulls are dropped: a full page with a null in it still has a next page
     let got = raw[format!("{kind}s")]["items"].as_array().map_or(0, |a| a.len());
@@ -378,6 +446,82 @@ pub async fn get_album_tracks(album_id: String, account: Option<String>) -> Resu
     if let Some(hit) = cached(&account, &key).await {
         return Ok(hit);
     }
+    let id = album_id.as_str();
+    let all = serve(
+        "get_album_tracks",
+        vec![
+            with_api(Primary, move |api| async move { Ok(Value::Array(api.album(id).await?)) }),
+            with_api(Fallback, move |api| async move { Ok(Value::Array(api.album_pb(id).await?)) }),
+            web(web_album_tracks(id)),
+        ],
+    )
+    .await?;
+    // an empty answer (an album gone from the catalogue) isn't kept forever
+    if all.as_array().is_some_and(|a| !a.is_empty()) {
+        cache_store(&account, key, &all);
+    }
+    Ok(all)
+}
+
+/// The album-info card's details (`parse::album_info`) of `album_id`, or of the album
+/// `track_id` is on (the now-playing track carries no album id). With an `account`, cached
+/// forever under `album-info:<id>` (and the track's album under `album-of:<track id>`).
+#[tauri::command]
+pub async fn get_album_info(album_id: Option<String>, track_id: Option<String>, account: Option<String>) -> Result<Value, String> {
+    let is_id = |s: &String| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric());
+    let album_id = match album_id.filter(is_id) {
+        Some(id) => id,
+        None => album_of_track(&track_id.filter(is_id).ok_or("BAD_ARGS: no album or track id")?, &account).await?,
+    };
+    let key = format!("album-info:{album_id}");
+    if let Some(hit) = cached(&account, &key).await {
+        return Ok(hit);
+    }
+    let id = album_id.as_str();
+    let info = serve("get_album_info", vec![with_api(Primary, move |api| async move { api.album_info(id).await }), web(web_album_info(id))]).await?;
+    cache_store(&account, key, &info);
+    Ok(info)
+}
+
+/// The id of the album `track_id` is on, cached under `album-of:<track id>`.
+pub(crate) async fn album_of_track(track_id: &str, account: &Option<String>) -> Result<String, String> {
+    let key = format!("album-of:{track_id}");
+    if let Some(Value::String(hit)) = cached(account, &key).await {
+        return Ok(hit);
+    }
+    let web_lookup = async move { get(&format!("/tracks/{track_id}")).await?["album"]["id"].as_str().map(str::to_string).ok_or_else(|| "no album on this track".to_string()) };
+    let id = serve("album_of_track", vec![with_api(Primary, move |api| async move { api.album_id_of_track(track_id).await }), web(web_lookup)]).await?;
+    cache_store(account, key, &json!(id));
+    Ok(id)
+}
+
+async fn web_album_info(album_id: &str) -> Result<Value, String> {
+    let a = get(&format!("/albums/{album_id}")).await?;
+    let tracks = all_items(a["tracks"].clone()).await?;
+    Ok(web_album_info_shape(&a, &tracks))
+}
+
+/// A Web API album + all its tracks → `parse::album_info`'s shape.
+fn web_album_info_shape(a: &Value, tracks: &[Value]) -> Value {
+    let copyrights: Vec<Value> = a["copyrights"].as_array().into_iter().flatten().map(|c| json!({ "text": c["text"], "type": c["type"] })).collect();
+    json!({
+        "id": a["id"],
+        "uri": a["uri"],
+        "name": a["name"],
+        "artists": join_artists(&a["artists"]),
+        // "album" | "single" | "compilation": the Web API files EPs as singles
+        "type": a["album_type"].as_str().unwrap_or("").to_ascii_lowercase(),
+        "release_date": a["release_date"],
+        "release_precision": a["release_date_precision"],
+        "total_tracks": a["total_tracks"],
+        "duration_ms": tracks.iter().filter_map(|t| t["duration_ms"].as_u64()).sum::<u64>(),
+        "label": a["label"].as_str().filter(|l| !l.trim().is_empty()),
+        "copyrights": copyrights,
+        "cover": first_image(&a["images"]),
+    })
+}
+
+async fn web_album_tracks(album_id: &str) -> Result<Value, String> {
     let album = get(&format!("/albums/{album_id}")).await?;
     let cover = first_image(&album["images"]);
     let album_name = album["name"].clone();
@@ -393,49 +537,77 @@ pub async fn get_album_tracks(album_id: String, account: Option<String>) -> Resu
             track
         })
         .collect();
-    let all = Value::Array(all);
-    cache_store(&account, key, &all);
-    Ok(all)
+    Ok(Value::Array(all))
 }
 
 // ---- library, taste, artists, mixes ------------------------------------------
 
-const MAX_SAVED_TRACKS: usize = 1000;
+pub(crate) const MAX_SAVED_TRACKS: usize = 1000;
 const MAX_SAVED_ALBUMS: usize = 200;
 const MAX_FOLLOWED: usize = 200;
 
 /// How many songs are in Liked Songs: one request, for the Library row.
 #[tauri::command]
 pub async fn liked_count() -> Result<u64, String> {
-    Ok(get("/me/tracks?limit=1").await?["total"].as_u64().unwrap_or(0))
+    let web_count = async { Ok(get("/me/tracks?limit=1").await?["total"].as_u64().unwrap_or(0)) };
+    serve("liked_count", vec![with_api(Primary, |api| async move { api.liked_count().await }), web(web_count)]).await
 }
 
 /// Liked Songs, newest first, capped at 1000: `{tracks, total}`. `total` is
 /// the full count, so the UI can say when the cap cut some off. Cached as `liked`.
 #[tauri::command]
 pub async fn get_saved_tracks(account: Option<String>) -> Result<Value, String> {
+    saved_tracks(MAX_SAVED_TRACKS, account).await
+}
+
+/// The newest `max` Liked Songs (at most 1000) and the full count. Only the whole list is cached.
+pub(crate) async fn saved_tracks(max: usize, account: Option<String>) -> Result<Value, String> {
+    let max = max.min(MAX_SAVED_TRACKS);
+    let shape = |(tracks, total): (Vec<Value>, u64)| json!({ "tracks": tracks, "total": total });
+    let out = serve(
+        "get_saved_tracks",
+        vec![
+            with_api(Primary, move |api| async move { api.liked(max).await.map(shape) }),
+            with_api(Fallback, move |api| async move { api.liked_pb(max).await.map(shape) }),
+            web(web_saved_tracks(max)),
+        ],
+    )
+    .await?;
+    if max == MAX_SAVED_TRACKS {
+        cache_store(&account, "liked".into(), &out);
+    }
+    Ok(out)
+}
+
+async fn web_saved_tracks(max: usize) -> Result<Value, String> {
     let first = get("/me/tracks?limit=50").await?;
     let total = first["total"].clone();
-    let tracks: Vec<Value> = pages_parallel(first, |o| format!("/me/tracks?limit=50&offset={o}"), 50, MAX_SAVED_TRACKS)
+    let tracks: Vec<Value> = pages_parallel(first, |o| format!("/me/tracks?limit=50&offset={o}"), 50, max)
         .await?
         .iter()
         .map(track_of_row)
         .filter(|t| !t.is_null())
         .map(simplify_track)
         .collect();
-    let out = json!({ "tracks": tracks, "total": total });
-    cache_store(&account, "liked".into(), &out);
-    Ok(out)
+    Ok(json!({ "tracks": tracks, "total": total }))
 }
 
 /// Saved albums, newest first, capped at 200. Cached as `albums`.
 #[tauri::command]
 pub async fn get_saved_albums(account: Option<String>) -> Result<Value, String> {
-    let first = get("/me/albums?limit=50").await?;
-    let rows = pages_parallel(first, |o| format!("/me/albums?limit=50&offset={o}"), 50, MAX_SAVED_ALBUMS).await?;
-    let out = Value::Array(parse_saved_albums(&json!({ "items": rows })));
+    let out = serve(
+        "get_saved_albums",
+        vec![with_api(Primary, |api| async move { Ok(Value::Array(api.saved_albums(MAX_SAVED_ALBUMS).await?)) }), web(web_saved_albums())],
+    )
+    .await?;
     cache_store(&account, "albums".into(), &out);
     Ok(out)
+}
+
+async fn web_saved_albums() -> Result<Value, String> {
+    let first = get("/me/albums?limit=50").await?;
+    let rows = pages_parallel(first, |o| format!("/me/albums?limit=50&offset={o}"), 50, MAX_SAVED_ALBUMS).await?;
+    Ok(Value::Array(parse_saved_albums(&json!({ "items": rows }))))
 }
 
 // Liked Songs. Since Feb 2026 the per-type /me/tracks writes and /contains are 403 for
@@ -448,18 +620,30 @@ fn library_path(path: &str, track_id: &str) -> String {
 /// Whether a track is in Liked Songs.
 #[tauri::command]
 pub async fn is_saved(track_id: String) -> Result<bool, String> {
-    let v = get(&library_path("/me/library/contains", &track_id)).await?;
-    Ok(v[0].as_bool().unwrap_or(false))
+    let id = track_id.as_str();
+    let web_contains = async move {
+        let v = get(&library_path("/me/library/contains", id)).await?;
+        Ok(v[0].as_bool().unwrap_or(false))
+    };
+    serve("is_saved", vec![with_api(Primary, move |api| async move { api.is_saved(id).await }), web(web_contains)]).await
 }
 
 #[tauri::command]
 pub async fn save_track(track_id: String) -> Result<(), String> {
-    command(Method::PUT, &library_path("/me/library", &track_id), None).await
+    set_saved(track_id, true).await
 }
 
 #[tauri::command]
 pub async fn unsave_track(track_id: String) -> Result<(), String> {
-    command(Method::DELETE, &library_path("/me/library", &track_id), None).await
+    set_saved(track_id, false).await
+}
+
+/// Liked Songs add/remove: collection v2 write (internal), else the Web API.
+async fn set_saved(track_id: String, saved: bool) -> Result<(), String> {
+    let id = track_id.as_str();
+    let method = if saved { Method::PUT } else { Method::DELETE };
+    let op = if saved { "save_track" } else { "unsave_track" };
+    serve(op, vec![with_api(Primary, move |api| async move { api.set_saved(id, saved).await }), web(command(method, &library_path("/me/library", id), None))]).await
 }
 
 /// Top tracks (`[Track]`) or artists (`[{id,name,image}]`), at most 20.
@@ -477,16 +661,36 @@ pub async fn get_top(kind: String, range: String, limit: Option<u8>, account: Op
     }
     // 20 for the Library group; the artist page asks for 50, Spotify's max (51 → 400)
     let limit = limit.unwrap_or(20).clamp(1, 50);
-    let raw = get(&format!("/me/top/{kind}?time_range={range}&limit={limit}")).await?;
-    let items = Value::Array(raw["items"].as_array().into_iter().flatten().filter(|x| !x.is_null()).map(simplify).collect());
+    let (k, r) = (kind.as_str(), range.as_str());
+    let web_top = async move {
+        let raw = get(&format!("/me/top/{k}?time_range={r}&limit={limit}")).await?;
+        Ok(Value::Array(raw["items"].as_array().into_iter().flatten().filter(|x| !x.is_null()).map(simplify).collect()))
+    };
+    let items = serve("get_top", vec![with_api(Primary, move |api| async move { Ok(Value::Array(api.top(k, r, limit).await?)) }), web(web_top)]).await?;
     cache_store(&account, format!("top:{kind}:{range}:{limit}"), &items);
     Ok(items)
 }
 
-/// `{id, name, image}` for one artist.
+/// `{id, name, image, top_tracks}` for one artist. `top_tracks` (Spotify's popular tracks, at
+/// most 10) is empty from the Web API, which no longer serves them.
 #[tauri::command]
 pub async fn get_artist(artist_id: String) -> Result<Value, String> {
-    Ok(simplify_artist(&get(&format!("/artists/{}", urlencode(&artist_id))).await?))
+    let id = artist_id.as_str();
+    serve(
+        "get_artist",
+        vec![
+            with_api(Primary, move |api| async move { api.artist(id).await }),
+            with_api(Fallback, move |api| async move { api.artist_pb(id).await }),
+            web(web_artist(id)),
+        ],
+    )
+    .await
+}
+
+async fn web_artist(artist_id: &str) -> Result<Value, String> {
+    let mut a = simplify_artist(&get(&format!("/artists/{}", urlencode(artist_id))).await?);
+    a["top_tracks"] = json!([]);
+    Ok(a)
 }
 
 /// An artist's albums and singles (first 50): `[{id, name, cover, year, kind}]`.
@@ -494,8 +698,24 @@ pub async fn get_artist(artist_id: String) -> Result<Value, String> {
 /// checked live 2026-10-02), so it follows `next`.
 #[tauri::command]
 pub async fn get_artist_albums(artist_id: String) -> Result<Value, String> {
-    let path = format!("/artists/{}/albums?include_groups=album,single&limit=10", urlencode(&artist_id));
-    let items = items_up_to(get(&path).await?, 50).await?;
+    let id = artist_id.as_str();
+    serve(
+        "get_artist_albums",
+        vec![
+            with_api(Primary, move |api| async move { Ok(Value::Array(api.artist_albums(id, MAX_ARTIST_ALBUMS).await?)) }),
+            with_api(Fallback, move |api| async move { Ok(Value::Array(api.artist_albums_pb(id, MAX_ARTIST_ALBUMS).await?)) }),
+            web(web_artist_albums(id)),
+        ],
+    )
+    .await
+}
+
+/// Albums and singles on an artist page.
+const MAX_ARTIST_ALBUMS: usize = 50;
+
+async fn web_artist_albums(artist_id: &str) -> Result<Value, String> {
+    let path = format!("/artists/{}/albums?include_groups=album,single&limit=10", urlencode(artist_id));
+    let items = items_up_to(get(&path).await?, MAX_ARTIST_ALBUMS).await?;
     Ok(Value::Array(parse_artist_albums(&json!({ "items": items }))))
 }
 
@@ -503,6 +723,20 @@ pub async fn get_artist_albums(artist_id: String) -> Result<Value, String> {
 /// (`artists.cursors.after`), not offset, so it stays serial. Cached as `following`.
 #[tauri::command]
 pub async fn get_followed_artists(account: Option<String>) -> Result<Value, String> {
+    let all = serve(
+        "get_followed_artists",
+        vec![
+            with_api(Primary, |api| async move { Ok(Value::Array(api.followed_artists(MAX_FOLLOWED).await?)) }),
+            with_api(Fallback, |api| async move { Ok(Value::Array(api.followed_artists_pb(MAX_FOLLOWED).await?)) }),
+            web(web_followed_artists()),
+        ],
+    )
+    .await?;
+    cache_store(&account, "following".into(), &all);
+    Ok(all)
+}
+
+async fn web_followed_artists() -> Result<Value, String> {
     const FIRST: &str = "/me/following?type=artist&limit=50";
     let mut page = get(FIRST).await?;
     let mut all = Vec::new();
@@ -518,17 +752,28 @@ pub async fn get_followed_artists(account: Option<String>) -> Result<Value, Stri
         }
     }
     all.truncate(MAX_FOLLOWED);
-    let all = Value::Array(all);
-    cache_store(&account, "following".into(), &all);
-    Ok(all)
+    Ok(Value::Array(all))
 }
 
-/// Best-effort name and cover of a Spotify-owned mix. Spotify hides these
-/// playlists' details; only the images endpoint sometimes answers, and a
-/// radio mix's image URL holds its seed artist.
+/// Name and cover of a Spotify-owned mix: internal endpoints give both. The Web API hides these
+/// playlists' details (best effort there: only the images endpoint sometimes answers, and a
+/// radio mix's image URL holds its seed artist).
 #[tauri::command]
 pub async fn mix_info(playlist_id: String) -> Result<Value, String> {
-    let images = match get(&format!("/playlists/{}/images", urlencode(&playlist_id))).await {
+    let id = playlist_id.as_str();
+    serve(
+        "mix_info",
+        vec![
+            with_api(Primary, move |api| async move { api.playlist_meta(id).await.map(|m| json!({ "name": m["name"], "cover": m["cover"] })) }),
+            with_api(Fallback, move |api| async move { api.playlist_info_pb(id).await }),
+            web(web_mix_info(id)),
+        ],
+    )
+    .await
+}
+
+async fn web_mix_info(playlist_id: &str) -> Result<Value, String> {
+    let images = match get(&format!("/playlists/{}/images", urlencode(playlist_id))).await {
         Ok(v) => v,
         Err(e) if e.starts_with("Spotify API 404") => Value::Null,
         Err(e) => return Err(e),
@@ -537,7 +782,7 @@ pub async fn mix_info(playlist_id: String) -> Result<Value, String> {
     let mut name = "Spotify mix".to_string();
     if let Some(artist_id) = cover.as_deref().and_then(mix_artist_id) {
         // best effort: a failed artist lookup keeps the generic name
-        if let Ok(artist) = get_artist(artist_id).await {
+        if let Ok(artist) = web_artist(&artist_id).await {
             if let Some(n) = artist["name"].as_str() {
                 name = format!("{n} Radio");
             }
@@ -699,6 +944,20 @@ fn mix_artist_id(image_url: &str) -> Option<String> {
 /// Returns a flat JSON array of playlist objects. Cached as `playlists`.
 #[tauri::command]
 pub async fn get_playlists(account: Option<String>) -> Result<Value, String> {
+    let all = serve(
+        "get_playlists",
+        vec![
+            with_api(Primary, |api| async move { Ok(Value::Array(api.playlists().await?)) }),
+            with_api(Fallback, |api| async move { Ok(Value::Array(api.rootlist().await?.iter().map(crate::pb::root_playlist).collect())) }),
+            web(web_playlists()),
+        ],
+    )
+    .await?;
+    cache_store(&account, "playlists".into(), &all);
+    Ok(all)
+}
+
+async fn web_playlists() -> Result<Value, String> {
     let first = get("/me/playlists?limit=50").await?;
     let all = all_items(first)
         .await?
@@ -715,9 +974,7 @@ pub async fn get_playlists(account: Option<String>) -> Result<Value, String> {
             pl
         })
         .collect();
-    let all = Value::Array(all);
-    cache_store(&account, "playlists".into(), &all);
-    Ok(all)
+    Ok(Value::Array(all))
 }
 
 /// Rows per playlist page: `limit=100` on `/items` is a 403 for this app.
@@ -738,29 +995,58 @@ fn playlist_items_path(playlist_id: &str, offset: usize) -> String {
 /// another app misses the cache; the caller's `snapshot_id` is the fallback when that fails.
 #[tauri::command]
 pub async fn get_playlist_tracks(playlist_id: String, snapshot_id: Option<String>, account: Option<String>) -> Result<Value, String> {
+    let (id, acc, snap) = (playlist_id.as_str(), &account, snapshot_id.clone());
+    // internal: the first page names the current snapshot, so a cache hit costs one request
+    let internal = with_api(Primary, move |api| async move {
+        let (first, rev) = api.playlist_page(id, 0, INTERNAL_PLAYLIST_PAGE).await?;
+        let key = rev.map(|s| playlist_key(id, &s));
+        if let Some(hit) = hit(acc, &key).await {
+            return Ok((hit, None));
+        }
+        Ok((Value::Array(api.playlist_rest(id, first, INTERNAL_PLAYLIST_PAGE).await?), key))
+    });
+    let fallback = with_api(Fallback, move |api| async move {
+        let (tracks, rev) = api.playlist_pb(id).await?;
+        Ok((Value::Array(tracks), rev.or(snap).map(|s| playlist_key(id, &s))))
+    });
+    let (all, key) = serve("get_playlist_tracks", vec![internal, fallback, web(web_playlist_tracks(id, snapshot_id, acc))]).await?;
+    if let Some(key) = key {
+        cache_store(&account, key, &all);
+    }
+    Ok(all)
+}
+
+/// Rows per internal playlist page.
+const INTERNAL_PLAYLIST_PAGE: usize = 100;
+
+fn playlist_key(playlist_id: &str, snapshot_id: &str) -> String {
+    format!("playlist:{playlist_id}:{snapshot_id}")
+}
+
+/// The cached list under `key`, if any.
+async fn hit(account: &Option<String>, key: &Option<String>) -> Option<Value> {
+    cached(account, key.as_deref()?).await
+}
+
+/// Web API: the list and the cache key to store it under (None after a cache hit).
+async fn web_playlist_tracks(playlist_id: &str, snapshot_id: Option<String>, account: &Option<String>) -> Result<(Value, Option<String>), String> {
     let current = get(&format!("/playlists/{playlist_id}?fields=snapshot_id"))
         .await
         .ok()
         .and_then(|v| v["snapshot_id"].as_str().map(String::from));
-    let key = current.or(snapshot_id).map(|s| format!("playlist:{playlist_id}:{s}"));
-    if let Some(key) = &key {
-        if let Some(hit) = cached(&account, key).await {
-            return Ok(hit);
-        }
+    let key = current.or(snapshot_id).map(|s| playlist_key(playlist_id, &s));
+    if let Some(hit) = hit(account, &key).await {
+        return Ok((hit, None));
     }
-    let first = get(&playlist_items_path(&playlist_id, 0)).await?;
-    let all = pages_parallel(first, |o| playlist_items_path(&playlist_id, o), PLAYLIST_PAGE, usize::MAX)
+    let first = get(&playlist_items_path(playlist_id, 0)).await?;
+    let all = pages_parallel(first, |o| playlist_items_path(playlist_id, o), PLAYLIST_PAGE, usize::MAX)
         .await?
         .iter()
         .map(track_of_row)
         .filter(|t| !t.is_null()) // null = removed/unavailable
         .map(simplify_track)
         .collect();
-    let all = Value::Array(all);
-    if let Some(key) = key {
-        cache_store(&account, key, &all);
-    }
-    Ok(all)
+    Ok((Value::Array(all), key))
 }
 
 
@@ -844,6 +1130,22 @@ mod tests {
         let t = simplify_track(&json!({"id":"x","album":{"name":"N","images":[]}}));
         assert!(t["cover"].is_null());
         assert_eq!(t["artist_list"], json!([]));
+    }
+
+    #[test]
+    fn web_album_info_matches_the_internal_shape() {
+        let a = json!({"id": "al", "uri": "spotify:album:al", "name": "N", "album_type": "single",
+            "artists": [{"name": "A"}, {"name": "B"}], "release_date": "2021-03", "release_date_precision": "month",
+            "total_tracks": 2, "label": "L", "copyrights": [{"text": "2021 L", "type": "P"}],
+            "images": [{"url": "https://i.scdn.co/x"}]});
+        let info = web_album_info_shape(&a, &[json!({"duration_ms": 1000}), json!({"duration_ms": 2500})]);
+        assert_eq!(info["type"], "single");
+        assert_eq!(info["artists"], "A, B");
+        assert_eq!(info["release_precision"], "month");
+        assert_eq!(info["duration_ms"], 3500);
+        assert_eq!(info["copyrights"], json!([{"text": "2021 L", "type": "P"}]));
+        assert_eq!(info["cover"], "https://i.scdn.co/x");
+        assert!(web_album_info_shape(&json!({"label": ""}), &[])["label"].is_null());
     }
 
     #[test]

@@ -90,8 +90,14 @@ fn is_terminal_refresh_failure(status: u16, body: &str) -> bool {
     status == 401 || (status == 400 && body.contains("invalid_grant"))
 }
 
+/// Unix time, seconds.
 pub(crate) fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Unix time, ms.
+pub(crate) fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 // ---- token persistence -----------------------------------------------------
@@ -110,12 +116,80 @@ fn save_tokens(t: &Tokens) -> Result<(), String> {
     write_private(&token_path(), &json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
 }
 
-/// The app's data folder (`~/Library/Application Support/rust-spotify`), created if missing.
+/// The app's data folder name under `~/Library/Application Support`.
+const APP_DIR_NAME: &str = "stylus";
+/// Older folder names, newest first: the app was Needle, and rust-spotify before that.
+const OLD_APP_DIR_NAMES: [&str; 2] = ["needle", "rust-spotify"];
+
+static APP_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+/// What the one-time folder migration did, for the log (the logger starts after it).
+static APP_DIR_NOTE: std::sync::OnceLock<(log::Level, String)> = std::sync::OnceLock::new();
+
+/// The app's data folder (`~/Library/Application Support/stylus`), created if missing.
+/// The first call moves an old `needle` or `rust-spotify` folder there (see `resolve_app_dir`).
 pub(crate) fn app_dir() -> std::path::PathBuf {
-    let mut dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    dir.push("rust-spotify");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
+    let dir = APP_DIR.get_or_init(|| {
+        // tests never touch the real folder
+        let base = if cfg!(test) {
+            std::env::temp_dir().join(format!("stylus-test-appdir-{}", std::process::id()))
+        } else {
+            dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+        };
+        resolve_app_dir(&base)
+    });
+    let _ = std::fs::create_dir_all(dir);
+    dir.clone()
+}
+
+/// The migration's log line, if it did anything. Taken once by `applog::init`.
+pub(crate) fn app_dir_note() -> Option<&'static (log::Level, String)> {
+    APP_DIR_NOTE.get()
+}
+
+#[derive(Debug, PartialEq)]
+enum DirAction {
+    /// Use the new folder (it exists, or there is nothing to move).
+    UseNew,
+    /// Move the old folder at this index of `OLD_APP_DIR_NAMES` to the new name.
+    Migrate(usize),
+}
+
+/// Move only when the new folder doesn't exist: never merge, never overwrite.
+/// The newest old folder that exists wins (`needle` before `rust-spotify`).
+fn dir_action(new_exists: bool, old_exists: &[bool]) -> DirAction {
+    if new_exists {
+        return DirAction::UseNew;
+    }
+    match old_exists.iter().position(|&e| e) {
+        Some(i) => DirAction::Migrate(i),
+        None => DirAction::UseNew,
+    }
+}
+
+/// The data folder under `base`. Moves `needle` (or, failing that, `rust-spotify`) to `stylus`
+/// once (one atomic rename: tokens, player login, device id, cache, settings and logs move
+/// together). A failed move keeps the old folder in use, so nothing is lost.
+fn resolve_app_dir(base: &std::path::Path) -> std::path::PathBuf {
+    let new = base.join(APP_DIR_NAME);
+    let olds: Vec<std::path::PathBuf> = OLD_APP_DIR_NAMES.iter().map(|n| base.join(n)).collect();
+    let old_exists: Vec<bool> = olds.iter().map(|o| o.is_dir()).collect();
+    match dir_action(new.exists(), &old_exists) {
+        DirAction::UseNew => new,
+        DirAction::Migrate(i) => {
+            let old = &olds[i];
+            match std::fs::rename(old, &new) {
+                Ok(()) => {
+                    let _ = APP_DIR_NOTE.set((log::Level::Info, format!("moved {} to {}", old.display(), new.display())));
+                    new
+                }
+                Err(e) => {
+                    let note = format!("could not move {} to {}: {e}; using the old folder", old.display(), new.display());
+                    let _ = APP_DIR_NOTE.set((log::Level::Warn, note));
+                    old.clone()
+                }
+            }
+        }
+    }
 }
 
 /// Writes a secret file readable by this user only (0600), replacing it atomically.
@@ -396,11 +470,11 @@ pub async fn valid_access_token() -> Result<String, String> {
 
 fn http_page(msg: &str) -> String {
     let body = format!(
-        "<!doctype html><html><head><meta charset=utf-8><title>rust-spotify</title>\
+        "<!doctype html><html><head><meta charset=utf-8><title>Stylus</title>\
          <style>body{{background:#121212;color:#fff;font-family:system-ui;\
          display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}\
          div{{text-align:center}}h1{{color:#1db954}}</style></head>\
-         <body><div><h1>rust-spotify</h1><p>{msg}</p></div></body></html>"
+         <body><div><h1>Stylus</h1><p>{msg}</p></div></body></html>"
     );
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -575,5 +649,78 @@ mod tests {
         assert!(!is_terminal_refresh_failure(400, r#"{"error":"invalid_request"}"#));
         assert!(!is_terminal_refresh_failure(500, "invalid_grant"));
         assert!(!is_terminal_refresh_failure(429, ""));
+    }
+
+    #[test]
+    fn app_dir_moves_only_into_a_free_name() {
+        use super::{dir_action, DirAction};
+        // [needle, rust-spotify]
+        assert_eq!(dir_action(false, &[true, false]), DirAction::Migrate(0));
+        assert_eq!(dir_action(false, &[false, true]), DirAction::Migrate(1));
+        assert_eq!(dir_action(false, &[true, true]), DirAction::Migrate(0));
+        assert_eq!(dir_action(false, &[false, false]), DirAction::UseNew);
+        assert_eq!(dir_action(true, &[true, true]), DirAction::UseNew);
+        assert_eq!(dir_action(true, &[true, false]), DirAction::UseNew);
+        assert_eq!(dir_action(true, &[false, false]), DirAction::UseNew);
+    }
+
+    fn migrate_base(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("stylus-migrate-{name}-{}-{}", std::process::id(), super::now()))
+    }
+
+    fn fill(dir: &std::path::Path) {
+        std::fs::create_dir_all(dir.join("cache")).unwrap();
+        std::fs::create_dir_all(dir.join("logs")).unwrap();
+        for f in ["tokens.json", "player-credentials.json", "session.json", "settings.json", "state.json"] {
+            std::fs::write(dir.join(f), f).unwrap();
+        }
+        std::fs::write(dir.join("player-device-id"), "dev-1").unwrap();
+        std::fs::write(dir.join("cache").join("x"), "c").unwrap();
+        std::fs::write(dir.join("logs").join("needle.log"), "l").unwrap();
+    }
+
+    fn assert_filled(dir: &std::path::Path) {
+        for f in ["tokens.json", "player-credentials.json", "session.json", "settings.json", "state.json"] {
+            assert_eq!(std::fs::read_to_string(dir.join(f)).unwrap(), f);
+        }
+        assert_eq!(std::fs::read_to_string(dir.join("player-device-id")).unwrap(), "dev-1");
+        assert_eq!(std::fs::read_to_string(dir.join("cache").join("x")).unwrap(), "c");
+        assert_eq!(std::fs::read_to_string(dir.join("logs").join("needle.log")).unwrap(), "l");
+    }
+
+    #[test]
+    fn app_dir_migrates_needle_and_leaves_rust_spotify() {
+        let base = migrate_base("needle");
+        let needle = base.join("needle");
+        let older = base.join("rust-spotify");
+        fill(&needle);
+        std::fs::create_dir_all(&older).unwrap();
+        let dir = super::resolve_app_dir(&base);
+        assert_eq!(dir, base.join("stylus"));
+        assert!(!needle.exists());
+        assert!(older.exists());
+        assert_filled(&dir);
+        // stylus exists now: it wins, the leftovers are left alone
+        std::fs::create_dir_all(&needle).unwrap();
+        assert_eq!(super::resolve_app_dir(&base), base.join("stylus"));
+        assert!(needle.exists());
+    }
+
+    #[test]
+    fn app_dir_migrates_rust_spotify_when_needle_is_missing() {
+        let base = migrate_base("rust-spotify");
+        let older = base.join("rust-spotify");
+        fill(&older);
+        let dir = super::resolve_app_dir(&base);
+        assert_eq!(dir, base.join("stylus"));
+        assert!(!older.exists());
+        assert_filled(&dir);
+    }
+
+    #[test]
+    fn app_dir_without_old_folders_is_the_new_one() {
+        let base = migrate_base("fresh");
+        std::fs::create_dir_all(&base).unwrap();
+        assert_eq!(super::resolve_app_dir(&base), base.join("stylus"));
     }
 }

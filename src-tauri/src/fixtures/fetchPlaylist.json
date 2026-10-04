@@ -1,0 +1,184 @@
+{
+ "playlistV2": {
+  "__typename": "Playlist",
+  "abuseReportingEnabled": false,
+  "basePermission": "VIEWER",
+  "content": {
+   "__typename": "PlaylistItemsPage",
+   "items": [
+    {
+     "addedAt": {
+      "isoString": "2026-09-25T04:02:48.872Z"
+     },
+     "addedBy": null,
+     "itemV2": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Taylor Swift"
+           },
+           "uri": "spotify:artist:06HL4z0CvFAxyc27GXpf02"
+          }
+         ]
+        },
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e02cf3de6b538d8b1ed73a4d5d1",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d00004851cf3de6b538d8b1ed73a4d5d1",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b273cf3de6b538d8b1ed73a4d5d1",
+           "width": 640
+          }
+         ]
+        },
+        "date": {
+         "isoString": "2026-09-25T00:00:00Z",
+         "precision": "DAY"
+        },
+        "name": "The Life of a Showgirl: The Encore",
+        "uri": "spotify:album:4hF2gTGuPYlykYuphDxi8J"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Taylor Swift"
+          },
+          "uri": "spotify:artist:06HL4z0CvFAxyc27GXpf02"
+         }
+        ]
+       },
+       "discNumber": 2,
+       "mediaType": "AUDIO",
+       "name": "Patient Zero",
+       "playcount": "52187950",
+       "trackDuration": {
+        "totalMilliseconds": 225868
+       },
+       "trackNumber": 1,
+       "uri": "spotify:track:11hcBLPtbMp4aQI6zGQLub"
+      }
+     },
+     "uid": "65384a4654507478686867"
+    },
+    {
+     "addedAt": {
+      "isoString": "2026-05-22T04:01:38.732Z"
+     },
+     "addedBy": null,
+     "itemV2": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Olivia Rodrigo"
+           },
+           "uri": "spotify:artist:1McMsnEElThX1knmY4oliG"
+          }
+         ]
+        },
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e0279e480cbab8c7b86d277841a",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d0000485179e480cbab8c7b86d277841a",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b27379e480cbab8c7b86d277841a",
+           "width": 640
+          }
+         ]
+        },
+        "date": {
+         "isoString": "2026-05-22T00:00:00Z",
+         "precision": "DAY"
+        },
+        "name": "the cure",
+        "uri": "spotify:album:6zme2NwcaBxbn3mWOcMY8y"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Olivia Rodrigo"
+          },
+          "uri": "spotify:artist:1McMsnEElThX1knmY4oliG"
+         }
+        ]
+       },
+       "discNumber": 1,
+       "mediaType": "AUDIO",
+       "name": "the cure",
+       "playcount": "467494470",
+       "trackDuration": {
+        "totalMilliseconds": 297090
+       },
+       "trackNumber": 1,
+       "uri": "spotify:track:4EoJ151oQ5jY48z4RhSE96"
+      }
+     },
+     "uid": "54456244394f3755774667"
+    }
+   ],
+   "pagingInfo": {
+    "limit": 5,
+    "offset": 0
+   },
+   "totalCount": 50
+  },
+  "description": "The hottest 50. Cover: Taylor Swift",
+  "followers": 33755262,
+  "following": false,
+  "format": "format-shows-shuffle",
+  "images": {
+   "items": [
+    {
+     "sources": [
+      {
+       "height": null,
+       "url": "https://i.scdn.co/image/ab67706f0000000271992d3b45eb1297df9c6bf7",
+       "width": null
+      }
+     ]
+    }
+   ]
+  },
+  "name": "Today’s Top Hits",
+  "ownerV2": {
+   "data": {
+    "__typename": "User",
+    "name": "Spotify",
+    "socialHandle": null,
+    "uri": "spotify:user:spotify",
+    "username": "spotify"
+   }
+  },
+  "revisionId": "AAAAAOuaTAK0A/u5OHDTUPj+eUBv59Mk",
+  "uri": "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"
+ }
+}

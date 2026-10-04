@@ -1,0 +1,97 @@
+<!doctype html>
+<!-- QA context for the mini player: a fake macOS menu bar (?bar=light|dark) with the tray template icon,
+     and dev/mini.html?s=<scenario> anchored under it at its real size (320×140). Not shipped. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Stylus menu bar (dev)</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font: 13px/1 -apple-system, system-ui, sans-serif;
+      }
+      body {
+        background: linear-gradient(160deg, #3f5a7a 0%, #8a6f8f 45%, #d9a27c 100%);
+      }
+      body.dark {
+        background: linear-gradient(160deg, #0e1424 0%, #29213a 50%, #4a2f35 100%);
+      }
+      .bar {
+        position: relative;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 14px;
+        height: 24px;
+        padding: 0 14px;
+        background: rgb(246 246 246 / 0.78);
+        color: #111;
+        backdrop-filter: blur(20px);
+      }
+      .dark .bar {
+        background: rgb(30 30 30 / 0.7);
+        color: #f2f2f2;
+      }
+      .item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        height: 22px;
+        padding: 0 5px;
+        border-radius: 4px;
+      }
+      .item.is-open {
+        background: rgb(0 0 0 / 0.12);
+      }
+      .dark .item.is-open {
+        background: rgb(255 255 255 / 0.2);
+      }
+      /* the template image: only its alpha counts; macOS paints it in the bar's text colour */
+      .tray {
+        width: 18px;
+        height: 18px;
+        background: currentColor;
+        -webkit-mask: url("../src-tauri/icons/tray-template.png") center / contain no-repeat;
+        mask: url("../src-tauri/icons/tray-template.png") center / contain no-repeat;
+      }
+      iframe {
+        position: absolute;
+        top: 30px;
+        width: 320px;
+        height: 140px;
+        border: 0;
+        border-radius: 12px;
+        box-shadow: 0 12px 40px rgb(0 0 0 / 0.45), 0 0 0 0.5px rgb(0 0 0 / 0.5);
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <span class="item">Wi‑Fi</span>
+      <span id="trayItem" class="item is-open"><span class="tray"></span><span id="trayTitle"></span></span>
+      <span class="item">Fri 3 Oct 14:20</span>
+    </div>
+    <iframe id="mini" title="Stylus mini player"></iframe>
+    <script>
+      const q = new URLSearchParams(location.search);
+      if (q.get("bar") === "dark") document.body.classList.add("dark");
+      // the song next to the icon (the "Show song in menu bar" setting), cut like tray.rs menu_title
+      const title = q.get("title");
+      if (title) document.getElementById("trayTitle").textContent = title.length > 24 ? title.slice(0, 23).trimEnd() + "…" : title;
+      const frame = document.getElementById("mini");
+      frame.src = `mini.html?s=${encodeURIComponent(q.get("s") || "playing")}`;
+      // centred under the icon, kept on screen (tray.rs anchor)
+      const place = () => {
+        const r = document.getElementById("trayItem").getBoundingClientRect();
+        const x = Math.min(Math.max(r.left + r.width / 2 - 160, 0), innerWidth - 320);
+        frame.style.left = `${Math.round(x)}px`;
+      };
+      addEventListener("resize", place);
+      place();
+    </script>
+  </body>
+</html>

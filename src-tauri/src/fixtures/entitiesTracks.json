@@ -1,0 +1,46 @@
+{
+ "lookup": [
+  {
+   "__typename": "TrackResponseWrapper",
+   "_uri": "spotify:track:70LcF31zb1H0PyJoS1Sx1r",
+   "data": {
+    "__typename": "Track",
+    "albumOfTrack": {
+     "coverArt": {
+      "sources": [
+       {
+        "height": 300,
+        "url": "https://i.scdn.co/image/ab67616d00001e02ec548c00d3ac2f10be73366d",
+        "width": 300
+       },
+       {
+        "height": 64,
+        "url": "https://i.scdn.co/image/ab67616d00004851ec548c00d3ac2f10be73366d",
+        "width": 64
+       },
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab67616d0000b273ec548c00d3ac2f10be73366d",
+        "width": 640
+       }
+      ]
+     },
+     "name": "Pablo Honey",
+     "uri": "spotify:album:3gBVdu4a1MMJVMy6vwPEb8"
+    },
+    "artists": {
+     "items": [
+      {
+       "profile": {
+        "name": "Radiohead"
+       },
+       "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+      }
+     ]
+    },
+    "name": "Creep",
+    "uri": "spotify:track:70LcF31zb1H0PyJoS1Sx1r"
+   }
+  }
+ ]
+}

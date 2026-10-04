@@ -1,0 +1,100 @@
+{
+ "searchV2": {
+  "albumsV2": {
+   "items": [
+    {
+     "__typename": "AlbumResponseWrapper",
+     "data": {
+      "__typename": "Album",
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      },
+      "coverArt": {
+       "sources": [
+        {
+         "height": 300,
+         "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856",
+         "width": 300
+        },
+        {
+         "height": 64,
+         "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856",
+         "width": 64
+        },
+        {
+         "height": 640,
+         "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856",
+         "width": 640
+        }
+       ]
+      },
+      "date": {
+       "year": 1997
+      },
+      "isAlbumPreRelease": false,
+      "name": "OK Computer",
+      "preReleaseEndDateTime": null,
+      "type": "ALBUM",
+      "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE"
+     }
+    },
+    {
+     "__typename": "AlbumResponseWrapper",
+     "data": {
+      "__typename": "Album",
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      },
+      "coverArt": {
+       "sources": [
+        {
+         "height": 300,
+         "url": "https://i.scdn.co/image/ab67616d00001e02de3c04b5fc750b68899b20a9",
+         "width": 300
+        },
+        {
+         "height": 64,
+         "url": "https://i.scdn.co/image/ab67616d00004851de3c04b5fc750b68899b20a9",
+         "width": 64
+        },
+        {
+         "height": 640,
+         "url": "https://i.scdn.co/image/ab67616d0000b273de3c04b5fc750b68899b20a9",
+         "width": 640
+        }
+       ]
+      },
+      "date": {
+       "year": 2007
+      },
+      "isAlbumPreRelease": false,
+      "name": "In Rainbows",
+      "preReleaseEndDateTime": null,
+      "type": "ALBUM",
+      "uri": "spotify:album:5vkqYmiPBYLaalcmjujWxK"
+     }
+    }
+   ],
+   "pagingInfo": {
+    "limit": 10,
+    "nextOffset": 10
+   },
+   "totalCount": 202
+  },
+  "query": "radiohead"
+ }
+}

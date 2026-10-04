@@ -1,0 +1,176 @@
+{
+ "artistUnion": {
+  "__typename": "Artist",
+  "discography": {
+   "albums": {
+    "items": [
+     {
+      "releases": {
+       "items": [
+        {
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e022c700c64cffdee30cdd40031",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d000048512c700c64cffdee30cdd40031",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b2732c700c64cffdee30cdd40031",
+            "width": 640
+           }
+          ]
+         },
+         "date": {
+          "day": 13,
+          "month": 8,
+          "precision": "DAY",
+          "year": 2025
+         },
+         "id": "5BLrEOEDKoDDg5T8PzdIHN",
+         "label": "XL Recordings",
+         "name": "Hail to the Thief (Live Recordings 2003-2009)",
+         "tracks": {
+          "totalCount": 12
+         },
+         "type": "ALBUM",
+         "uri": "spotify:album:5BLrEOEDKoDDg5T8PzdIHN"
+        }
+       ]
+      }
+     }
+    ],
+    "totalCount": 15
+   },
+   "topTracks": {
+    "items": [
+     {
+      "track": {
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "url": "https://i.scdn.co/image/ab67616d00001e02ec548c00d3ac2f10be73366d"
+          },
+          {
+           "url": "https://i.scdn.co/image/ab67616d00004851ec548c00d3ac2f10be73366d"
+          },
+          {
+           "url": "https://i.scdn.co/image/ab67616d0000b273ec548c00d3ac2f10be73366d"
+          }
+         ]
+        },
+        "uri": "spotify:album:3gBVdu4a1MMJVMy6vwPEb8"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "discNumber": 1,
+       "duration": {
+        "totalMilliseconds": 238640
+       },
+       "id": "70LcF31zb1H0PyJoS1Sx1r",
+       "name": "Creep",
+       "playcount": "3165713640",
+       "uri": "spotify:track:70LcF31zb1H0PyJoS1Sx1r"
+      },
+      "uid": "df6db0effb7a12f8c62e"
+     },
+     {
+      "track": {
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856"
+          },
+          {
+           "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856"
+          },
+          {
+           "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856"
+          }
+         ]
+        },
+        "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "discNumber": 1,
+       "duration": {
+        "totalMilliseconds": 299560
+       },
+       "id": "2fuYa3Lx06QQJAm0MjztKr",
+       "name": "Let Down",
+       "playcount": "959833854",
+       "uri": "spotify:track:2fuYa3Lx06QQJAm0MjztKr"
+      },
+      "uid": "f47435defa0a86105756"
+     }
+    ]
+   }
+  },
+  "id": "4Z8W4fKeB5YxbusRsdQVPb",
+  "profile": {
+   "name": "Radiohead",
+   "verified": true
+  },
+  "saved": false,
+  "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+  "visuals": {
+   "avatarImage": {
+    "sources": [
+     {
+      "height": 640,
+      "url": "https://i.scdn.co/image/ab6761610000e5eb959527d2fabc9c64287e57b9",
+      "width": 640
+     },
+     {
+      "height": 160,
+      "url": "https://i.scdn.co/image/ab6761610000f178959527d2fabc9c64287e57b9",
+      "width": 160
+     },
+     {
+      "height": 320,
+      "url": "https://i.scdn.co/image/ab67616100005174959527d2fabc9c64287e57b9",
+      "width": 320
+     }
+    ]
+   },
+   "gallery": {
+    "items": [
+     {
+      "sources": [
+       {
+        "height": 640,
+        "url": "https://i.scdn.co/image/ab6761670000ecd4d17c37851cc5f2bc5cceccf9",
+        "width": 640
+       }
+      ]
+     }
+    ]
+   }
+  }
+ }
+}

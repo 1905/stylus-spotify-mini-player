@@ -1,0 +1,284 @@
+{
+ "searchV2": {
+  "albumsV2": {
+   "__typename": "AlbumOrPrereleasePage",
+   "items": [
+    {
+     "__typename": "AlbumResponseWrapper",
+     "data": {
+      "__typename": "Album",
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      },
+      "coverArt": {
+       "sources": [
+        {
+         "height": 300,
+         "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856",
+         "width": 300
+        },
+        {
+         "height": 64,
+         "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856",
+         "width": 64
+        },
+        {
+         "height": 640,
+         "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856",
+         "width": 640
+        }
+       ]
+      },
+      "date": {
+       "year": 1997
+      },
+      "isAlbumPreRelease": false,
+      "name": "OK Computer",
+      "preReleaseEndDateTime": null,
+      "type": "ALBUM",
+      "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE"
+     }
+    },
+    {
+     "__typename": "AlbumResponseWrapper",
+     "data": {
+      "__typename": "Album",
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      },
+      "coverArt": {
+       "sources": [
+        {
+         "height": 300,
+         "url": "https://i.scdn.co/image/ab67616d00001e02de3c04b5fc750b68899b20a9",
+         "width": 300
+        },
+        {
+         "height": 64,
+         "url": "https://i.scdn.co/image/ab67616d00004851de3c04b5fc750b68899b20a9",
+         "width": 64
+        },
+        {
+         "height": 640,
+         "url": "https://i.scdn.co/image/ab67616d0000b273de3c04b5fc750b68899b20a9",
+         "width": 640
+        }
+       ]
+      },
+      "date": {
+       "year": 2007
+      },
+      "isAlbumPreRelease": false,
+      "name": "In Rainbows",
+      "preReleaseEndDateTime": null,
+      "type": "ALBUM",
+      "uri": "spotify:album:5vkqYmiPBYLaalcmjujWxK"
+     }
+    }
+   ],
+   "totalCount": 202
+  },
+  "artists": {
+   "items": [
+    {
+     "__typename": "ArtistResponseWrapper",
+     "data": {
+      "__typename": "Artist",
+      "profile": {
+       "name": "Radiohead"
+      },
+      "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+      "visuals": {
+       "avatarImage": {
+        "sources": [
+         {
+          "height": 640,
+          "url": "https://i.scdn.co/image/ab6761610000e5eb959527d2fabc9c64287e57b9",
+          "width": 640
+         },
+         {
+          "height": 160,
+          "url": "https://i.scdn.co/image/ab6761610000f178959527d2fabc9c64287e57b9",
+          "width": 160
+         },
+         {
+          "height": 320,
+          "url": "https://i.scdn.co/image/ab67616100005174959527d2fabc9c64287e57b9",
+          "width": 320
+         }
+        ]
+       }
+      }
+     }
+    }
+   ],
+   "totalCount": 127
+  },
+  "tracksV2": {
+   "items": [
+    {
+     "item": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e02ec548c00d3ac2f10be73366d",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d00004851ec548c00d3ac2f10be73366d",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b273ec548c00d3ac2f10be73366d",
+           "width": 640
+          }
+         ]
+        },
+        "id": "3gBVdu4a1MMJVMy6vwPEb8",
+        "name": "Pablo Honey",
+        "uri": "spotify:album:3gBVdu4a1MMJVMy6vwPEb8"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 238640
+       },
+       "id": "70LcF31zb1H0PyJoS1Sx1r",
+       "name": "Creep",
+       "trackMediaType": "AUDIO",
+       "uri": "spotify:track:70LcF31zb1H0PyJoS1Sx1r"
+      }
+     }
+    },
+    {
+     "item": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856",
+           "width": 640
+          }
+         ]
+        },
+        "id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+        "name": "OK Computer",
+        "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 229120
+       },
+       "id": "10nyNJ6zNy2YVYLrcwLccB",
+       "name": "No Surprises",
+       "trackMediaType": "AUDIO",
+       "uri": "spotify:track:10nyNJ6zNy2YVYLrcwLccB"
+      }
+     }
+    },
+    {
+     "item": {
+      "__typename": "TrackResponseWrapper",
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856",
+           "width": 640
+          }
+         ]
+        },
+        "id": "6dVIqQ8qmQ5GBnJ9shOYGE",
+        "name": "OK Computer",
+        "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Radiohead"
+          },
+          "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 267186
+       },
+       "id": "0z1o5L7HJx562xZSATcIpY",
+       "name": "Exit Music (For A Film)",
+       "trackMediaType": "AUDIO",
+       "uri": "spotify:track:0z1o5L7HJx562xZSATcIpY"
+      }
+     }
+    }
+   ],
+   "totalCount": 438
+  }
+ }
+}

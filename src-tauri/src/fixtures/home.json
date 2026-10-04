@@ -1,0 +1,448 @@
+{
+ "home": {
+  "__typename": "HomeResponsePayload",
+  "sectionContainer": {
+   "sections": {
+    "items": [
+     {
+      "uri": "spotify:section:0JQ5DAIiKWzVFULQfUm85Y",
+      "data": {
+       "__typename": "HomeShortsSectionData"
+      },
+      "sectionItems": {
+       "items": [
+        {
+         "uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 50
+           },
+           "description": "With Kiasmos, BICEP, Tor and more",
+           "format": "inspiredby-mix",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/radio/artist/0cmWgDlu9CwTgxPhf403hb/en",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "Bonobo Radio",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb"
+          }
+         }
+        },
+        {
+         "uri": "spotify:playlist:37i9dQZEVXcVV9hd3iqSgp",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 30
+           },
+           "description": "Your shortcut to hidden gems, deep cuts, and future faves, updated every Monday. You’ll know when you hear it.",
+           "format": "discover-weekly",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/dw/cover/en",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "Discover Weekly",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZEVXcVV9hd3iqSgp"
+          }
+         }
+        },
+        {
+         "uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 0
+           },
+           "description": "All kinds of music, picked by your own AI DJ.",
+           "format": "",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://lexicon-assets.spotifycdn.com/DJ-Beta-CoverArt-300.jpg",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "DJ",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq"
+          }
+         }
+        },
+        {
+         "uri": "spotify:album:62rCkiOIOj6WhnMTj0cNju",
+         "content": {
+          "__typename": "AlbumResponseWrapper",
+          "data": {
+           "__typename": "Album",
+           "albumType": "ALBUM",
+           "artists": {
+            "items": [
+             {
+              "profile": {
+               "name": "Skeler"
+              },
+              "uri": "spotify:artist:7ks4LdnBvp6HUsmVJiKgsB"
+             }
+            ]
+           },
+           "coverArt": {
+            "extractedColors": {
+             "colorDark": {
+              "hex": "#901088",
+              "isFallback": false
+             }
+            },
+            "sources": [
+             {
+              "height": 300,
+              "url": "https://i.scdn.co/image/ab67616d00001e020aed5fffc44fb502a5822937",
+              "width": 300
+             },
+             {
+              "height": 64,
+              "url": "https://i.scdn.co/image/ab67616d000048510aed5fffc44fb502a5822937",
+              "width": 64
+             },
+             {
+              "height": 640,
+              "url": "https://i.scdn.co/image/ab67616d0000b2730aed5fffc44fb502a5822937",
+              "width": 640
+             }
+            ]
+           },
+           "isPreRelease": false,
+           "name": "N i g h t D r i v e スケラーPART IV",
+           "playability": {
+            "playable": true,
+            "reason": "PLAYABLE"
+           },
+           "preReleaseEndDateTime": {
+            "isoString": "2026-10-01T17:00:00Z"
+           },
+           "uri": "spotify:album:62rCkiOIOj6WhnMTj0cNju"
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "uri": "spotify:section:0JQ5DAUnp4wcj0bCb3wh3S",
+      "data": {
+       "__typename": "HomeGenericSectionData"
+      },
+      "sectionItems": {
+       "items": [
+        {
+         "uri": "spotify:playlist:37i9dQZF1E383PNAIaEkqr",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 50
+           },
+           "description": "Kiasmos, BlauDisS, Tecnosine and more",
+           "format": "daily-mix",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/daily/1/ab6761610000e5eb09b55d86f0b4bddd1d5b010b/en",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "Daily Mix 1",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZF1E383PNAIaEkqr"
+          }
+         }
+        },
+        {
+         "uri": "spotify:playlist:37i9dQZEVXbqEuNs4QsXYB",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 200
+           },
+           "description": "Catch all the latest music from artists you follow, plus new singles picked for you. Updates every Friday.",
+           "format": "release-radar",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000bada/dt/v1/img/release-radar-v4/3FlXXv8lfSt3ZWk9epMxe7/en",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "Release Radar",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZEVXbqEuNs4QsXYB"
+          }
+         }
+        }
+       ]
+      }
+     },
+     {
+      "uri": "spotify:section:0JQ5DAob0KZzPQKc9YbqhR",
+      "data": {
+       "__typename": "HomeGenericSectionData"
+      },
+      "sectionItems": {
+       "items": [
+        {
+         "uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 50
+           },
+           "description": "With Kiasmos, BICEP, Tor and more",
+           "format": "inspiredby-mix",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/radio/artist/0cmWgDlu9CwTgxPhf403hb/en",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "Bonobo Radio",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb"
+          }
+         }
+        },
+        {
+         "uri": "spotify:album:62rCkiOIOj6WhnMTj0cNju",
+         "content": {
+          "__typename": "AlbumResponseWrapper",
+          "data": {
+           "__typename": "Album",
+           "albumType": "ALBUM",
+           "artists": {
+            "items": [
+             {
+              "profile": {
+               "name": "Skeler"
+              },
+              "uri": "spotify:artist:7ks4LdnBvp6HUsmVJiKgsB"
+             }
+            ]
+           },
+           "coverArt": {
+            "extractedColors": {
+             "colorDark": {
+              "hex": "#901088",
+              "isFallback": false
+             }
+            },
+            "sources": [
+             {
+              "height": 300,
+              "url": "https://i.scdn.co/image/ab67616d00001e020aed5fffc44fb502a5822937",
+              "width": 300
+             },
+             {
+              "height": 64,
+              "url": "https://i.scdn.co/image/ab67616d000048510aed5fffc44fb502a5822937",
+              "width": 64
+             },
+             {
+              "height": 640,
+              "url": "https://i.scdn.co/image/ab67616d0000b2730aed5fffc44fb502a5822937",
+              "width": 640
+             }
+            ]
+           },
+           "isPreRelease": false,
+           "name": "N i g h t D r i v e スケラーPART IV",
+           "playability": {
+            "playable": true,
+            "reason": "PLAYABLE"
+           },
+           "preReleaseEndDateTime": {
+            "isoString": "2026-10-01T17:00:00Z"
+           },
+           "uri": "spotify:album:62rCkiOIOj6WhnMTj0cNju"
+          }
+         }
+        },
+        {
+         "uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 0
+           },
+           "description": "All kinds of music, picked by your own AI DJ.",
+           "format": "",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://lexicon-assets.spotifycdn.com/DJ-Beta-CoverArt-300.jpg",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "DJ",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZF1EYkqdzj48dyYq"
+          }
+         }
+        },
+        {
+         "uri": "spotify:playlist:37i9dQZEVXcVV9hd3iqSgp",
+         "content": {
+          "__typename": "PlaylistResponseWrapper",
+          "data": {
+           "__typename": "Playlist",
+           "content": {
+            "__typename": "PlaylistItemsPage",
+            "totalCount": 30
+           },
+           "description": "Your shortcut to hidden gems, deep cuts, and future faves, updated every Monday. You’ll know when you hear it.",
+           "format": "discover-weekly",
+           "images": {
+            "items": [
+             {
+              "sources": [
+               {
+                "height": null,
+                "url": "https://pickasso.spotifycdn.com/image/ab67c0de0000deef/dt/v1/img/dw/cover/en",
+                "width": null
+               }
+              ]
+             }
+            ]
+           },
+           "name": "Discover Weekly",
+           "ownerV2": {
+            "data": {
+             "__typename": "User",
+             "name": "Spotify",
+             "uri": "spotify:user:spotify"
+            }
+           },
+           "uri": "spotify:playlist:37i9dQZEVXcVV9hd3iqSgp"
+          }
+         }
+        }
+       ]
+      }
+     }
+    ],
+    "totalCount": 3
+   }
+  }
+ }
+}

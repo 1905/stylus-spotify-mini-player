@@ -1,17 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "rust-spotify",
+  "productName": "Stylus",
   "version": "0.1.0",
-  "identifier": "com.kass.rustspotify",
+  "identifier": "com.kass.stylus",
   "build": {
     "frontendDist": "../src"
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
-        "title": "Player",
+        "title": "Stylus",
         "width": 1000,
         "height": 720,
         "minWidth": 480,

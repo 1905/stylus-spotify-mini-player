@@ -5,7 +5,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Player (dev)</title>
+    <title>Stylus (dev)</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="../src/styles.css" />
     <script src="mock.js"></script>
@@ -37,28 +37,80 @@
     <main id="stage" class="stage" hidden>
       <header class="topbar">
         <div class="topbar-tools">
-          <button id="libraryBtn" class="btn btn-ghost" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h3v15H4zM9.5 4.5h3v15h-3zM15.2 5.3l2.9-.8 3.9 14.5-2.9.8z" /></svg>
-            Library
+          <button id="libraryBtn" class="btn btn-ghost nav-btn" type="button" aria-label="Library">
+            <svg class="ic ic-library" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7.46 15.5H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v.57"/><circle cx="14" cy="13" r="7"/><circle cx="14" cy="13" r="2"/></svg>
           </button>
-          <button id="searchBtn" class="btn btn-ghost" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
-            Search
+          <button id="searchBtn" class="btn btn-ghost nav-btn" type="button" aria-label="Search">
+            <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
           </button>
         </div>
-        <div class="device-wrap">
-          <button id="deviceBtn" class="device" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="devicePop" hidden>
-            <span class="device-dot"></span><span class="device-name"></span>
-            <svg class="device-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 8.6 5.6 5.6 5.6-5.6L19 10l-7 7-7-7z" /></svg>
-          </button>
-          <div id="devicePop" class="device-pop" hidden>
-            <div id="deviceList" class="device-list" role="listbox" aria-label="Spotify devices"></div>
-            <p class="device-note" role="status" hidden></p>
+        <div class="topbar-end">
+          <div class="device-wrap">
+            <button id="deviceBtn" class="device" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="devicePop" hidden>
+              <span class="device-dot"></span><span class="device-name"></span>
+              <svg class="ic ic-chevron-down" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6.5 9.25 5.5 5.5 5.5-5.5"/></svg>
+            </button>
+            <div id="devicePop" class="device-pop" hidden>
+              <div id="deviceList" class="device-list" role="listbox" aria-label="Spotify devices"></div>
+              <p class="device-note" role="status" hidden></p>
+            </div>
+          </div>
+          <div class="settings-wrap">
+            <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPop">
+              <svg class="ic ic-settings" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 5.3l.26-2.19h2.82l.26 2.19a6.9 6.9 0 0 1 1.88.79l1.74-1.37 1.99 1.99-1.37 1.74a6.9 6.9 0 0 1 .79 1.88l2.19.26v2.82l-2.19.26a6.9 6.9 0 0 1-.79 1.88l1.37 1.74-1.99 1.99-1.74-1.37a6.9 6.9 0 0 1-1.88.79l-.26 2.19h-2.82l-.26-2.19a6.9 6.9 0 0 1-1.88-.79l-1.74 1.37-1.99-1.99 1.37-1.74a6.9 6.9 0 0 1-.79-1.88l-2.19-.26v-2.82l2.19-.26a6.9 6.9 0 0 1 .79-1.88L4.72 6.71l1.99-1.99 1.74 1.37a6.9 6.9 0 0 1 1.88-.79z"/><circle cx="12" cy="12" r="2.75"/></svg>
+            </button>
+            <div id="settingsPop" class="device-pop settings-pop" role="dialog" aria-label="Settings" hidden>
+              <div class="set-row">
+                <span id="dockArtLabel" class="set-label">Album art as app icon</span>
+                <button id="dockArtSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="dockArtLabel"></button>
+              </div>
+              <div class="set-row">
+                <span id="coverRowLabel" class="set-label">Show cover row</span>
+                <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
+              </div>
+              <div class="set-row">
+                <span id="menuBarLabel" class="set-label">Show in menu bar</span>
+                <button id="menuBarSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="menuBarLabel"></button>
+              </div>
+              <div class="set-row">
+                <span id="menuBarTitleLabel" class="set-label">Show song in menu bar</span>
+                <button id="menuBarTitleSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="menuBarTitleLabel"></button>
+              </div>
+              <div class="set-group">
+                <span id="qualityLabel" class="set-label">Audio quality</span>
+                <div id="qualityOpts" class="seg" role="radiogroup" aria-labelledby="qualityLabel">
+                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="96"><span class="seg-name">Normal</span><span class="seg-sub">96 kbps</span></button>
+                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="160"><span class="seg-name">High</span><span class="seg-sub">160 kbps</span></button>
+                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="320"><span class="seg-name">Very high</span><span class="seg-sub">320 kbps</span></button>
+                </div>
+                <p id="qualityNote" class="set-note">Changing restarts the player for a moment.</p>
+              </div>
+              <div class="set-group set-mcp">
+                <div class="set-row">
+                  <span id="mcpLabel" class="set-label">MCP server</span>
+                  <button id="mcpSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="mcpLabel" aria-describedby="mcpStatus"></button>
+                </div>
+                <p id="mcpStatus" class="set-note set-mcp-status" role="status"></p>
+                <div id="mcpActions" class="set-actions" hidden>
+                  <span class="set-actions-label">Copy connect</span>
+                  <button class="chip" type="button" data-copy="json">JSON config</button>
+                  <button class="chip" type="button" data-copy="claude">Claude Code</button>
+                  <button class="chip" type="button" data-copy="skill">Copy skill</button>
+                  <button id="mcpReset" class="chip chip-quiet" type="button">Reset key</button>
+                </div>
+                <div id="mcpResetAsk" class="set-actions set-confirm" hidden>
+                  <span class="set-actions-label">The copied connect text stops working.</span>
+                  <button id="mcpResetYes" class="chip chip-danger" type="button">Reset key</button>
+                  <button id="mcpResetNo" class="chip" type="button">Cancel</button>
+                </div>
+              </div>
+              <p id="quotaStatus" class="set-note set-quota" role="status" hidden></p>
+            </div>
           </div>
         </div>
       </header>
 
-      <div id="run" class="run" aria-label="Played, now playing, and up next"></div>
+      <div id="run" class="run" aria-label="Played, now playing, and up next"><div id="runTrack" class="run-track"></div></div>
 
       <section class="now" aria-live="polite">
         <h1 id="nowTitle" class="now-title"></h1>
@@ -76,30 +128,35 @@
           <span id="durTime" class="time">0:00</span>
         </div>
         <div class="controls">
-          <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h3c2 0 3.2 1 4.2 2.6l2.4 3.8c1 1.6 2.2 2.6 4.2 2.6H20M4 17h3c1.3 0 2.3-.4 3.1-1.2M13.7 8.2C14.5 7.4 15.5 7 16.8 7H20M17.6 4.6 20 7l-2.4 2.4M17.6 14.6 20 17l-2.4 2.4" /></svg>
-          </button>
-          <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5h2.2v14H6zM19 5.6v12.8c0 .8-.9 1.3-1.6.8L8.6 12.8a1 1 0 0 1 0-1.6l8.8-6.4c.7-.5 1.6 0 1.6.8z" /></svg>
-          </button>
-          <button id="playBtn" class="ctl ctl-play" type="button" aria-label="Play">
-            <svg class="i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.4v13.2c0 .8.9 1.3 1.6.8l10-6.6a1 1 0 0 0 0-1.6l-10-6.6C8.9 4.1 8 4.6 8 5.4z" /></svg>
-            <svg class="i-pause" viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="5" width="4" height="14" rx="1.2" /><rect x="13.5" y="5" width="4" height="14" rx="1.2" /></svg>
-          </button>
-          <button id="nextBtn" class="ctl" type="button" aria-label="Next">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5h-2.2v14H18zM5 5.6v12.8c0 .8.9 1.3 1.6.8l8.8-6.4a1 1 0 0 0 0-1.6L6.6 4.8C5.9 4.3 5 4.8 5 5.6z" /></svg>
-          </button>
-          <button id="repeatBtn" class="ctl ctl-toggle" type="button" aria-label="Repeat" title="Repeat" data-mode="off">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4.5 11.5V10A3 3 0 0 1 7.5 7H19M16.6 4.6 19 7l-2.4 2.4M19.5 12.5V14a3 3 0 0 1-3 3H5M7.4 19.4 5 17l2.4-2.4" /></svg>
-          </button>
+          <div class="controls-lead">
+            <button id="panelBtn" class="ctl" type="button" aria-label="Playlist" title="Playlist" aria-haspopup="dialog" aria-expanded="false" aria-controls="panel" disabled>
+              <svg class="ic ic-playlist" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h14M4 11.5h14M4 16.5h6.5"/><path fill="currentColor" stroke="none" d="M14.5 14.1v4.8a.5.5 0 0 0 .76.43l3.9-2.4a.5.5 0 0 0 0-.86l-3.9-2.4a.5.5 0 0 0-.76.43z"/></svg>
+            </button>
+          </div>
+          <div class="controls-main">
+            <button id="shuffleBtn" class="ctl ctl-toggle" type="button" aria-label="Shuffle" title="Shuffle" aria-pressed="false">
+              <svg class="ic ic-shuffle" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h2.2c2 0 3.3.9 4.4 2.5l2.8 5c1.1 1.6 2.4 2.5 4.4 2.5H20M4 17h2.2c1.3 0 2.3-.4 3.1-1.1M14.7 8.1c.8-.7 1.8-1.1 3.1-1.1H20M17 4l3 3-3 3M17 14l3 3-3 3"/></svg>
+            </button>
+            <button id="prevBtn" class="ctl" type="button" aria-label="Previous">
+              <svg class="ic ic-previous" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M18.5 6.4v11.2a.9.9 0 0 1-1.4.75l-8.3-5.6a.9.9 0 0 1 0-1.5l8.3-5.6a.9.9 0 0 1 1.4.75z"/><rect x="5" y="5.5" width="2.25" height="13" rx="1.125"/></svg>
+            </button>
+            <button id="playBtn" class="ctl ctl-play" type="button" aria-label="Play">
+              <svg class="ic ic-play" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M7.5 5.25v13.5a.9.9 0 0 0 1.38.76l10.6-6.75a.9.9 0 0 0 0-1.52L8.88 4.49A.9.9 0 0 0 7.5 5.25z"/></svg><svg class="ic ic-pause" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><rect x="6" y="5" width="4.25" height="14" rx="1.5"/><rect x="13.75" y="5" width="4.25" height="14" rx="1.5"/></svg>
+            </button>
+            <button id="nextBtn" class="ctl" type="button" aria-label="Next">
+              <svg class="ic ic-next" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M5.5 6.4v11.2a.9.9 0 0 0 1.4.75l8.3-5.6a.9.9 0 0 0 0-1.5L6.9 5.65a.9.9 0 0 0-1.4.75z"/><rect x="16.75" y="5.5" width="2.25" height="13" rx="1.125"/></svg>
+            </button>
+            <button id="repeatBtn" class="ctl ctl-toggle" type="button" aria-label="Repeat" title="Repeat" data-mode="off">
+              <svg class="ic ic-repeat" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5v-2a3 3 0 0 1 3-3h13M17 3.5l3 3-3 3M20 12.5v2a3 3 0 0 1-3 3H4M7 20.5l-3-3 3-3"/></svg><svg class="ic ic-repeat-one" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5v-2a3 3 0 0 1 3-3h13M17 3.5l3 3-3 3M20 12.5v2a3 3 0 0 1-3 3H4M7 20.5l-3-3 3-3"/><path stroke-width="1.6" d="M10.9 10.4 12.4 9.4v5.2"/></svg>
+            </button>
+          </div>
           <div class="controls-side">
             <button id="heartBtn" class="ctl ctl-toggle" type="button" aria-label="Save to Liked Songs" title="Save to Liked Songs" aria-pressed="false" hidden>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path class="heart" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" d="M12 19.5S4.5 15 4.5 9.6A4 4 0 0 1 12 7.7a4 4 0 0 1 7.5 1.9c0 5.4-7.5 9.9-7.5 9.9z" /></svg>
+              <svg class="ic ic-heart" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20c-.3 0-.55-.08-.8-.26C8.4 17.7 4 14.2 4 9.6 4 7.05 5.95 5 8.4 5c1.5 0 2.8.73 3.6 1.9C12.8 5.73 14.1 5 15.6 5 18.05 5 20 7.05 20 9.6c0 4.6-4.4 8.1-7.2 10.14-.25.18-.5.26-.8.26z"/></svg><svg class="ic ic-heart-filled" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M12 20c-.3 0-.55-.08-.8-.26C8.4 17.7 4 14.2 4 9.6 4 7.05 5.95 5 8.4 5c1.5 0 2.8.73 3.6 1.9C12.8 5.73 14.1 5 15.6 5 18.05 5 20 7.05 20 9.6c0 4.6-4.4 8.1-7.2 10.14-.25.18-.5.26-.8.26z"/></svg>
             </button>
             <div id="volume" class="volume" hidden>
               <button id="volBtn" class="ctl" type="button" aria-label="Mute" title="Mute">
-                <svg class="i-vol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" /><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M14.8 9.6a3.4 3.4 0 0 1 0 4.8M17.4 7.2a6.8 6.8 0 0 1 0 9.6" /></svg>
-                <svg class="i-mute" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" /><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m15.2 9.8 4.4 4.4m0-4.4-4.4 4.4" /></svg>
+                <svg class="ic ic-volume-high" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1 1 0 0 0 1 1h2.6l4.15 3.6a.6.6 0 0 0 1-.45V5.85a.6.6 0 0 0-1-.45L7.6 9H5a1 1 0 0 0-1 1z"/><path d="M15.75 9.5a3.5 3.5 0 0 1 0 5M18.25 7a7 7 0 0 1 0 10"/></svg><svg class="ic ic-volume-low" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1 1 0 0 0 1 1h2.6l4.15 3.6a.6.6 0 0 0 1-.45V5.85a.6.6 0 0 0-1-.45L7.6 9H5a1 1 0 0 0-1 1z"/><path d="M15.75 9.5a3.5 3.5 0 0 1 0 5"/></svg><svg class="ic ic-mute" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4a1 1 0 0 0 1 1h2.6l4.15 3.6a.6.6 0 0 0 1-.45V5.85a.6.6 0 0 0-1-.45L7.6 9H5a1 1 0 0 0-1 1z"/><path d="m16 10 4 4M20 10l-4 4"/></svg>
               </button>
               <div class="vol-pop">
                 <div id="volSlider" class="scrub vol-slider" role="slider" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
@@ -112,68 +169,87 @@
       </footer>
     </main>
 
+    <div id="panelLayer" class="overlay overlay-panel" hidden>
+      <div class="backdrop" data-close></div>
+      <aside id="panel" class="panel" role="dialog" aria-modal="true" aria-labelledby="panelTitle" tabindex="-1">
+        <header class="panel-head">
+          <div class="panel-heading">
+            <p class="panel-kicker">Playing from</p>
+            <h2 id="panelTitle" class="panel-title"></h2>
+          </div>
+          <button class="icon-btn" type="button" data-close aria-label="Close">
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
+          </button>
+        </header>
+        <div id="panelList" class="panel-list"></div>
+      </aside>
+    </div>
+
     <div id="library" class="overlay overlay-library" hidden>
       <div class="backdrop" data-close></div>
       <aside id="sheet" class="sheet" role="dialog" aria-modal="true" aria-label="Library" tabindex="-1">
         <header class="sheet-bar">
-          <h2 id="libTitle" class="sheet-title">Library</h2>
+          <h2 id="libTitle" class="sheet-title" hidden>Library</h2>
           <button id="libBack" class="btn btn-ghost btn-back" type="button" hidden>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            <svg class="ic ic-back" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.75 5.5 8.25 12l6.5 6.5"/></svg>
             <span class="back-label">Library</span>
           </button>
           <button class="icon-btn" type="button" data-close aria-label="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
           </button>
         </header>
+        <div id="libTabs" class="lib-tabs" role="tablist" aria-label="Library">
+          <button id="libTab-playlists" class="lib-tab" type="button" role="tab" data-tab="playlists" aria-controls="libPlaylists" aria-selected="true">Playlists</button>
+          <button id="libTab-liked" class="lib-tab" type="button" role="tab" data-tab="liked" aria-controls="libLiked" aria-selected="false" tabindex="-1" hidden>Liked Songs</button>
+          <button id="libTab-albums" class="lib-tab" type="button" role="tab" data-tab="albums" aria-controls="libAlbums" aria-selected="false" tabindex="-1" hidden>Albums</button>
+          <button id="libTab-following" class="lib-tab" type="button" role="tab" data-tab="following" aria-controls="libFollowing" aria-selected="false" tabindex="-1" hidden>Artists</button>
+          <button id="libTab-top" class="lib-tab" type="button" role="tab" data-tab="top" aria-controls="libTop" aria-selected="false" tabindex="-1" hidden>Your top</button>
+          <button id="libTab-mixes" class="lib-tab" type="button" role="tab" data-tab="mixes" aria-controls="libMixes" aria-selected="false" tabindex="-1" hidden>Mixes</button>
+        </div>
         <div id="sheetBody" class="sheet-body">
           <div id="libLevel1">
-            <button id="libLiked" class="row row-playlist row-liked" type="button" hidden>
-              <span class="art row-art liked-art"><svg class="liked-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.3S3.8 15.5 3.8 9.4A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 8.2 2.2c0 6.1-8.2 10.9-8.2 10.9z" /></svg></span>
-              <span class="row-text"><span class="row-title">Liked Songs</span><span class="row-sub"></span></span>
-            </button>
-            <section id="libTop" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Your top</h3>
-                <div id="topTabs" class="tabs" role="tablist" aria-label="Time range">
-                  <button class="tab" type="button" role="tab" data-range="short_term" aria-selected="true">4 weeks</button>
-                  <button class="tab" type="button" role="tab" data-range="medium_term" aria-selected="false">6 months</button>
-                  <button class="tab" type="button" role="tab" data-range="long_term" aria-selected="false">All time</button>
-                </div>
-              </div>
-              <p class="status" role="status" hidden></p>
-              <div id="topArtistsHead" class="group-head group-sub" hidden>
-                <h4 class="sub-title">Artists</h4>
-                <button class="see-all" type="button" data-see="topArtists" aria-label="See all your top artists" hidden>See all</button>
-              </div>
-              <div id="topArtists" class="albums"></div>
-              <div id="topTracks" class="rows"></div>
-            </section>
-            <section class="group">
-              <h3 class="group-title">Playlists</h3>
+            <div id="libAdd" class="lib-add" hidden>
+              <button id="libAddBtn" class="btn btn-ghost lib-add-btn" type="button" aria-expanded="false" aria-controls="libAddForm">
+                <svg class="ic ic-plus" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"/></svg>
+                <span>Add</span>
+              </button>
+              <form id="libAddForm" class="lib-add-form" hidden>
+                <input id="libAddInput" class="lib-add-input" type="text" placeholder="Paste a Spotify link" aria-label="Spotify link of a playlist, album or artist" autocomplete="off" spellcheck="false" />
+                <button id="libAddGo" class="btn btn-solid lib-add-go" type="submit">Add</button>
+                <button id="libAddCancel" class="btn btn-ghost" type="button">Cancel</button>
+              </form>
+              <p id="libAddMsg" class="lib-add-msg" role="status" hidden></p>
+            </div>
+            <section id="libPlaylists" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-playlists">
               <p id="listStatus" class="status" role="status" hidden></p>
               <div id="libList" class="rows"></div>
             </section>
-            <section id="libAlbums" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Albums</h3>
-                <button class="see-all" type="button" data-see="albums" aria-label="See all your albums" hidden>See all</button>
-              </div>
+            <section id="libLiked" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-liked" hidden>
+              <p class="status" role="status" hidden></p>
+              <p id="likedNote" class="detail-note" hidden></p>
+              <div id="likedRows" class="rows"></div>
+            </section>
+            <section id="libAlbums" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-albums" hidden>
               <p class="status" role="status" hidden></p>
               <div class="albums"></div>
             </section>
-            <section id="libFollowing" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Following</h3>
-                <button class="see-all" type="button" data-see="following" aria-label="See all the artists you follow" hidden>See all</button>
-              </div>
+            <section id="libFollowing" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-following" hidden>
               <p class="status" role="status" hidden></p>
               <div class="albums"></div>
             </section>
-            <section id="libMixes" class="group" hidden>
-              <div class="group-head">
-                <h3 class="group-title">Spotify mixes</h3>
-                <button class="see-all" type="button" data-see="mixes" aria-label="See all Spotify mixes" hidden>See all</button>
+            <section id="libTop" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-top" hidden>
+              <div id="topTabs" class="tabs" role="tablist" aria-label="Time range">
+                <button class="tab" type="button" role="tab" data-range="short_term" aria-selected="true">4 weeks</button>
+                <button class="tab" type="button" role="tab" data-range="medium_term" aria-selected="false">6 months</button>
+                <button class="tab" type="button" role="tab" data-range="long_term" aria-selected="false">All time</button>
               </div>
+              <p class="status" role="status" hidden></p>
+              <h4 id="topArtistsHead" class="sub-title" hidden>Artists</h4>
+              <div id="topArtists" class="albums"></div>
+              <h4 id="topTracksHead" class="sub-title" hidden>Songs</h4>
+              <div id="topTracks" class="rows"></div>
+            </section>
+            <section id="libMixes" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-mixes" hidden>
               <div class="albums"></div>
             </section>
           </div>
@@ -183,7 +259,10 @@
               <div class="detail-meta">
                 <h2 id="detailName" class="sheet-title detail-name"></h2>
                 <p id="detailSub" class="detail-sub"></p>
-                <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
+                <div class="detail-actions">
+                  <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
+                  <button id="detailSave" class="btn btn-ghost detail-save" type="button" hidden></button>
+                </div>
               </div>
             </div>
             <p id="detailNote" class="detail-note" hidden></p>
@@ -198,8 +277,8 @@
       <div class="backdrop" data-close></div>
       <div class="palette" role="dialog" aria-modal="true" aria-label="Search">
         <label class="palette-field">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.25 4.24-1.42 1.42-4.24-4.25A7.5 7.5 0 1 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z" /></svg>
-          <input id="searchInput" type="text" placeholder="Songs or albums" aria-label="Search songs or albums" autocomplete="off" spellcheck="false" />
+          <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
+          <input id="searchInput" type="text" placeholder="Songs, albums or a Spotify link" aria-label="Search songs or albums, or paste a Spotify link" autocomplete="off" spellcheck="false" />
         </label>
         <div id="searchResults" class="palette-results" hidden></div>
       </div>
@@ -209,11 +288,11 @@
       <section id="page" class="page" role="dialog" aria-modal="true" aria-labelledby="pageTitle" tabindex="-1">
         <header class="page-bar">
           <button id="pageBack" class="btn btn-ghost btn-back" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 5 16.8 6.4 11.2 12l5.6 5.6-1.4 1.4-7-7z" /></svg>
+            <svg class="ic ic-back" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M14.75 5.5 8.25 12l6.5 6.5"/></svg>
             <span class="back-label">Back</span>
           </button>
           <button class="icon-btn" type="button" data-close aria-label="Close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z" /></svg>
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
           </button>
         </header>
         <div id="pageBody" class="page-body">

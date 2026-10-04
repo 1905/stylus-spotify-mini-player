@@ -1,0 +1,166 @@
+{
+ "me": {
+  "profile": {
+   "topArtists": {
+    "__typename": "ArtistPageV2",
+    "items": [
+     {
+      "data": {
+       "__typename": "Artist",
+       "profile": {
+        "name": "Carbon Based Lifeforms"
+       },
+       "uri": "spotify:artist:38DX4hQVvPBs3PThDIAK11",
+       "visuals": {
+        "avatarImage": {
+         "sources": [
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab6761610000e5eb3ea5a8d04ae3e36c96da329a",
+           "width": 640
+          },
+          {
+           "height": 160,
+           "url": "https://i.scdn.co/image/ab6761610000f1783ea5a8d04ae3e36c96da329a",
+           "width": 160
+          },
+          {
+           "height": 320,
+           "url": "https://i.scdn.co/image/ab676161000051743ea5a8d04ae3e36c96da329a",
+           "width": 320
+          }
+         ]
+        }
+       }
+      }
+     },
+     {
+      "data": {
+       "__typename": "Artist",
+       "profile": {
+        "name": "The xx"
+       },
+       "uri": "spotify:artist:3iOvXCl6edW5Um0fXEBRXy",
+       "visuals": {
+        "avatarImage": {
+         "sources": [
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab6761610000e5eb3a96db4736ef035e1fcb2516",
+           "width": 640
+          },
+          {
+           "height": 160,
+           "url": "https://i.scdn.co/image/ab6761610000f1783a96db4736ef035e1fcb2516",
+           "width": 160
+          },
+          {
+           "height": 320,
+           "url": "https://i.scdn.co/image/ab676161000051743a96db4736ef035e1fcb2516",
+           "width": 320
+          }
+         ]
+        }
+       }
+      }
+     }
+    ],
+    "totalCount": 52
+   },
+   "topTracks": {
+    "__typename": "TrackPageV2",
+    "items": [
+     {
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e02a46d603701aa0342e8cca64e",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d00004851a46d603701aa0342e8cca64e",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b273a46d603701aa0342e8cca64e",
+           "width": 640
+          }
+         ]
+        },
+        "name": "xx",
+        "uri": "spotify:album:2av2ZSHlvD7rvLSsMvtYCG"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "The xx"
+          },
+          "uri": "spotify:artist:3iOvXCl6edW5Um0fXEBRXy"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 127920
+       },
+       "name": "Intro",
+       "saved": false,
+       "uri": "spotify:track:2usrT8QIbIk9y0NEtQwS4j"
+      }
+     },
+     {
+      "data": {
+       "__typename": "Track",
+       "albumOfTrack": {
+        "coverArt": {
+         "sources": [
+          {
+           "height": 300,
+           "url": "https://i.scdn.co/image/ab67616d00001e0293bc4fdaa80785edcb2dd92d",
+           "width": 300
+          },
+          {
+           "height": 64,
+           "url": "https://i.scdn.co/image/ab67616d0000485193bc4fdaa80785edcb2dd92d",
+           "width": 64
+          },
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab67616d0000b27393bc4fdaa80785edcb2dd92d",
+           "width": 640
+          }
+         ]
+        },
+        "name": "3:27",
+        "uri": "spotify:album:0xFMgxwYuKAzyv5bg81uN4"
+       },
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "skyfall beats"
+          },
+          "uri": "spotify:artist:6ORJGSfnPFkJFFs5wXEClO"
+         }
+        ]
+       },
+       "duration": {
+        "totalMilliseconds": 159589
+       },
+       "name": "3:27",
+       "saved": true,
+       "uri": "spotify:track:4RfeM0lbg8PPsfHeDVut2v"
+      }
+     }
+    ],
+    "totalCount": 534
+   }
+  }
+ }
+}

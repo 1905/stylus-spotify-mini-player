@@ -1,0 +1,142 @@
+{
+ "albumUnion": {
+  "__typename": "Album",
+  "artists": {
+   "items": [
+    {
+     "id": "4Z8W4fKeB5YxbusRsdQVPb",
+     "profile": {
+      "name": "Radiohead"
+     },
+     "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb",
+     "visuals": {
+      "avatarImage": {
+       "sources": [
+        {
+         "height": 640,
+         "url": "https://i.scdn.co/image/ab6761610000e5eb959527d2fabc9c64287e57b9",
+         "width": 640
+        },
+        {
+         "height": 160,
+         "url": "https://i.scdn.co/image/ab6761610000f178959527d2fabc9c64287e57b9",
+         "width": 160
+        },
+        {
+         "height": 320,
+         "url": "https://i.scdn.co/image/ab67616100005174959527d2fabc9c64287e57b9",
+         "width": 320
+        }
+       ]
+      }
+     }
+    }
+   ],
+   "totalCount": 1
+  },
+  "courtesyLine": "",
+  "coverArt": {
+   "sources": [
+    {
+     "height": 300,
+     "url": "https://i.scdn.co/image/ab67616d00001e02c8b444df094279e70d0ed856",
+     "width": 300
+    },
+    {
+     "height": 64,
+     "url": "https://i.scdn.co/image/ab67616d00004851c8b444df094279e70d0ed856",
+     "width": 64
+    },
+    {
+     "height": 640,
+     "url": "https://i.scdn.co/image/ab67616d0000b273c8b444df094279e70d0ed856",
+     "width": 640
+    }
+   ]
+  },
+  "date": {
+   "isoString": "1997-05-28T00:00:00Z",
+   "precision": "DAY"
+  },
+  "discs": {
+   "items": [
+    {
+     "number": 1,
+     "tracks": {
+      "totalCount": 12
+     }
+    }
+   ],
+   "totalCount": 1
+  },
+  "isPreRelease": false,
+  "label": "XL Recordings",
+  "name": "OK Computer",
+  "preReleaseEndDateTime": null,
+  "releases": {
+   "items": [],
+   "totalCount": 0
+  },
+  "saved": false,
+  "tracksV2": {
+   "items": [
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 287880
+      },
+      "name": "Airbag",
+      "playcount": "106409110",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 1,
+      "uri": "spotify:track:7c378mlmubSu7NGkLFa4sN"
+     },
+     "uid": "a27ee133a088cd918441"
+    },
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Radiohead"
+         },
+         "uri": "spotify:artist:4Z8W4fKeB5YxbusRsdQVPb"
+        }
+       ]
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 387213
+      },
+      "name": "Paranoid Android",
+      "playcount": "325021900",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 2,
+      "uri": "spotify:track:6LgJvl0Xdtc73RJ1mmpotq"
+     },
+     "uid": "9568fd544ad24f13dd15"
+    }
+   ],
+   "totalCount": 12
+  },
+  "type": "ALBUM",
+  "uri": "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE"
+ },
+ "meV2": {
+  "ianaTimezoneId": "Asia/Jakarta"
+ }
+}

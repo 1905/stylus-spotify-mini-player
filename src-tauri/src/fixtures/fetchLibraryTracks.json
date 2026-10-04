@@ -1,0 +1,140 @@
+{
+ "me": {
+  "library": {
+   "tracks": {
+    "__typename": "UserLibraryTrackPage",
+    "items": [
+     {
+      "__typename": "UserLibraryTrackResponse",
+      "addedAt": {
+       "isoString": "2026-10-02T15:16:08Z"
+      },
+      "track": {
+       "_uri": "spotify:track:3jPrWXnA9EXrMn4qAX68uf",
+       "data": {
+        "__typename": "Track",
+        "albumOfTrack": {
+         "artists": {
+          "items": [
+           {
+            "profile": {
+             "name": "Shlohmo"
+            },
+            "uri": "spotify:artist:6y80I9YZi4DOpbaSUlL725"
+           }
+          ]
+         },
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e02ff9408960a3ca1db6aa2791c",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d00004851ff9408960a3ca1db6aa2791c",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b273ff9408960a3ca1db6aa2791c",
+            "width": 640
+           }
+          ]
+         },
+         "name": "Dark Red",
+         "uri": "spotify:album:0YXO93VbnFFXMf6R5gf729"
+        },
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Shlohmo"
+           },
+           "uri": "spotify:artist:6y80I9YZi4DOpbaSUlL725"
+          }
+         ]
+        },
+        "discNumber": 1,
+        "duration": {
+         "totalMilliseconds": 286013
+        },
+        "mediaType": "AUDIO",
+        "name": "Ten Days of Falling",
+        "trackNumber": 1
+       }
+      }
+     },
+     {
+      "__typename": "UserLibraryTrackResponse",
+      "addedAt": {
+       "isoString": "2026-10-02T14:30:44Z"
+      },
+      "track": {
+       "_uri": "spotify:track:6r9tm1J5LHNpj8e79P2bhX",
+       "data": {
+        "__typename": "Track",
+        "albumOfTrack": {
+         "artists": {
+          "items": [
+           {
+            "profile": {
+             "name": "Shlohmo"
+            },
+            "uri": "spotify:artist:6y80I9YZi4DOpbaSUlL725"
+           }
+          ]
+         },
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e0209b5089ce7af3c7024685288",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d0000485109b5089ce7af3c7024685288",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b27309b5089ce7af3c7024685288",
+            "width": 640
+           }
+          ]
+         },
+         "name": "The End",
+         "uri": "spotify:album:0no9vd20lVRbHZooRhqUHb"
+        },
+        "artists": {
+         "items": [
+          {
+           "profile": {
+            "name": "Shlohmo"
+           },
+           "uri": "spotify:artist:6y80I9YZi4DOpbaSUlL725"
+          }
+         ]
+        },
+        "discNumber": 1,
+        "duration": {
+         "totalMilliseconds": 260017
+        },
+        "mediaType": "AUDIO",
+        "name": "Eating Away",
+        "trackNumber": 4
+       }
+      }
+     }
+    ],
+    "pagingInfo": {
+     "limit": 5,
+     "offset": 0
+    },
+    "totalCount": 137
+   }
+  }
+ }
+}

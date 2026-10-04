@@ -1,18 +1,19 @@
 [package]
-name = "rust-spotify"
+name = "stylus"
 version = "0.1.0"
-description = "Spotify profile and playlists"
+description = "Stylus — a small Spotify player"
 edition = "2021"
 
 [lib]
-name = "rust_spotify_lib"
+name = "stylus_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon: the menu-bar mini player (tray.rs); macos-private-api: its transparent, rounded window
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -24,18 +25,47 @@ rand = "0.8"
 dirs = "5"
 # parallel list paging (StreamExt::buffered); already in the tree via tokio/reqwest
 futures-util = "0.3"
-# The in-app Connect speaker "The Run" (plans/2026-10-02-standalone). Not librespot-oauth:
+# The in-app Connect speaker "This Mac" (plans/2026-10-02-standalone). Not librespot-oauth:
 # its listener blocks with no deadline, so the player login reuses auth.rs (oauth_login).
 librespot-core = "0.8.0"
 librespot-playback = { version = "0.8.0", features = ["rodio-backend"] }
 librespot-connect = "0.8.0"
+# track names, artists and covers for the in-app player's now-playing (nowplaying.rs): no Web API
+librespot-metadata = "0.8.0"
 # only for AuthenticationType: the session hands back its reusable login as raw fields
 librespot-protocol = "0.8.0"
+# librespot-protocol's message types (playlist4, extended metadata) need its protobuf runtime
+protobuf = "3.7"
 # OS media keys + Now Playing (MPRemoteCommandCenter / MPNowPlayingInfoCenter on macOS)
 souvlaki = "0.8.3"
+# the app log file (applog.rs); already in the tree via librespot
+log = "0.4"
+# the player's output stage (audio_out.rs): the rodio version librespot-playback 0.8.0 uses
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+# the local MCP server (mcp.rs): streamable HTTP on 127.0.0.1, axum underneath
+rmcp = { version = "3.5.0", features = ["server", "macros", "transport-streamable-http-server"] }
+axum = "0.8"
+# constant-time compare of the MCP bearer key
+subtle = "2"
+# the MCP server's stop signal (CancellationToken); already in the tree via tokio/rmcp
+tokio-util = "0.7"
+
+# Dock icon = album art (dock.rs); the objc2 versions tauri already pulls in
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSGeometry", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSApplication", "NSResponder", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphics", "NSGraphicsContext", "NSBezierPath", "NSPasteboard"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Mac disk is small and debug info is most of target/debug (24 GB before this): line tables keep
+# panic backtraces readable at a fraction of the size
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
 
 # Size over speed: the app is a thin remote, its hot path is waiting on HTTP.
 [profile.release]

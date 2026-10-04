@@ -1,30 +1,40 @@
-//! The app's own Spotify Connect speaker "The Run" (librespot): Session + Player +
+//! The app's own Spotify Connect speaker "This Mac" (librespot): Session + Player +
 //! SoftMixer + Spirc, kept alive by a reconnect loop. The UI controls other devices
-//! through the Web API (spotify.rs). For "The Run" it can also call the `local_*`
+//! through the Web API (spotify.rs). For "This Mac" it can also call the `local_*`
 //! commands, which drive Spirc directly with no Web API round trip.
 //!
 //! The player needs its own login: Spotify's keymaster client id, not the app's
 //! (the app's token logs librespot in, but every audio fetch fails, P0 spike).
 //! librespot's reusable credentials live in the credentials file. They are never logged.
+//!
+//! The playback session (what plays here, where, at what volume) is kept by session.rs:
+//! fed from `local_load`, the player's events and Connect cluster updates, loaded back
+//! (paused) on the first ready of each launch.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use librespot_connect::{ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack, Spirc};
+use futures_util::StreamExt;
+use librespot_core::dealer::{manager::BoxedStreamResult, protocol::Message};
 use librespot_core::{authentication::Credentials, config::DeviceType, error::ErrorKind, Session, SessionConfig};
 use librespot_playback::{
-    audio_backend,
-    config::{AudioFormat, PlayerConfig},
-    mixer::{softmixer::SoftMixer, Mixer, MixerConfig},
+    config::PlayerConfig,
+    mixer::{softmixer::SoftMixer, Mixer, MixerConfig, NoOpVolume},
     player::Player,
 };
 use librespot_protocol::authentication::AuthenticationType;
-use serde::Serialize;
+use librespot_protocol::connect::ClusterUpdate;
+use serde::{Deserialize, Serialize};
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter, State as Managed};
 use tokio::sync::watch;
 
-pub const DEVICE_NAME: &str = "The Run";
+use crate::nowplaying::{self, lock, volume_from_percent, Now, NowPlaying};
+use crate::session::{self, Repeat, Source, Tracker};
+
+/// The Connect device name other Spotify clients show. Renaming keeps the device id.
+pub const DEVICE_NAME: &str = "This Mac";
 /// librespot's default client id. Only its logins may fetch audio.
 const KEYMASTER_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
 /// The player login's redirect is `http://127.0.0.1:5588/login`, as in librespot's binary.
@@ -257,10 +267,20 @@ struct Inner {
     login_busy: AtomicBool,
     /// The persisted Connect device id, read (or created) on the first run.
     device_id: OnceLock<String>,
+    /// The playback session (session.rs).
+    session: Arc<Tracker>,
+    /// The saved session is loaded back on the first ready of the process only.
+    restore_tried: AtomicBool,
+    /// What plays here, for the UI (`player-state` events, nowplaying.rs).
+    now: Arc<NowPlaying>,
+    /// The volume set while This Mac was inactive, for its next load (`PendingVolume`).
+    pending_volume: Mutex<PendingVolume>,
 }
 
 impl Engine {
     pub fn new(store: Arc<dyn CredStore>) -> Self {
+        let session = Arc::new(Tracker::new(session::default_path()));
+        let now = Arc::new(NowPlaying::new(session.clone()));
         Engine(Arc::new(Inner {
             state: watch::Sender::new(State::Starting),
             generation: AtomicU64::new(0),
@@ -270,11 +290,16 @@ impl Engine {
             task: tokio::sync::Mutex::new(None),
             login_busy: AtomicBool::new(false),
             device_id: OnceLock::new(),
+            session,
+            restore_tried: AtomicBool::new(false),
+            now,
+            pending_volume: Mutex::new(PendingVolume::default()),
         }))
     }
 
     /// Where `engine-status` events go. Set once, in `setup`.
     pub fn attach(&self, app: AppHandle) {
+        self.0.now.attach(app.clone());
         let _ = self.0.app.set(app);
     }
 
@@ -289,6 +314,35 @@ impl Engine {
     /// The persisted device id; reads or creates the file on the first call.
     fn device_id(&self) -> String {
         self.0.device_id.get_or_init(|| load_or_create_device_id(&device_id_path())).clone()
+    }
+
+    /// The player's session while the engine is ready and the session alive: internal.rs
+    /// calls Spotify's internal endpoints with its tokens. None otherwise.
+    pub fn live_session(&self) -> Option<Session> {
+        if self.state() != State::Ready {
+            return None;
+        }
+        self.0.now.session().filter(|s| !s.is_invalid())
+    }
+
+    /// What Spotify Connect looks like from here while ready: the latest cluster, this Mac's
+    /// device id and its volume %. None before the first cluster update of the session.
+    pub fn connect_view(&self) -> Option<(Arc<librespot_protocol::connect::Cluster>, String, u8)> {
+        let session = self.live_session()?;
+        let cluster = self.0.now.cluster()?;
+        Some((cluster, session.device_id().to_string(), self.volume_percent()))
+    }
+
+    /// What plays here, from the player's own events (nowplaying.rs).
+    pub fn now_playing(&self) -> Arc<NowPlaying> {
+        self.0.now.clone()
+    }
+
+    /// This Mac's volume, 0–100 %: the level waiting for the next load while inactive
+    /// (`PendingVolume`), else the player's.
+    pub fn volume_percent(&self) -> u8 {
+        let active = self.0.now.engine_active();
+        lock(&self.0.pending_volume).read(active, self.0.now.volume_percent())
     }
 
     /// Runs `f` on the current Spirc. Err `ENGINE_NOT_READY` when the engine isn't
@@ -320,6 +374,9 @@ impl Engine {
         if changed {
             if let Some(app) = self.0.app.get() {
                 let _ = app.emit("engine-status", self.status(&now));
+            }
+            if now != State::Ready {
+                self.0.now.set_inactive();
             }
         }
         now
@@ -375,7 +432,9 @@ impl Engine {
 
     /// On app exit: stop Spirc and give it up to 2s to disconnect. Not async: called
     /// from the event loop's Exit, outside the async runtime.
+    /// The session's position is written first, synchronously.
     pub fn shutdown(&self) {
+        self.0.session.save_and_close();
         self.retire();
         tauri::async_runtime::block_on(async {
             if let Some(mut task) = self.0.task.lock().await.take() {
@@ -403,11 +462,12 @@ impl Engine {
     }
 }
 
-fn connect_config() -> ConnectConfig {
+/// `initial_volume`: the session's volume, so launches and reconnects keep it.
+fn connect_config(initial_volume: u16) -> ConnectConfig {
     ConnectConfig {
         name: DEVICE_NAME.into(),
         device_type: DeviceType::Computer,
-        initial_volume: u16::MAX / 2,
+        initial_volume,
         ..ConnectConfig::default()
     }
 }
@@ -453,18 +513,29 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
             return;
         }
     };
-    let Some(backend) = audio_backend::find(None) else {
-        engine.apply(generation, Event::Fatal("no audio output".into()));
-        return;
-    };
+    let bitrate = tokio::task::spawn_blocking(|| crate::settings::load().bitrate).await.unwrap_or(crate::settings::DEFAULT_BITRATE);
+    let player_config = PlayerConfig { bitrate: crate::settings::librespot_bitrate(bitrate), ..PlayerConfig::default() };
     let mut session = Session::new(session_config.clone(), None);
-    let player = Player::new(PlayerConfig::default(), session.clone(), mixer.get_soft_volume(), move || {
-        backend(None, AudioFormat::default())
+    // volume is applied by the output stage at playback time (audio_out.rs), not at decode time
+    let sink_mixer = mixer.clone();
+    let player = Player::new(player_config, session.clone(), Box::new(NoOpVolume), move || {
+        Box::new(crate::audio_out::RampSink::new(sink_mixer))
     });
+    // the session follows the player; the listener ends with the player (its channel closes)
+    let tracker = engine.0.session.clone();
+    if let Some(account) = creds.username.as_deref() {
+        // stored credentials name the account: its saved volume is the first Spirc's volume
+        let (t, account) = (tracker.clone(), account.to_string());
+        let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
+    }
+    tauri::async_runtime::spawn(session::listen(tracker.clone(), player.get_player_event_channel()));
+    let now_playing = engine.0.now.clone();
+    now_playing.set_volume(tracker.volume());
+    tauri::async_runtime::spawn(nowplaying::listen(now_playing.clone(), player.get_player_event_channel()));
 
     let mut attempt = 0;
     loop {
-        let connect = Spirc::new(connect_config(), session.clone(), creds.clone(), player.clone(), mixer.clone());
+        let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
         let connected = tokio::time::timeout(CONNECT_TIMEOUT, connect)
             .await
@@ -489,19 +560,37 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     return;
                 }
                 let up_since = Instant::now();
+                now_playing.set_session(session.clone());
                 creds = keep_reusable(&engine, &session, creds).await;
                 let player_user = session.username();
-                let event = Event::Connected { player: player_user, app: app_user.clone() };
-                if let State::AccountMismatch(_) = engine.apply(generation, event) {
-                    engine.stop_spirc();
-                    spirc_task.await;
-                    return;
+                {
+                    let (t, account) = (tracker.clone(), player_user.clone());
+                    let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
                 }
+                let event = Event::Connected { player: player_user, app: app_user.clone() };
+                match engine.apply(generation, event) {
+                    State::AccountMismatch(_) => {
+                        engine.stop_spirc();
+                        spirc_task.await;
+                        return;
+                    }
+                    State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
+                        tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string()));
+                    }
+                    _ => {}
+                }
+                let mut cluster = cluster_updates(&session);
                 tokio::pin!(spirc_task);
                 // the Spirc task ends on shutdown or session loss; a dead player thread is fatal
                 loop {
                     tokio::select! {
                         _ = &mut spirc_task => break,
+                        Some(update) = cluster.next() => {
+                            if let Ok(update) = update {
+                                follow_cluster(&tracker, &update, session.device_id());
+                                now_playing.on_cluster(&update, session.device_id());
+                            }
+                        }
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {
                             if player.is_invalid() {
                                 engine.apply(generation, Event::Fatal("the audio player stopped".into()));
@@ -551,6 +640,102 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     }
 }
 
+/// Connect cluster updates (the account's devices and the active one's player state).
+/// Spirc listens too; the dealer hands each update to every listener.
+fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
+    match session.dealer().listen_for("hm://connect-state/v1/cluster", Message::from_raw::<ClusterUpdate>) {
+        Ok(stream) => stream,
+        Err(e) => {
+            log::warn!(target: "stylus::session", "no cluster updates, loads by other clients keep their first track only: {e}");
+            Box::pin(futures_util::stream::pending())
+        }
+    }
+}
+
+/// A cluster update while this Mac plays: tells the session which context another client loaded.
+fn follow_cluster(tracker: &Tracker, update: &ClusterUpdate, device_id: &str) {
+    let cluster = &update.cluster;
+    if cluster.active_device_id != device_id {
+        return;
+    }
+    let state = &cluster.player_state;
+    let o = &state.options;
+    tracker.on_cluster(&state.context_uri, &state.track.uri, o.shuffling_context, Repeat::from_flags(o.repeating_context, o.repeating_track));
+}
+
+/// Loads the saved session back, paused, on the first ready of the launch. Skipped when
+/// there is none, when this player already has a track, or when another device is playing.
+async fn restore(engine: Engine, device_id: String) {
+    const LOG: &str = "stylus::session";
+    let tracker = engine.0.session.clone();
+    let Some(saved) = tracker.current() else {
+        log::info!(target: LOG, "restore skipped: no saved session for this account");
+        return;
+    };
+    if tracker.has_track() {
+        log::info!(target: LOG, "restore skipped: the player already has a track");
+        return;
+    }
+    // another device playing must not be interrupted. Spotify's own device state (the Connect
+    // cluster) answers first: it works while the Web API is rate-limited, and the first update
+    // arrives within seconds of connecting. Without an answer from either, don't restore.
+    let mut cluster = None;
+    for _ in 0..12 {
+        cluster = engine.0.now.cluster();
+        if cluster.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    if let Some(c) = cluster {
+        let state = &c.player_state;
+        if !c.active_device_id.is_empty() && c.active_device_id != device_id && state.is_playing && !state.is_paused {
+            log::info!(target: LOG, "restore skipped: another device is playing (Connect state)");
+            return;
+        }
+    } else {
+        match crate::spotify::get("/me/player").await {
+            Ok(p) if p["is_playing"].as_bool() == Some(true) && p["device"]["id"].as_str() != Some(device_id.as_str()) => {
+                let name = p["device"]["name"].as_str().unwrap_or("another device");
+                log::info!(target: LOG, "restore skipped: {name} is playing");
+                return;
+            }
+            Ok(_) => {}
+            Err(e) => {
+                log::info!(target: LOG, "restore skipped: can't tell whether another device is playing ({e})");
+                return;
+            }
+        }
+    }
+    if tracker.has_track() {
+        log::info!(target: LOG, "restore skipped: the player got a track meanwhile");
+        return;
+    }
+    let source = match saved.source.clone() {
+        Some(Source::Context { context_uri }) => LoadSource::Context(context_uri),
+        Some(Source::Uris { uris }) => LoadSource::Tracks(uris),
+        None => return,
+    };
+    let modes = Modes { shuffle: saved.shuffle, repeat: saved.repeat == Repeat::Context, repeat_track: saved.repeat == Repeat::Track };
+    let request = load_request(source, saved.track_uri.clone(), saved.position_ms, false, modes);
+    let volume = saved.volume;
+    // Spirc ignores everything while inactive: activate first, then volume and load, in order
+    let sent = engine.with_spirc(|s| {
+        s.activate()?;
+        s.set_volume(volume)?;
+        s.load(request)
+    });
+    match sent {
+        Ok(()) => {
+            log::info!(target: LOG, "restored {}", session::describe(&saved));
+            if let Some(app) = engine.0.app.get() {
+                let _ = app.emit("session-restored", saved.payload());
+            }
+        }
+        Err(e) => log::warn!(target: LOG, "restore failed: {e}"),
+    }
+}
+
 /// The reusable credentials a connected session got back from Spotify. After the
 /// player login these replace the short-lived OAuth token, and they are stored.
 /// librespot's own cache keeps exactly these fields; the type is always "stored
@@ -575,7 +760,7 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
 
 // ---- commands --------------------------------------------------------------
 
-/// `{state, name: "The Run", reason?, device_id}`; `device_id` is null until ready.
+/// `{state, name: "This Mac", reason?, device_id}`; `device_id` is null until ready.
 #[tauri::command]
 pub fn engine_status(engine: Managed<'_, Engine>) -> Status {
     engine.status(&engine.state())
@@ -606,15 +791,40 @@ pub async fn engine_restart(engine: Managed<'_, Engine>) -> Result<(), String> {
     Ok(())
 }
 
+/// The stream quality in kbps: 96, 160 or 320.
+#[tauri::command]
+pub fn engine_get_quality() -> u16 {
+    crate::settings::load().bitrate
+}
+
+/// Stores the stream quality (96, 160 or 320 kbps) and restarts the engine with it.
+/// Returns once the restart has begun; the UI waits for `engine-status` ready.
+#[tauri::command]
+pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Result<(), String> {
+    if !crate::settings::BITRATES.contains(&kbps) {
+        return Err(format!("BAD_ARGS: quality must be 96, 160 or 320 kbps, got {kbps}"));
+    }
+    let saved = tokio::task::spawn_blocking(move || {
+        crate::settings::update(|s| std::mem::replace(&mut s.bitrate, kbps)).map(|(old, _)| old)
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r);
+    match saved {
+        Ok(old) => log::info!("quality {old} → {kbps} kbps, restarting the engine"),
+        Err(e) => {
+            log::warn!("quality {kbps} kbps not saved: {e}");
+            return Err(e);
+        }
+    }
+    engine.restart(None).await;
+    Ok(())
+}
+
 // ---- local transport (Spirc, no Web API) -----------------------------------
 
 /// Most tracks one `local_load` takes.
 const MAX_LOAD_URIS: usize = 200;
-
-/// 0–100 % → Spirc's 0–65535, rounded. Above 100 counts as 100.
-fn volume_from_percent(percent: u8) -> u16 {
-    ((u32::from(percent.min(100)) * 65535 + 50) / 100) as u16
-}
 
 #[derive(Debug)]
 enum LoadSource {
@@ -665,56 +875,269 @@ fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32,
     }
 }
 
+/// What `Engine::load` loads: a context or a track list (exactly one), from `track_uri` (None:
+/// the first) at `position_ms`, playing or paused. `shuffle`/`repeat` ("off" | "context" |
+/// "track") are kept across the load. The UI's `local_load` sends it camelCase.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadSpec {
+    pub context_uri: Option<String>,
+    pub uris: Option<Vec<String>>,
+    pub track_uri: Option<String>,
+    #[serde(default)]
+    pub position_ms: u32,
+    #[serde(default)]
+    pub play: bool,
+    pub shuffle: Option<bool>,
+    pub repeat: Option<String>,
+}
+
+/// This Mac's volume as last set while it was inactive. Spirc ignores volume then, and takes
+/// its old level back when it activates: the level waits here, reads report it, and the next
+/// load here sends it.
+#[derive(Debug, Default, PartialEq)]
+pub struct PendingVolume(Option<u8>);
+
+impl PendingVolume {
+    /// Sets `percent`: true when it goes to Spirc now (This Mac active), false when it waits.
+    pub fn set(&mut self, active: bool, percent: u8) -> bool {
+        self.0 = (!active).then_some(percent);
+        active
+    }
+
+    /// The level to report: the waiting one while inactive, else the player's (`live`).
+    pub fn read(&mut self, active: bool, live: u8) -> u8 {
+        if active {
+            // activated some other way (the UI, a phone): the player's level counts
+            self.0 = None;
+            return live;
+        }
+        self.0.unwrap_or(live)
+    }
+
+    pub fn take(&mut self) -> Option<u8> {
+        self.0.take()
+    }
+}
+
+pub const NOTHING_AFTER: &str = "Nothing after this track: next would stop playback";
+pub const NOTHING_BEFORE: &str = "Nothing before this track: previous would stop playback";
+
+/// Under this position `previous` goes to the track before, at or over it restarts the track:
+/// librespot's own threshold (Spirc handle_prev, 3 s). Lower would let a paused press stop playback.
+const PREV_RESTARTS_AFTER_MS: u32 = 3_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Skip {
+    Next,
+    Previous,
+}
+
+/// Why a next/previous on This Mac would only stop playback (Spirc stops when there is no track
+/// to go to), None when it may go. Only when the cluster's up-next is known for this track and
+/// repeat is off; anything uncertain goes through.
+pub fn skip_blocked(skip: Skip, n: &Now, now: Instant) -> Option<&'static str> {
+    if !n.skips_fresh || n.repeat != Repeat::Off {
+        return None;
+    }
+    match skip {
+        Skip::Next if n.next.as_ref().is_some_and(Vec::is_empty) => Some(NOTHING_AFTER),
+        Skip::Previous if n.prev == Some(false) && n.position(now) < PREV_RESTARTS_AFTER_MS => Some(NOTHING_BEFORE),
+        _ => None,
+    }
+}
+
+/// A local command's result, logged (an error as a warning).
+fn logged(what: &str, r: Result<(), String>) -> Result<(), String> {
+    match &r {
+        Ok(()) => log::info!(target: "stylus::cmd", "{what}"),
+        Err(e) => log::warn!(target: "stylus::cmd", "{what} failed: {e}"),
+    }
+    r
+}
+
+/// The in-app player's transport, for the UI's `local_*` commands and for control.rs (MCP).
+/// Each queues a Spirc command: Err `ENGINE_NOT_READY` when the engine isn't ready.
+impl Engine {
+    /// True while the engine is ready (Spirc running, session up).
+    pub fn is_ready(&self) -> bool {
+        self.state() == State::Ready
+    }
+
+    pub fn play(&self) -> Result<(), String> {
+        logged("play", self.with_spirc(Spirc::play))
+    }
+
+    pub fn pause(&self) -> Result<(), String> {
+        logged("pause", self.with_spirc(Spirc::pause))
+    }
+
+    /// Err `NOTHING_AFTER` when next would only stop playback (`skip_blocked`).
+    pub fn next(&self) -> Result<(), String> {
+        self.may_skip(Skip::Next)?;
+        crate::audio_out::flush();
+        logged("next", self.with_spirc(Spirc::next))
+    }
+
+    /// Err `NOTHING_BEFORE` when previous would only stop playback (`skip_blocked`).
+    pub fn prev(&self) -> Result<(), String> {
+        self.may_skip(Skip::Previous)?;
+        crate::audio_out::flush();
+        logged("prev", self.with_spirc(Spirc::prev))
+    }
+
+    fn may_skip(&self, skip: Skip) -> Result<(), String> {
+        let n = self.0.now.now();
+        match skip_blocked(skip, &n, Instant::now()).filter(|_| n.engine_active) {
+            Some(why) => Err(why.into()),
+            None => Ok(()),
+        }
+    }
+
+    pub fn seek(&self, position_ms: u32) -> Result<(), String> {
+        crate::audio_out::flush();
+        logged(&format!("seek {position_ms}"), self.with_spirc(|s| s.set_position_ms(position_ms)))
+    }
+
+    /// `percent` 0–100. True: sent to Spirc now; false: This Mac is inactive, so the level waits
+    /// for its next load (`PendingVolume`).
+    pub fn set_volume(&self, percent: u8) -> Result<bool, String> {
+        let percent = percent.min(100);
+        if !lock(&self.0.pending_volume).set(self.0.now.engine_active(), percent) {
+            log::info!(target: "stylus::cmd", "volume {percent} waits for the next load here");
+            return Ok(false);
+        }
+        logged(&format!("volume {percent}"), self.with_spirc(|s| s.set_volume(volume_from_percent(percent))))?;
+        // the player's VolumeChanged follows in a moment: reads right after see the level already
+        self.0.now.set_volume(volume_from_percent(percent));
+        Ok(true)
+    }
+
+    pub fn set_shuffle(&self, on: bool) -> Result<(), String> {
+        logged(&format!("shuffle {on}"), self.with_spirc(|s| s.shuffle(on)))
+    }
+
+    /// `mode` is "off", "context" or "track".
+    pub fn set_repeat(&self, mode: &str) -> Result<(), String> {
+        let (context, track) = match mode {
+            "off" => (false, false),
+            "context" => (true, false),
+            "track" => (true, true),
+            _ => return Err(format!("BAD_ARGS: bad repeat mode: {mode}")),
+        };
+        logged(&format!("repeat {mode}"), self.with_spirc(|s| {
+            s.repeat(context)?;
+            s.repeat_track(track)
+        }))
+    }
+
+    /// What plays here now (the `player-state` payload), None before the player's first event.
+    pub fn now_state(&self) -> Option<serde_json::Value> {
+        self.0.now.snapshot()
+    }
+
+    /// Loads a context or a track list here. Activates the device first: Spirc ignores every
+    /// command, Load included, while inactive. Then the volume set while inactive, if any.
+    /// Ok only means queued.
+    pub fn load(&self, spec: LoadSpec) -> Result<(), String> {
+        let LoadSpec { context_uri, uris, track_uri, position_ms, play, shuffle, repeat } = spec;
+        let source = load_source(context_uri, uris)?;
+        let m = modes(shuffle, repeat);
+        let saved = match &source {
+            LoadSource::Context(c) => Source::Context { context_uri: c.clone() },
+            LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
+        };
+        log::info!(target: "stylus::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
+        let request = load_request(source, track_uri.clone(), position_ms, play, m);
+        crate::audio_out::flush();
+        self.with_spirc(|s| {
+            s.activate()?;
+            s.load(request)
+        })?;
+        self.0.session.loaded(saved, track_uri, position_ms, m.shuffle, Repeat::from_flags(m.repeat, m.repeat_track));
+        let pending = lock(&self.0.pending_volume).take();
+        if let Some(p) = pending {
+            // best effort: the load went through, a lost level isn't worth failing it
+            let _ = logged(&format!("pending volume {p}"), self.with_spirc(|s| s.set_volume(volume_from_percent(p))));
+        }
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub fn local_play(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::play)
+    engine.play()
 }
 
 #[tauri::command]
 pub fn local_pause(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::pause)
+    engine.pause()
 }
 
 #[tauri::command]
 pub fn local_next(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::next)
+    engine.next()
 }
 
 #[tauri::command]
 pub fn local_prev(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.with_spirc(Spirc::prev)
+    engine.prev()
 }
 
 #[tauri::command]
 pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), String> {
-    engine.with_spirc(|s| s.set_position_ms(position_ms))
+    engine.seek(position_ms)
 }
 
 /// `percent` 0–100.
 #[tauri::command]
 pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), String> {
-    engine.with_spirc(|s| s.set_volume(volume_from_percent(percent)))
+    engine.set_volume(percent).map(|_| ())
 }
 
-/// Loads a context or a track list on The Run. Activates the device first: Spirc
-/// ignores every command, Load included, while inactive. Both go down the same
-/// ordered channel. Ok only means queued; the UI confirms the track from the poll.
 #[tauri::command]
-pub fn local_load(
-    engine: Managed<'_, Engine>,
-    context_uri: Option<String>,
-    uris: Option<Vec<String>>,
-    track_uri: Option<String>,
-    position_ms: u32,
-    play: bool,
-    shuffle: Option<bool>,
-    repeat: Option<String>,
-) -> Result<(), String> {
-    let request = load_request(load_source(context_uri, uris)?, track_uri, position_ms, play, modes(shuffle, repeat));
-    engine.with_spirc(|s| {
-        s.activate()?;
-        s.load(request)
+pub fn local_shuffle(engine: Managed<'_, Engine>, on: bool) -> Result<(), String> {
+    engine.set_shuffle(on)
+}
+
+/// `mode` is "off", "context" or "track".
+#[tauri::command]
+pub fn local_repeat(engine: Managed<'_, Engine>, mode: String) -> Result<(), String> {
+    engine.set_repeat(&mode)
+}
+
+/// What plays on this Mac now, from librespot: the latest `player-state` payload (see
+/// nowplaying.rs), for the UI's first paint. Null before the player's first event.
+#[tauri::command]
+pub fn local_state(engine: Managed<'_, Engine>) -> Option<serde_json::Value> {
+    engine.now_state()
+}
+
+/// Loads a context or a track list on this Mac's speaker (`Engine::load`). Ok only means
+/// queued; the UI confirms the track from the player-state events.
+#[tauri::command]
+pub fn local_load(engine: Managed<'_, Engine>, spec: LoadSpec) -> Result<(), String> {
+    engine.load(spec)
+}
+
+/// The saved playback session of the player's account, for the UI to show before its first
+/// poll: `{contextUri, uris, trackUri, positionMs, shuffle, repeat, volume}` (one of
+/// contextUri/uris is null; volume 0–65535). Null when there is none.
+#[tauri::command]
+pub async fn session_get(engine: Managed<'_, Engine>) -> Result<Option<serde_json::Value>, String> {
+    let engine = engine.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let tracker = &engine.0.session;
+        if tracker.account().is_none() {
+            // before the engine connects: the account of the stored player login
+            if let Some(account) = engine.0.store.load().and_then(|c| c.username) {
+                tracker.use_account(&account);
+            }
+        }
+        tracker.current().map(|s| s.payload())
     })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -830,11 +1253,12 @@ mod tests {
     }
 
     #[test]
-    fn device_is_the_run_at_half_volume() {
-        let c = connect_config();
-        assert_eq!(c.name, "The Run");
+    fn device_is_this_mac_at_half_volume() {
+        let c = connect_config(session::DEFAULT_VOLUME);
+        assert_eq!(c.name, "This Mac");
         assert_eq!(c.device_type, DeviceType::Computer);
         assert_eq!(c.initial_volume, u16::MAX / 2);
+        assert_eq!(connect_config(40_000).initial_volume, 40_000);
         assert!(!c.disable_volume);
     }
 
@@ -861,11 +1285,11 @@ mod tests {
     #[test]
     fn status_payload() {
         let v = serde_json::to_value(Status::new(&Ready, Some("dev-1"))).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "ready", "name": "The Run", "device_id": "dev-1"}));
+        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1"}));
         let v = serde_json::to_value(Status::new(&Failed("Premium required".into()), Some("dev-1"))).unwrap();
         assert_eq!(
             v,
-            serde_json::json!({"state": "failed", "name": "The Run", "reason": "Premium required", "device_id": null})
+            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null})
         );
         let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting, AccountMismatch("m".into())]
             .iter()
@@ -885,7 +1309,7 @@ mod tests {
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("rust-spotify-test-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stylus-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("player-device-id")
     }
@@ -922,15 +1346,6 @@ mod tests {
             && s.chars().all(|c| c == '-' || c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
             && parts[2].starts_with('4')
             && matches!(parts[3].chars().next(), Some('8' | '9' | 'a' | 'b'))
-    }
-
-    #[test]
-    fn volume_percent_to_u16() {
-        assert_eq!(volume_from_percent(0), 0);
-        assert_eq!(volume_from_percent(50), 32768);
-        assert_eq!(volume_from_percent(100), 65535);
-        assert_eq!(volume_from_percent(1), 655);
-        assert_eq!(volume_from_percent(255), 65535);
     }
 
     fn uris(n: usize) -> Vec<String> {
@@ -976,6 +1391,77 @@ mod tests {
         assert!(dbg.contains("shuffle: true") && dbg.contains("repeat: true") && dbg.contains("repeat_track: false"), "{dbg}");
         let m = modes(None, Some("track".into()));
         assert!(!m.shuffle && !m.repeat && m.repeat_track);
+    }
+
+    #[test]
+    fn volume_set_while_inactive_waits_for_the_load() {
+        // the observed bug: set_volume 35 while inactive was dropped by Spirc; the read said 73
+        let mut p = PendingVolume::default();
+        assert!(!p.set(false, 35), "inactive: not sent now");
+        assert_eq!(p.read(false, 73), 35, "reads report the level set");
+        assert_eq!(p.read(false, 73) as i64 + 10, 45, "volume_step +10 starts from it");
+        assert_eq!(p.take(), Some(35), "the load sends it");
+        assert_eq!(p.read(false, 73), 73);
+        // active: straight to Spirc, nothing waits
+        assert!(p.set(true, 30));
+        assert_eq!(p.read(true, 30), 30);
+        // activated some other way: the player's level counts, the old one is dropped
+        p.set(false, 20);
+        assert_eq!(p.read(true, 60), 60);
+        assert_eq!(p.take(), None);
+    }
+
+    #[test]
+    fn inactive_engine_volume_waits_for_the_load() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        assert_eq!(engine.set_volume(35), Ok(false), "not the active device: queued, no Spirc needed");
+        assert_eq!(engine.volume_percent(), 35);
+        assert!(engine.load(LoadSpec::default()).unwrap_err().starts_with("BAD_ARGS"));
+        assert_eq!(engine.volume_percent(), 35, "a refused load keeps it waiting");
+    }
+
+    #[test]
+    fn next_and_previous_refuse_only_when_they_would_stop() {
+        let t0 = Instant::now();
+        let at = |next: Option<Vec<&str>>, prev: Option<bool>, fresh: bool, pos: u32| {
+            let mut n = Now::new(t0);
+            n.track_uri = Some("spotify:track:kerala".into());
+            n.next = next.map(|l| l.into_iter().map(String::from).collect());
+            n.prev = prev;
+            n.skips_fresh = fresh;
+            n.position_ms = pos;
+            n
+        };
+        // the observed bug: Kerala played on its own (uris:[track]), next stopped it silently
+        assert_eq!(skip_blocked(Skip::Next, &at(Some(vec![]), Some(false), true, 6_000), t0), Some(NOTHING_AFTER));
+        assert_eq!(skip_blocked(Skip::Next, &at(Some(vec!["spotify:track:b"]), Some(false), true, 6_000), t0), None);
+        // up-next not known, or from before this track loaded: Spirc decides
+        assert_eq!(skip_blocked(Skip::Next, &at(None, None, true, 6_000), t0), None);
+        assert_eq!(skip_blocked(Skip::Next, &at(Some(vec![]), Some(false), false, 6_000), t0), None);
+        // repeat on: Spirc wraps or repeats
+        let mut rep = at(Some(vec![]), Some(false), true, 0);
+        rep.repeat = Repeat::Context;
+        assert_eq!(skip_blocked(Skip::Next, &rep, t0), None);
+        // previous: no track before and under 3 s stops; later it restarts the track
+        assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, 1_000), t0), Some(NOTHING_BEFORE));
+        assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, 6_000), t0), None);
+        // Astra round 4: the boundary matches librespot's 3 s (2.5–3 s used to slip through and stop)
+        for (pos, want) in [(2_500, Some(NOTHING_BEFORE)), (2_700, Some(NOTHING_BEFORE)), (2_999, Some(NOTHING_BEFORE)), (3_000, None)] {
+            assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, pos), t0), want, "{pos}");
+        }
+        assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(true), true, 1_000), t0), None);
+    }
+
+    #[test]
+    fn a_load_makes_up_next_stale_until_the_cluster_speaks() {
+        let t0 = Instant::now();
+        let mut n = Now::new(t0);
+        n.next = Some(vec![]);
+        n.skips_fresh = true;
+        let id = librespot_core::SpotifyUri::from_uri("spotify:track:5DAjrJqXqYtgr67pVhmUeR").unwrap();
+        n.on_event(&librespot_playback::player::PlayerEvent::Loading { play_request_id: 2, track_id: id, position_ms: 0 }, t0);
+        assert!(!n.skips_fresh, "the old track's up-next must not block the new one");
+        assert_eq!(skip_blocked(Skip::Next, &n, t0), None);
     }
 
     #[test]

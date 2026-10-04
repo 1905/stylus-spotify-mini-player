@@ -1,4 +1,4 @@
-// Which path a player command takes: the in-app player ("The Run") directly, or the Web API.
+// Which path a player command takes: the in-app player ("Here") directly, or the Web API.
 
 /** True when deviceId is the in-app player and it's ready (connected; maybe not active). */
 export const isEngineDevice = (engine, deviceId) =>

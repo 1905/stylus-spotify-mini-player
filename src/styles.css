@@ -1,4 +1,4 @@
-/* The Run — one screen. Played → now → next, colour from the current cover. */
+/* Stylus — one screen. Now → next (played off to the left), colour from the current cover. */
 
 @font-face {
   font-family: "Bricolage";
@@ -24,7 +24,7 @@
   --gap: 28px;
   --gutter: 48px;
   --cap: 52px; /* room under the run for hover captions */
-  --axis: calc(50% - var(--now) / 2); /* left edge of the current cover */
+  --axis: calc(50% - var(--now) / 2); /* the login screen's centred cover: its left edge */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --page-max: 1200px; /* full pages (Library, "See all"): content width on wide windows */
 
@@ -84,27 +84,91 @@ button:disabled {
   outline-offset: 3px;
 }
 
+/* a click or a drag never draws a focus ring, even where WebKit matches :focus-visible on a click
+   (app.js marks the last input on <html>); a key press brings the rings back */
+[data-input="pointer"] :focus-visible,
+[data-input="pointer"] .row:has(.row-play:focus-visible) {
+  outline: none;
+}
+
+/* icons (src/lib/icons.js) carry their own fill and stroke; CSS sets size and colour only */
 svg {
   display: block;
-  fill: currentColor;
 }
 
 /* ---------- background: two art layers + grain ---------- */
 
+/* glow v2 (src/lib/glow.js): up to 3 blobs placed where their colour sits on the cover, a wash, a base tint.
+   Blob offsets and radii are in cover sizes (--now) from the cover's centre (--ax, --ay).
+   Stops follow 1 − smoothstep (glow.js falloff), so a blob has no visible rim. */
 .bg {
+  --ax: calc(var(--gutter) + var(--now) / 2); /* the cover row: the current cover sits at the left gutter */
+  --ay: 42%;
+  --w: var(--v);
+  --wa: 0.22;
+  --g1: var(--v);
+  --g1a: 0;
+  --g1x: 0;
+  --g1y: 0;
+  --g1r: 1;
+  --g2: var(--v);
+  --g2a: 0;
+  --g2x: 0;
+  --g2y: 0;
+  --g2r: 1;
+  --g3: var(--v);
+  --g3a: 0;
+  --g3x: 0;
+  --g3y: 0;
+  --g3r: 1;
   position: fixed;
-  inset: 0;
+  inset: -5%; /* room for the drift: no edge shows while it moves */
   z-index: 0;
   opacity: 0;
-  transition: opacity 900ms ease;
+  transition: opacity 1000ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: glow-drift 28s ease-in-out infinite alternate;
+  will-change: transform, opacity;
   background:
-    radial-gradient(64% 58% at 50% 38%, rgb(var(--v) / 0.22), transparent 72%),
+    radial-gradient(
+      calc(var(--now) * var(--g1r)) calc(var(--now) * var(--g1r) * 0.85) at calc(var(--ax) + var(--now) * var(--g1x)) calc(var(--ay) + var(--now) * var(--g1y)),
+      rgb(var(--g1) / var(--g1a)), rgb(var(--g1) / calc(var(--g1a) * 0.84)) 25%,
+      rgb(var(--g1) / calc(var(--g1a) * 0.5)) 50%, rgb(var(--g1) / calc(var(--g1a) * 0.16)) 75%, rgb(var(--g1) / 0)
+    ),
+    radial-gradient(
+      calc(var(--now) * var(--g2r)) calc(var(--now) * var(--g2r) * 0.85) at calc(var(--ax) + var(--now) * var(--g2x)) calc(var(--ay) + var(--now) * var(--g2y)),
+      rgb(var(--g2) / var(--g2a)), rgb(var(--g2) / calc(var(--g2a) * 0.84)) 25%,
+      rgb(var(--g2) / calc(var(--g2a) * 0.5)) 50%, rgb(var(--g2) / calc(var(--g2a) * 0.16)) 75%, rgb(var(--g2) / 0)
+    ),
+    radial-gradient(
+      calc(var(--now) * var(--g3r)) calc(var(--now) * var(--g3r) * 0.85) at calc(var(--ax) + var(--now) * var(--g3x)) calc(var(--ay) + var(--now) * var(--g3y)),
+      rgb(var(--g3) / var(--g3a)), rgb(var(--g3) / calc(var(--g3a) * 0.84)) 25%,
+      rgb(var(--g3) / calc(var(--g3a) * 0.5)) 50%, rgb(var(--g3) / calc(var(--g3a) * 0.16)) 75%, rgb(var(--g3) / 0)
+    ),
+    radial-gradient(64% 58% at 50% 38%, rgb(var(--w) / var(--wa)), transparent 72%),
     radial-gradient(140% 70% at 50% 125%, rgb(0 0 0 / 0.4), transparent 62%),
     rgb(var(--i));
 }
 
+/* the focus layout (cover row off): the cover is centred */
+body:has(.stage.is-solo) .bg {
+  --ax: 50%;
+}
+
 .bg.is-on {
   opacity: 1;
+}
+
+/* the glow breathes slowly while a track plays: a small drift and swell, never a visible move */
+@keyframes glow-drift {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  35% { transform: translate3d(1.6%, -1.1%, 0) scale(1.035); }
+  70% { transform: translate3d(-1.2%, 0.9%, 0) scale(1.02); }
+  100% { transform: translate3d(0.8%, 1.4%, 0) scale(1.045); }
+}
+
+/* paused or idle: the glow holds still */
+body:has(.stage:not(.is-playing)) .bg {
+  animation-play-state: paused;
 }
 
 .grain {
@@ -186,6 +250,28 @@ svg {
 .topbar-tools {
   display: flex;
   gap: 4px;
+  margin-left: 2px; /* the glyph, not its hit area, lines up with the gutter */
+}
+
+/* Library and Search: icons only, big */
+.nav-btn {
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.nav-btn svg {
+  width: 28px;
+  height: 28px;
+}
+
+/* the device chip, then the settings cog */
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
 }
 
 /* ---------- device picker: the chip and its popover ---------- */
@@ -222,10 +308,11 @@ svg {
   text-overflow: ellipsis;
 }
 
-.device-caret {
+.device .ic-chevron-down {
   flex: none;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.1; /* the family's 1.75 looks hairline this small */
   opacity: 0.7;
 }
 
@@ -317,23 +404,311 @@ svg {
   margin-top: 6px;
 }
 
+/* ---------- settings: the cog and its popover (the device popover's look) ---------- */
+
+.settings-wrap {
+  position: relative;
+  flex: none;
+  margin-right: 6px; /* the cog, not its hit area, lines up with the gutter */
+}
+
+.settings-wrap .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+
+/* the cog is as tall as the device chip's text line plus its padding feels: 22 px in 36 */
+.settings-wrap .icon-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.settings-wrap .icon-btn[aria-expanded="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+}
+
+.settings-pop {
+  width: 320px;
+  padding: 8px 14px 12px;
+}
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+}
+
+.set-group {
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1px solid var(--hair);
+}
+
+.set-label {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.set-note {
+  margin-top: 8px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+/* an on/off switch: the knob slides right and turns the track green when on */
+.switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(246, 244, 248, 0.18);
+  transition: background-color 160ms ease;
+}
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 160ms var(--ease);
+}
+
+.switch[aria-checked="true"] {
+  background: var(--live);
+}
+
+.switch[aria-checked="true"]::after {
+  transform: translateX(14px);
+}
+
+.switch:focus-visible {
+  outline-offset: 2px;
+}
+
+.switch:disabled {
+  opacity: 0.4;
+}
+
+/* a segmented choice: three options in one rounded strip */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  margin-top: 10px;
+  padding: 2px;
+  border-radius: 10px;
+  background: rgba(246, 244, 248, 0.07);
+}
+
+.seg-opt {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 7px 4px;
+  border-radius: 8px;
+  color: var(--fg-2);
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.seg-opt:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.seg-opt[aria-checked="true"] {
+  color: var(--ink);
+  background: var(--fg);
+}
+
+.seg-opt:disabled {
+  opacity: 0.4;
+}
+
+.seg-opt:focus-visible {
+  outline-offset: 1px;
+}
+
+.seg-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.seg-sub {
+  font-size: 11.5px;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+
+/* ---------- the playlist panel: a full-height sheet from the left, the app blurred behind it ---------- */
+
+.panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(440px, calc(100vw - 32px));
+  border-right: 1px solid var(--hair);
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.08), transparent 320px),
+    rgb(var(--i));
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6);
+  animation: slide-in 320ms var(--ease) both;
+}
+
+.panel:focus {
+  outline: none;
+}
+
+.panel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 84px;
+  padding: 16px 14px 14px 24px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.panel-heading {
+  flex: 1;
+  min-width: 0;
+}
+
+.panel-kicker {
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-title {
+  margin: 2px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  font-stretch: 85%;
+}
+
+.panel-list {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair) transparent;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.panel-label {
+  margin: 10px 10px 4px;
+  color: var(--fg-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panel-label:first-child {
+  margin-top: 4px;
+}
+
+.panel .row {
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 6px 10px;
+}
+
+.panel .row-art {
+  width: 40px;
+}
+
+.panel .row-title {
+  font-size: 14px;
+  line-height: 19px;
+}
+
+.panel .row-sub {
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+/* played: dimmed; now: highlighted; next: as is */
+.panel .row.is-played {
+  opacity: 0.5;
+}
+
+.panel .row.is-played:hover {
+  opacity: 0.85;
+}
+
+.panel .row.is-now {
+  background: rgba(246, 244, 248, 0.1);
+  cursor: default;
+}
+
+.panel .row.is-now .row-title {
+  color: var(--live);
+}
+
+.panel .row.is-skeleton {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
 /* ---------- the run ---------- */
 
+/* At rest the current cover sits at the left content edge, what's next to its right, what played
+   off to the left. A drag or a sideways swipe pans the track (app.js); it clips its own content
+   and never scrolls. The mask hides played covers inside the left gutter and fades the right end. */
 .run {
-  --shift: 0px;
   position: relative;
   display: flex;
   align-items: flex-end;
-  gap: var(--gap);
   min-height: 0;
   padding-bottom: var(--cap);
   overflow-x: clip;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 76%, transparent 99%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 76%, transparent 99%);
+  cursor: grab;
+  touch-action: pan-y;
+  -webkit-mask-image: linear-gradient(90deg, transparent calc(var(--gutter) - 14px), #000 var(--gutter), #000 76%, transparent 99%);
+  mask-image: linear-gradient(90deg, transparent calc(var(--gutter) - 14px), #000 var(--gutter), #000 76%, transparent 99%);
 }
 
-.run > :first-child {
-  margin-left: var(--shift);
+.run.is-dragging {
+  cursor: grabbing;
+}
+
+/* every cover centred on the current one's middle */
+.run-track {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gap);
+  will-change: transform;
+}
+
+/* back to rest after a pan; back from past an end, quicker (reduced motion: the global rule makes both a jump) */
+.run-track.is-returning {
+  transition: transform 600ms var(--ease);
+}
+
+.run-track.is-springing {
+  transition: transform 350ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .cover {
@@ -354,21 +729,14 @@ svg {
     0 42px 90px -36px rgb(0 0 0 / 0.75);
 }
 
+/* the current cover big, every other one smaller: the same size while panning */
+.cover:not([data-role="now"]) { --s: 0.536; }
+.cover[data-role="next"] .art { opacity: 0.9; }
+
 .cover[data-role="past"] .art {
+  opacity: 0.55;
   filter: saturate(0.6);
 }
-
-.cover[data-offset="-1"] { --s: 0.395; }
-.cover[data-offset="-2"] { --s: 0.326; }
-.cover[data-offset="-3"] { --s: 0.274; }
-.cover[data-offset="-4"] { --s: 0.232; }
-.cover[data-role="next"] { --s: 0.447; }
-
-.cover[data-offset="-1"] .art { opacity: 0.62; }
-.cover[data-offset="-2"] .art { opacity: 0.46; }
-.cover[data-offset="-3"] .art { opacity: 0.34; }
-.cover[data-offset="-4"] .art { opacity: 0.24; }
-.cover[data-role="next"] .art { opacity: 0.9; }
 
 .cover figcaption {
   position: absolute;
@@ -382,8 +750,14 @@ svg {
   pointer-events: none;
 }
 
-.cover:hover figcaption {
+/* every small cover is named; cover-wide, so neighbours never overlap */
+.cover:not([data-role="now"]) figcaption {
+  width: 100%;
   opacity: 1;
+}
+
+.cover[data-role="past"] figcaption {
+  opacity: 0.6;
 }
 
 .cover[data-role="now"] figcaption {
@@ -406,10 +780,6 @@ svg {
   color: var(--fg-2);
 }
 
-.cover.is-off {
-  visibility: hidden;
-}
-
 /* the empty "now" slot when nothing plays */
 .slot {
   flex: none;
@@ -420,12 +790,27 @@ svg {
   background: linear-gradient(160deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 60%);
 }
 
+/* the cover row off: the current cover alone, centred, its title under it */
+.stage.is-solo .run {
+  cursor: default;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.stage.is-solo .now {
+  text-align: center;
+}
+
+.stage.is-solo :is(.now-title, .now-artist, .now-album) {
+  margin-inline: auto;
+}
+
 /* ---------- now block ---------- */
 
 .now {
   min-width: 0;
   margin-top: calc(48px - var(--cap));
-  padding: 0 var(--gutter) 0 var(--axis);
+  padding: 0 var(--gutter);
 }
 
 .now-title {
@@ -490,9 +875,9 @@ svg {
 
 /* ---------- transport ---------- */
 
-/* one left-aligned column with the now cover: scrub runs from its left edge to the right margin */
+/* the scrub bar runs gutter to gutter; the controls: playlist left, transport centred, heart and volume right */
 .transport {
-  padding: 30px var(--gutter) 28px var(--axis);
+  padding: 30px var(--gutter) 28px;
 }
 
 .scrub-row {
@@ -561,22 +946,34 @@ svg {
 }
 
 .controls {
-  display: flex;
-  flex-wrap: wrap; /* very narrow windows: heart and volume drop under the transport */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 4px 10px;
+  gap: 10px;
   margin-top: 12px;
-  margin-left: -10px; /* the prev icon, not its hit area, lines up with the column */
+}
+
+.controls-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* the playlist button: its icon, not its hit area, lines up with the scrub's start */
+.controls-lead {
+  justify-self: start;
+  margin-left: -10px;
 }
 
 .ctl {
+  position: relative;
   display: grid;
   place-items: center;
   width: 44px;
   height: 44px;
   border-radius: 50%;
   color: var(--fg-2);
-  transition: background-color 160ms ease, color 160ms ease, opacity 160ms ease;
+  transition: background-color 160ms ease, color 160ms ease, opacity 160ms ease, transform 90ms ease;
 }
 
 .ctl svg {
@@ -589,6 +986,17 @@ svg {
   background: rgba(246, 244, 248, 0.08);
 }
 
+/* pressed: every transport button answers the click at once */
+.ctl:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.ctl:not(.ctl-play):active:not(:disabled),
+.ctl[aria-expanded="true"] {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.16);
+}
+
 .ctl-play {
   width: 60px;
   height: 60px;
@@ -597,8 +1005,15 @@ svg {
 }
 
 .ctl-play svg {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+}
+
+/* previous and next: the solid pair beside play, a step bigger than the line icons */
+#prevBtn svg,
+#nextBtn svg {
+  width: 24px;
+  height: 24px;
 }
 
 .ctl-play:hover:not(:disabled) {
@@ -606,12 +1021,16 @@ svg {
   background: #fff;
 }
 
-.ctl-play .i-pause,
-.is-playing .ctl-play .i-play {
+.ctl-play:active:not(:disabled) {
+  background: rgb(246 244 248 / 0.8);
+}
+
+.ctl-play .ic-pause,
+.is-playing .ctl-play .ic-play {
   display: none;
 }
 
-.is-playing .ctl-play .i-pause {
+.is-playing .ctl-play .ic-pause {
   display: block;
 }
 
@@ -619,17 +1038,18 @@ svg {
   opacity: 0.3;
 }
 
-/* shuffle, repeat, heart: off = faint, on = full colour + a dot under the icon */
+/* shuffle, repeat, heart: off = the normal grey, on = the accent; shuffle and repeat add a dot
+   under the icon, the heart fills */
 .ctl-toggle {
   position: relative;
-  color: var(--fg-3);
 }
 
-.ctl-toggle.is-on {
-  color: var(--fg);
+.ctl-toggle.is-on,
+.ctl-toggle.is-on:hover:not(:disabled) {
+  color: var(--live);
 }
 
-.ctl-toggle.is-on::after {
+.ctl-toggle.is-on:not(#heartBtn)::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -642,37 +1062,35 @@ svg {
 }
 
 .ctl-toggle svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
-/* repeat this song: a "1" badge on the loop */
-#repeatBtn[data-mode="track"]::before {
-  content: "1";
-  position: absolute;
-  top: 9px;
-  right: 7px;
-  min-width: 11px;
-  height: 11px;
-  border-radius: 6px;
-  background: var(--fg);
-  color: var(--ink);
-  font-size: 8.5px;
-  font-weight: 700;
-  line-height: 11px;
-  text-align: center;
+/* repeat this song: the loop with a 1 inside */
+#repeatBtn .ic-repeat-one,
+#repeatBtn[data-mode="track"] .ic-repeat {
+  display: none;
 }
 
-#heartBtn.is-on .heart {
-  fill: currentColor;
+#repeatBtn[data-mode="track"] .ic-repeat-one {
+  display: block;
+}
+
+#heartBtn .ic-heart-filled,
+#heartBtn.is-on .ic-heart {
+  display: none;
+}
+
+#heartBtn.is-on .ic-heart-filled {
+  display: block;
 }
 
 /* heart and volume sit at the right end of the control row */
 .controls-side {
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 4px;
-  margin-left: auto;
   margin-right: -10px; /* the icon, not its hit area, lines up with the scrub's end */
 }
 
@@ -682,12 +1100,14 @@ svg {
   align-items: center;
 }
 
-.volume .i-mute,
-.volume.is-muted .i-vol {
+/* the speaker: two waves, one wave under 40%, crossed out at 0 */
+.volume :is(.ic-volume-low, .ic-mute),
+.volume:is(.is-low, .is-muted) .ic-volume-high {
   display: none;
 }
 
-.volume.is-muted .i-mute {
+.volume.is-low:not(.is-muted) .ic-volume-low,
+.volume.is-muted .ic-mute {
   display: block;
 }
 
@@ -697,14 +1117,28 @@ svg {
   touch-action: none; /* a drag moves the volume, not the page */
 }
 
-.vol-slider:hover .scrub-fill::after,
-.vol-slider:focus-visible .scrub-fill::after {
+.vol-slider:hover .scrub-fill::after {
   transform: scale(1);
+}
+
+/* the sliders (seek, volume) never get a box: keyboard focus rings their thumb */
+.scrub:focus-visible {
+  outline: none;
+}
+
+:root:not([data-input="pointer"]) .scrub:focus-visible .scrub-fill::after {
+  transform: scale(1);
+  box-shadow: 0 0 0 4px rgb(246 244 248 / 0.28);
 }
 
 [data-mode="idle"] .transport,
 [data-mode="other"] .scrub-row {
   visibility: hidden;
+}
+
+/* a play (or the restore) on its way: the transport shows its loaders, even before a song is known */
+.stage:is(.is-loading, .is-starting)[data-mode="idle"] .transport {
+  visibility: visible;
 }
 
 /* ---------- login ---------- */
@@ -1125,8 +1559,7 @@ svg {
   border-radius: 50%;
 }
 
-/* Liked Songs: a heart tile, in the list row and the detail head */
-.liked-art,
+/* Liked Songs: a heart tile in the detail head */
 .detail-cover.is-liked {
   display: grid;
   place-items: center;
@@ -1134,12 +1567,7 @@ svg {
   background: linear-gradient(135deg, rgb(var(--v) / 0.9), rgb(var(--v) / 0.35));
 }
 
-.liked-art .liked-icon {
-  width: 24px;
-  height: 24px;
-}
-
-.detail-cover.is-liked .liked-icon {
+.detail-cover.is-liked .ic-heart-filled {
   width: 84px;
   height: 84px;
 }
@@ -1274,7 +1702,48 @@ svg {
 
 /* Library level 1: Liked Songs, Your top, Playlists, Albums, Following, Spotify mixes */
 #libLevel1 .group {
-  margin-top: 26px;
+  margin-top: 12px;
+}
+
+/* the Library's tabs: one group at a time, under the bar, outside the scrolling list */
+.lib-tabs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  max-width: calc(var(--page-max) + 2 * var(--gutter));
+  margin: 0 auto;
+  padding: 0 var(--gutter) 14px calc(var(--gutter) - 16px);
+}
+
+.lib-tab {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  color: var(--fg-2);
+  font-size: 15px;
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.lib-tab:hover {
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.06);
+}
+
+.lib-tab[aria-selected="true"] {
+  color: var(--ink);
+  background: var(--fg);
+}
+
+.lib-panel:not(.is-current) {
+  display: none;
+}
+
+#libTop > .tabs {
+  padding: 0 12px 6px;
 }
 
 /* a full page: section heads read as headings */
@@ -1287,9 +1756,6 @@ svg {
   letter-spacing: -0.01em;
 }
 
-#libLiked {
-  max-width: 480px;
-}
 
 /* playlists: rows in as many columns as fit */
 #libList {
@@ -1303,7 +1769,7 @@ svg {
   #topTracks {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-template-rows: repeat(5, auto);
+    grid-template-rows: repeat(var(--rows, 5), auto);
     grid-auto-flow: column;
     column-gap: 24px;
   }
@@ -1676,6 +2142,10 @@ svg {
   from { opacity: 0; transform: translateY(-4px); }
 }
 
+@keyframes slide-in {
+  from { transform: translateX(-100%); }
+}
+
 @keyframes drop-in {
   from { opacity: 0; transform: translate(-50%, -8px); }
 }
@@ -1727,7 +2197,7 @@ svg {
   }
 
   .transport {
-    padding: 20px var(--gutter) 18px var(--axis);
+    padding: 20px var(--gutter) 18px;
   }
 
   .ctl-play {
@@ -1735,7 +2205,8 @@ svg {
     height: 52px;
   }
 
-  .controls {
+  .controls,
+  .controls-main {
     gap: 4px;
   }
 
@@ -1779,6 +2250,34 @@ svg {
 }
 
 /* ---------- reduced motion ---------- */
+
+/* ---------- a play starting: the clicked song shows at once, alive until Spotify confirms it ---------- */
+
+/* nothing moves while a play loads: the play button's spinner is the loader (user, 2026-10-04);
+   the cover, the seek line and the volume stay still, the sliders only fade to inactive */
+.stage.is-loading :is(.now-title, .now-artist, .now-album) {
+  opacity: 0.7;
+  transition: opacity 200ms ease;
+}
+
+.stage:is(.is-loading, .is-starting, .is-skipping) :is(.scrub-row, .volume) {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+/* the seek line holds at the start, no running bar */
+.stage:is(.is-loading, .is-starting, .is-skipping) .scrub-fill {
+  width: 0 !important;
+  transition: none;
+}
+
+/* the song isn't known yet: the empty cover slot shimmers */
+.stage.is-starting .slot {
+  background: linear-gradient(90deg, rgb(246 244 248 / 0.05) 0%, rgb(246 244 248 / 0.14) 50%, rgb(246 244 248 / 0.05) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1885,6 +2384,36 @@ svg {
   inset: -6px;
 }
 
+/* next / previous: the ring from the click until another song shows (app.js skip) */
+.ctl.is-pending:not(.ctl-play)::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  border: 2px solid rgb(246 244 248 / 0.2);
+  border-top-color: var(--fg);
+  animation: spin 0.8s linear infinite;
+}
+
+/* a quality option while the player restarts on it */
+.seg-opt.is-pending .seg-sub {
+  visibility: hidden;
+}
+
+.seg-opt.is-pending::after {
+  content: "";
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  border: 2px solid rgb(0 0 0 / 0.2);
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
 /* pending: the button is only the spinner, not a pause icon that looks like it already plays */
 .ctl-play.is-pending svg {
   visibility: hidden;
@@ -1971,7 +2500,8 @@ svg {
   opacity: 1;
 }
 
-.cover[data-role="now"] .cover-play {
+.cover[data-role="now"] .cover-play,
+.run.is-dragging .cover-play {
   display: none;
 }
 
@@ -1979,4 +2509,407 @@ svg {
 #topArtists .album.is-skeleton .art,
 #libFollowing .album.is-skeleton .art {
   border-radius: 50%;
+}
+
+/* ---------- Spotify rate-limited the app's Web API: one quiet line in Settings ---------- */
+
+.set-quota {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--hair);
+}
+
+.set-quota[hidden] {
+  display: none;
+}
+
+/* ---------- Settings: the MCP server (switch, status, copy buttons, reset key asked inline) ---------- */
+
+.set-mcp .set-note {
+  margin-top: 0;
+}
+
+.set-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.set-actions-label {
+  width: 100%;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+
+.chip {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.chip:hover {
+  background: rgba(246, 244, 248, 0.15);
+}
+
+.chip-quiet {
+  margin-left: auto;
+  color: var(--fg-2);
+  background: none;
+}
+
+.chip-quiet:hover {
+  color: var(--fg);
+}
+
+.chip-danger {
+  color: var(--ink);
+  background: #ff8f84;
+}
+
+.chip-danger:hover {
+  background: #ffaaa1;
+}
+
+/* ---------- Library: "Add" a pasted Spotify link (Playlists and Mixes tabs) ---------- */
+
+.lib-add {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.lib-add-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 620px;
+}
+
+.lib-add-input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: var(--fg);
+  background: rgba(246, 244, 248, 0.08);
+  font-size: 14px;
+}
+
+.lib-add-input::placeholder {
+  color: var(--fg-3);
+}
+
+.lib-add-go {
+  height: 36px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+.lib-add-go[aria-busy="true"] {
+  opacity: 0.7;
+}
+
+.lib-add-msg {
+  width: 100%;
+  max-width: 620px;
+  color: var(--fg-2);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.added-mark {
+  color: var(--fg);
+  font-weight: 550;
+}
+
+/* the detail head: Play, then Add to library / Save to Mixes */
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.detail-actions .btn-play {
+  margin-top: 0;
+}
+
+.detail-save {
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--hair);
+}
+
+.detail-save[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+/* ---------- the current cover's sleeve: the info button turns it over to the album's details ---------- */
+
+/* the sleeve turns in place: the art is its front, .sleeve-back (added by app.js) its back */
+.cover[data-role="now"] {
+  perspective: 1600px;
+}
+
+.sleeve {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 600ms cubic-bezier(0.45, 0.05, 0.25, 1);
+}
+
+.cover.is-flipped .sleeve {
+  transform: rotateY(180deg);
+}
+
+.sleeve > .art,
+.sleeve-back {
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+/* the back: dark card stock tinted with the cover's colour, fine grain, a faint inner rule */
+.sleeve-back {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1em;
+  padding: 7.5% 7.5% 6.5%; /* of the sleeve's width */
+  overflow: hidden;
+  border-radius: 6px;
+  color: var(--fg);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(120% 90% at 0% 0%, rgb(var(--v) / 0.3), transparent 62%),
+    linear-gradient(160deg, rgb(var(--v) / 0.16), rgb(var(--v) / 0.04) 70%),
+    rgb(17 15 22);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.07),
+    0 42px 90px -36px rgb(0 0 0 / 0.75);
+  transform: rotateY(180deg);
+  container-type: inline-size;
+  font-size: clamp(11px, 3.4vmin, 13px);
+  line-height: 1.4;
+  text-align: left;
+}
+
+.sb-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: clamp(9.5px, 2.8cqw, 11px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* the turned cover's ✕ sits at the top right: the catalogue number stays clear of it */
+.sb-head {
+  padding-right: 22px;
+}
+
+.sb-type {
+  color: color-mix(in srgb, rgb(var(--v)) 55%, #fff);
+}
+
+.sb-title {
+  display: grid;
+  gap: 0.3em;
+  padding-bottom: 5cqw;
+  border-bottom: 1px solid var(--hair);
+}
+
+.sb-title p {
+  margin: 0;
+}
+
+.sb-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: clamp(16px, 6.6cqw, 25px);
+  font-weight: 700;
+  font-stretch: 88%;
+  line-height: 1.08;
+  letter-spacing: -0.015em;
+}
+
+.sb-artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-2);
+}
+
+.sb-facts {
+  display: grid;
+  gap: 0.45em;
+  margin: 0;
+}
+
+.sb-facts > div {
+  display: grid;
+  grid-template-columns: 5.6em minmax(0, 1fr);
+  gap: 10px;
+}
+
+.sb-facts dt {
+  color: var(--fg-3);
+}
+
+.sb-facts dd {
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ℗ and ©: the small print at the foot */
+.sb-legal {
+  margin-top: auto;
+  font-size: clamp(9px, 2.6cqw, 10.5px);
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+
+.sb-legal p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* loading: shimmering lines in the shape of the filled back */
+.sb-line {
+  display: block;
+  width: 45%;
+  height: 0.8em;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgb(246 244 248 / 0.06) 0%, rgb(246 244 248 / 0.14) 50%, rgb(246 244 248 / 0.06) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.sb-head .sb-line { width: 28%; }
+.sb-title .sb-line.is-big { width: 78%; height: 1.6em; }
+.sleeve-back.is-loading .sb-facts { gap: 0.8em; }
+.sb-facts .sb-line:nth-child(1) { width: 62%; }
+.sb-facts .sb-line:nth-child(2) { width: 50%; }
+.sb-facts .sb-line:nth-child(3) { width: 38%; }
+
+.sb-error {
+  margin: auto 0;
+  text-align: center;
+  color: var(--fg-2);
+}
+
+/* a small cover (narrow or short window): one line per ℗/© line, no catalogue number */
+@container (max-width: 260px) {
+  .sb-cat {
+    display: none;
+  }
+
+  .sb-title {
+    padding-bottom: 0.9em;
+  }
+
+  .sb-legal p {
+    -webkit-line-clamp: 1;
+  }
+}
+
+/* a very small cover: the facts only */
+@container (max-width: 200px) {
+  .sb-legal {
+    display: none;
+  }
+
+  .sb-facts > div {
+    grid-template-columns: 4.3em minmax(0, 1fr);
+    gap: 6px;
+  }
+}
+
+/* the round button at the top right: on hover or keyboard focus of the current cover, always while turned */
+.cover-info {
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  color: rgb(255 255 255 / 0.92);
+  background: rgb(12 11 16 / 0.42);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.4);
+  backdrop-filter: blur(10px) saturate(1.4);
+  opacity: 0;
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.cover-info svg {
+  width: 18px;
+  height: 18px;
+}
+
+.cover-info:hover {
+  background: rgb(12 11 16 / 0.68);
+}
+
+.cover[data-role="now"]:hover .cover-info,
+.cover-info:focus-visible,
+.cover.is-flipped .cover-info {
+  opacity: 1;
+}
+
+.cover:not([data-role="now"]) .cover-info,
+.run.is-dragging .cover:not(.is-flipped) .cover-info {
+  display: none;
+}
+
+/* reduced motion: the back fades in over the art, no turn */
+@media (prefers-reduced-motion: reduce) {
+  .cover .sleeve,
+  .cover.is-flipped .sleeve,
+  .cover .sleeve-back {
+    transform: none !important;
+  }
+
+  .cover .sleeve > .art,
+  .cover .sleeve-back {
+    transition: opacity 220ms ease !important;
+  }
+
+  .cover .sleeve-back {
+    opacity: 0;
+  }
+
+  .cover.is-flipped .sleeve-back {
+    opacity: 1;
+  }
+
+  .cover.is-flipped .sleeve > .art {
+    opacity: 0;
+  }
 }

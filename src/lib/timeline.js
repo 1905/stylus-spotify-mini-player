@@ -1,5 +1,5 @@
 // The run: played → now → next. Pure builder + FLIP helpers.
-import { offsettable } from "./session.js";
+import { offsettable } from "./source.js";
 
 /**
  * Build the display list, left → right.
@@ -7,20 +7,9 @@ import { offsettable } from "./session.js";
  * @returns {{key: string, role: 'past'|'now'|'next', offset: number, track: object}[]}
  */
 export function buildRun({ history = [], now = null, queue = [] } = {}, { maxPast = 4, maxNext = 8 } = {}) {
-  const tracks = (history || []).map((h) => h && h.track).filter(Boolean);
-
   const next = (queue || []).filter(Boolean).slice(0, maxNext);
-
-  // 1. skip rows of the current track (it is on screen as now), 2. collapse consecutive
-  //    duplicates, 3. take maxPast, reverse. Queued repeats keep their past plays.
-  const past = [];
-  for (const t of tracks) {
-    if (past.length >= maxPast) break;
-    if (now && t.uri === now.uri) continue;
-    if (past.length && past[past.length - 1].uri === t.uri) continue;
-    past.push(t);
-  }
-  past.reverse();
+  // queued repeats keep their past plays
+  const past = pastTracks(history, now && now.uri, maxPast).map((p) => p.track);
 
   const rows = [
     ...past.map((track, j) => ({ role: "past", offset: j - past.length, track })),
@@ -34,6 +23,22 @@ export function buildRun({ history = [], now = null, queue = [] } = {}, { maxPas
     seen.set(r.track.uri, k + 1);
     return { key: `${r.track.uri}~${k}`, ...r };
   });
+}
+
+/**
+ * What played, oldest first, for the run and the playlist panel: history (newest first,
+ * [{track, played_at}]) without plays of the current song (nowUri, on screen as now), repeats in a
+ * row collapsed, the newest max. Each {track, i}: i is its index in history.
+ */
+export function pastTracks(history, nowUri, max) {
+  const past = [];
+  (history || []).forEach((h, i) => {
+    const t = h && h.track;
+    if (!t || !t.uri || past.length >= max || (nowUri && t.uri === nowUri)) return;
+    if (past.length && past[past.length - 1].track.uri === t.uri) return;
+    past.push({ track: t, i });
+  });
+  return past.reverse();
 }
 
 /**
@@ -81,7 +86,8 @@ export function coverTarget(item, ctx = {}) {
   const list = ctx.listUris && (!ctx.nowUri || ctx.listUris.includes(ctx.nowUri)) ? ctx.listUris : null;
   const fromList = () => {
     const i = list ? list.indexOf(uri) : -1;
-    return i < 0 ? null : { uris: list.slice(i), trackUri: uri };
+    // the whole list with a start track: Back still has the songs before it
+    return i < 0 ? null : { uris: list, trackUri: uri };
   };
   if (item.role === "next") {
     const { contextUri, members } = ctx;

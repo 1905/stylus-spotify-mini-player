@@ -153,9 +153,9 @@ describe("coverTarget", () => {
     expect(coverTarget(next(2, 1), ctx)).toEqual({ uris: [U(2)], trackUri: U(2) });
   });
 
-  it("next, in the uris list the play started with: that list from the track", () => {
+  it("next, in the uris list the play started with: the whole list, starting at the track (Back still works)", () => {
     const ctx = { contextUri: null, listUris: [U(1), U(2), U(3), U(4)], nowUri: U(1), nextUris: [U(2), U(3)] };
-    expect(coverTarget(next(3, 2), ctx)).toEqual({ uris: [U(3), U(4)], trackUri: U(3) });
+    expect(coverTarget(next(3, 2), ctx)).toEqual({ uris: [U(1), U(2), U(3), U(4)], trackUri: U(3) });
   });
 
   it("a stale uris list (now isn't in it) is ignored", () => {
@@ -167,9 +167,9 @@ describe("coverTarget", () => {
     expect(coverTarget(past(7), { historyContext: "spotify:album:x" })).toEqual({ contextUri: "spotify:album:x", trackUri: U(7) });
   });
 
-  it("past with another kind of context, in the current list: that list from it", () => {
+  it("past with another kind of context, in the current list: the whole list, starting at it", () => {
     const ctx = { historyContext: "spotify:artist:a", listUris: [U(6), U(7), U(1)], nowUri: U(1) };
-    expect(coverTarget(past(7), ctx)).toEqual({ uris: [U(7), U(1)], trackUri: U(7) });
+    expect(coverTarget(past(7), ctx)).toEqual({ uris: [U(6), U(7), U(1)], trackUri: U(7) });
   });
 
   it("past with nothing known: alone", () => {

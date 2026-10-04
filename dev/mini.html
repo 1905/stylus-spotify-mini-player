@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- Dev harness copy of src/mini.html (same body, vitest keeps them equal). Serve the repo root and open
+     /dev/mini.html?s=<scenario>, or /dev/menubar.html?bar=light|dark&s=<scenario> for it under a menu bar. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Stylus mini (dev)</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="../src/mini.css" />
+    <script src="mini-mock.js"></script>
+    <script type="module" src="../src/mini.js"></script>
+  </head>
+  <body>
+    <main id="mini" class="mini" data-mode="idle">
+      <div id="miniBg" class="mini-bg" aria-hidden="true"></div>
+      <div class="mini-top">
+        <button id="miniOpen" class="mini-open" type="button" aria-label="Show Stylus">
+          <span class="mini-art"><img id="miniCover" alt="" hidden /><span id="miniGlyph" class="mini-glyph"></span></span>
+          <span class="mini-text">
+            <span id="miniTitle" class="mini-title"></span>
+            <span id="miniArtist" class="mini-artist"></span>
+            <span id="miniDevice" class="mini-device" hidden></span>
+          </span>
+        </button>
+        <button id="miniHeart" class="mini-btn mini-heart" type="button" aria-label="Save to Liked Songs" aria-pressed="false" hidden></button>
+      </div>
+      <div id="miniBar" class="mini-bar" aria-hidden="true"><div id="miniFill" class="mini-fill"></div></div>
+      <div class="mini-ctl">
+        <div class="mini-transport">
+          <button id="miniPrev" class="mini-btn mini-skip" type="button" aria-label="Previous" disabled></button>
+          <button id="miniPlay" class="mini-btn mini-play" type="button" aria-label="Play" disabled></button>
+          <button id="miniNext" class="mini-btn mini-skip" type="button" aria-label="Next" disabled></button>
+        </div>
+        <div id="miniVol" class="mini-vol" hidden>
+          <button id="miniMute" class="mini-btn mini-mute" type="button" aria-label="Mute"></button>
+          <div id="miniSlider" class="mini-slider" role="slider" tabindex="0" aria-label="Volume" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="mini-slider-track"><div id="miniVolFill" class="mini-slider-fill"></div></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

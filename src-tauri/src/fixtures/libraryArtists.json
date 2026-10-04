@@ -1,0 +1,109 @@
+{
+ "me": {
+  "libraryV3": {
+   "__typename": "LibraryPage",
+   "breadcrumbs": [],
+   "items": [
+    {
+     "addedAt": {
+      "isoString": "2024-02-08T01:23:10Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "ArtistResponseWrapper",
+      "_uri": "spotify:artist:1PmVyfIR9KtCxbHWuga8E5",
+      "data": {
+       "__typename": "Artist",
+       "profile": {
+        "name": "Lorn"
+       },
+       "uri": "spotify:artist:1PmVyfIR9KtCxbHWuga8E5",
+       "visuals": {
+        "avatarImage": {
+         "sources": [
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab6761610000e5eb407dacc6afcca2e56bdf0b02",
+           "width": 640
+          },
+          {
+           "height": 160,
+           "url": "https://i.scdn.co/image/ab6761610000f178407dacc6afcca2e56bdf0b02",
+           "width": 160
+          },
+          {
+           "height": 320,
+           "url": "https://i.scdn.co/image/ab67616100005174407dacc6afcca2e56bdf0b02",
+           "width": 320
+          }
+         ]
+        }
+       }
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": {
+      "isoString": "2026-08-22T14:27:19.063Z"
+     }
+    },
+    {
+     "addedAt": {
+      "isoString": "2025-05-15T06:23:29Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "ArtistResponseWrapper",
+      "_uri": "spotify:artist:3xDYZyU0u2UORxJh6BcZe4",
+      "data": {
+       "__typename": "Artist",
+       "profile": {
+        "name": "Malvae"
+       },
+       "uri": "spotify:artist:3xDYZyU0u2UORxJh6BcZe4",
+       "visuals": {
+        "avatarImage": {
+         "sources": [
+          {
+           "height": 640,
+           "url": "https://i.scdn.co/image/ab6761610000e5eb10baa6afec7f0181b425f9e8",
+           "width": 640
+          },
+          {
+           "height": 160,
+           "url": "https://i.scdn.co/image/ab6761610000f17810baa6afec7f0181b425f9e8",
+           "width": 160
+          },
+          {
+           "height": 320,
+           "url": "https://i.scdn.co/image/ab6761610000517410baa6afec7f0181b425f9e8",
+           "width": 320
+          }
+         ]
+        }
+       }
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": null
+    }
+   ],
+   "pagingInfo": {
+    "limit": 50,
+    "offset": 0
+   },
+   "selectedFilters": [
+    {
+     "id": "Artists",
+     "name": "Artists"
+    }
+   ],
+   "selectedSortOrder": {
+    "id": "Recents",
+    "name": "Recents"
+   },
+   "totalCount": 11
+  }
+ }
+}

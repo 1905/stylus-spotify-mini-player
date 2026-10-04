@@ -1,0 +1,135 @@
+{
+ "me": {
+  "libraryV3": {
+   "__typename": "LibraryPage",
+   "breadcrumbs": [],
+   "items": [
+    {
+     "addedAt": {
+      "isoString": "2025-03-28T13:03:41Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "AlbumResponseWrapper",
+      "_uri": "spotify:album:0xFMgxwYuKAzyv5bg81uN4",
+      "data": {
+       "__typename": "Album",
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "skyfall beats"
+          },
+          "uri": "spotify:artist:6ORJGSfnPFkJFFs5wXEClO"
+         }
+        ]
+       },
+       "coverArt": {
+        "sources": [
+         {
+          "height": 300,
+          "url": "https://i.scdn.co/image/ab67616d00001e0293bc4fdaa80785edcb2dd92d",
+          "width": 300
+         },
+         {
+          "height": 64,
+          "url": "https://i.scdn.co/image/ab67616d0000485193bc4fdaa80785edcb2dd92d",
+          "width": 64
+         },
+         {
+          "height": 640,
+          "url": "https://i.scdn.co/image/ab67616d0000b27393bc4fdaa80785edcb2dd92d",
+          "width": 640
+         }
+        ]
+       },
+       "date": {
+        "isoString": "2025-03-28T00:00:00Z",
+        "precision": "DAY"
+       },
+       "name": "3:27",
+       "preReleaseEndDateTime": null,
+       "type": "SINGLE",
+       "uri": "spotify:album:0xFMgxwYuKAzyv5bg81uN4"
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": {
+      "isoString": "2026-09-25T09:52:52.928Z"
+     }
+    },
+    {
+     "addedAt": {
+      "isoString": "2026-04-30T17:00:00Z"
+     },
+     "depth": 0,
+     "item": {
+      "__typename": "AlbumResponseWrapper",
+      "_uri": "spotify:album:43iaCaFjHG1v62VWKp48EC",
+      "data": {
+       "__typename": "Album",
+       "artists": {
+        "items": [
+         {
+          "profile": {
+           "name": "Younger Brother"
+          },
+          "uri": "spotify:artist:4ypPM5MAlxN4nbsiiHtBpu"
+         }
+        ]
+       },
+       "coverArt": {
+        "sources": [
+         {
+          "height": 300,
+          "url": "https://i.scdn.co/image/ab67616d00001e0290aac347bbc153cd344ce17b",
+          "width": 300
+         },
+         {
+          "height": 64,
+          "url": "https://i.scdn.co/image/ab67616d0000485190aac347bbc153cd344ce17b",
+          "width": 64
+         },
+         {
+          "height": 640,
+          "url": "https://i.scdn.co/image/ab67616d0000b27390aac347bbc153cd344ce17b",
+          "width": 640
+         }
+        ]
+       },
+       "date": {
+        "isoString": "2026-05-01T00:00:00Z",
+        "precision": "DAY"
+       },
+       "name": "Mutually Assured Distraction",
+       "preReleaseEndDateTime": {
+        "isoString": "2026-04-30T17:00:00Z"
+       },
+       "type": "ALBUM",
+       "uri": "spotify:album:43iaCaFjHG1v62VWKp48EC"
+      }
+     },
+     "pinnable": true,
+     "pinned": false,
+     "playedAt": null
+    }
+   ],
+   "pagingInfo": {
+    "limit": 50,
+    "offset": 0
+   },
+   "selectedFilters": [
+    {
+     "id": "Albums",
+     "name": "Albums"
+    }
+   ],
+   "selectedSortOrder": {
+    "id": "Recents",
+    "name": "Recents"
+   },
+   "totalCount": 12
+  }
+ }
+}

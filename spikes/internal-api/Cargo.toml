@@ -1,0 +1,23 @@
+[package]
+name = "internal-api-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# standalone: not part of any workspace
+[workspace]
+
+[dependencies]
+librespot-core = "0.8.0"
+librespot-protocol = "0.8.0"
+protobuf = "3.7"
+prost = "0.13"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+dirs = "5"
+urlencoding = "2"
+
+# same vendored librespot-core as the app (2 patches, see src-tauri/Cargo.toml)
+[patch.crates-io]
+librespot-core = { path = "../../src-tauri/vendor/librespot-core" }

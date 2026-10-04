@@ -1,0 +1,129 @@
+{
+ "artistUnion": {
+  "__typename": "Artist",
+  "discography": {
+   "all": {
+    "items": [
+     {
+      "releases": {
+       "items": [
+        {
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e022c700c64cffdee30cdd40031",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d000048512c700c64cffdee30cdd40031",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b2732c700c64cffdee30cdd40031",
+            "width": 640
+           }
+          ]
+         },
+         "date": {
+          "isoString": "2025-08-13T00:00:00Z",
+          "precision": "DAY",
+          "year": 2025
+         },
+         "id": "5BLrEOEDKoDDg5T8PzdIHN",
+         "name": "Hail to the Thief (Live Recordings 2003-2009)",
+         "tracks": {
+          "totalCount": 12
+         },
+         "type": "ALBUM",
+         "uri": "spotify:album:5BLrEOEDKoDDg5T8PzdIHN"
+        }
+       ]
+      }
+     },
+     {
+      "releases": {
+       "items": [
+        {
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e02bbaaa8bf9aedb07135d2c6d3",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d00004851bbaaa8bf9aedb07135d2c6d3",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b273bbaaa8bf9aedb07135d2c6d3",
+            "width": 640
+           }
+          ]
+         },
+         "date": {
+          "isoString": "2021-11-05T00:00:00Z",
+          "precision": "DAY",
+          "year": 2021
+         },
+         "id": "6ofEQubaL265rIW6WnCU8y",
+         "name": "KID A MNESIA",
+         "tracks": {
+          "totalCount": 34
+         },
+         "type": "ALBUM",
+         "uri": "spotify:album:6ofEQubaL265rIW6WnCU8y"
+        }
+       ]
+      }
+     },
+     {
+      "releases": {
+       "items": [
+        {
+         "coverArt": {
+          "sources": [
+           {
+            "height": 300,
+            "url": "https://i.scdn.co/image/ab67616d00001e025637612eee3adc7070675fa5",
+            "width": 300
+           },
+           {
+            "height": 64,
+            "url": "https://i.scdn.co/image/ab67616d000048515637612eee3adc7070675fa5",
+            "width": 64
+           },
+           {
+            "height": 640,
+            "url": "https://i.scdn.co/image/ab67616d0000b2735637612eee3adc7070675fa5",
+            "width": 640
+           }
+          ]
+         },
+         "date": {
+          "isoString": "2021-11-01T00:00:00Z",
+          "precision": "DAY",
+          "year": 2021
+         },
+         "id": "2vTAZfcTyauC6ZG29d6yB5",
+         "name": "Follow Me Around",
+         "tracks": {
+          "totalCount": 1
+         },
+         "type": "SINGLE",
+         "uri": "spotify:album:2vTAZfcTyauC6ZG29d6yB5"
+        }
+       ]
+      }
+     }
+    ],
+    "totalCount": 45
+   }
+  }
+ }
+}
