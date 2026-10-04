@@ -9,3 +9,6 @@ src-tauri/gen/
 tokens.json*
 *.invalid
 .playwright-cli/
+
+# planning docs stay local
+plans/
