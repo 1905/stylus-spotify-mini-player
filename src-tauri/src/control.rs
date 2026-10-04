@@ -228,7 +228,13 @@ pub fn load_confirmed(before: Option<&str>, src: &Source, s: &Value, waited_ms: 
         Some(t) => t == track,
         None => src.uris.is_empty() || src.uris.iter().any(|u| u == track),
     };
-    wanted && (before != Some(track) || s["progress_ms"].as_u64().is_some_and(|p| p <= waited_ms + 1_500))
+    // a requested context must be the one playing: else the old track, unchanged and early in
+    // its play, would "confirm" a load that hasn't happened yet
+    let context_ok = match &src.context_uri {
+        Some(c) => s["context_uri"].as_str() == Some(c.as_str()),
+        None => true,
+    };
+    wanted && context_ok && (before != Some(track) || s["progress_ms"].as_u64().is_some_and(|p| p <= waited_ms + 1_500))
 }
 
 /// This Mac's state once it plays what was just loaded, None after `CONFIRM_WAIT`.
@@ -484,7 +490,11 @@ mod tests {
     }
 
     fn state(track: &str, playing: bool, progress: u64) -> Value {
-        json!({ "active": true, "is_playing": playing, "progress_ms": progress, "track": { "uri": track }, "context_uri": null })
+        state_in(track, playing, progress, None)
+    }
+
+    fn state_in(track: &str, playing: bool, progress: u64, context: Option<&str>) -> Value {
+        json!({ "active": true, "is_playing": playing, "progress_ms": progress, "track": { "uri": track }, "context_uri": context })
     }
 
     #[test]
@@ -494,9 +504,11 @@ mod tests {
         assert!(!load_confirmed(Some("spotify:track:kerala"), &ctx, &state("spotify:track:kerala", true, 9_000), 140));
         // loading (not playing yet), then the new track plays
         assert!(!load_confirmed(Some("spotify:track:kerala"), &ctx, &state("spotify:track:cycles", false, 0), 1_000));
-        assert!(load_confirmed(Some("spotify:track:kerala"), &ctx, &state("spotify:track:cycles", true, 200), 2_800));
+        assert!(load_confirmed(Some("spotify:track:kerala"), &ctx, &state_in("spotify:track:cycles", true, 200, Some("spotify:playlist:bonobo")), 2_800));
         // the same track restarted: its position shows it
-        assert!(load_confirmed(Some("spotify:track:cycles"), &ctx, &state("spotify:track:cycles", true, 300), 1_000));
+        assert!(load_confirmed(Some("spotify:track:cycles"), &ctx, &state_in("spotify:track:cycles", true, 300, Some("spotify:playlist:bonobo")), 1_000));
+        // Astra round 2: the old track early in its play, still in the OLD context, doesn't confirm
+        assert!(!load_confirmed(Some("spotify:track:a"), &ctx, &state_in("spotify:track:a", true, 500, Some("spotify:album:old")), 300));
         // a list: one of its tracks; an asked-for track: that one
         let list = Source { uris: vec!["spotify:track:a".into(), "spotify:track:b".into()], ..Source::default() };
         assert!(load_confirmed(None, &list, &state("spotify:track:b", true, 0), 500));

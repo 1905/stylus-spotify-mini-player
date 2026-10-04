@@ -427,6 +427,12 @@ impl Tracker {
             return;
         }
         if matches!(&live.source, Some(Source::Context { context_uri: c }) if c == context_uri) {
+            // same context, maybe new options (another client toggled shuffle/repeat): keep them
+            if live.shuffle != shuffle || live.repeat != repeat {
+                live.shuffle = shuffle;
+                live.repeat = repeat;
+                live.clock.dirty = true;
+            }
             return;
         }
         log::info!(target: LOG, "source is now context {context_uri} (loaded by another client)");

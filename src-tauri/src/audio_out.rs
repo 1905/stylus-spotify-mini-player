@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use librespot_playback::{
-    audio_backend::{Sink, SinkError, SinkResult},
+    audio_backend::{Sink, SinkResult},
     convert::Converter,
     decoder::AudioPacket,
     mixer::{Mixer, VolumeGetter},
@@ -65,34 +65,54 @@ pub struct RampSink {
     /// The gain of the last frame played (f32 bits), carried from one packet to the next.
     gain: Arc<AtomicU32>,
     out: Option<(Arc<rodio::Sink>, rodio::OutputStream)>,
+    /// When opening the device last failed: the next try waits RETRY_OPEN.
+    failed_at: Option<std::time::Instant>,
 }
+
+/// How long a failed device open waits before the next try.
+const RETRY_OPEN: Duration = Duration::from_secs(2);
 
 impl RampSink {
     /// `mixer` is the SoftMixer Spirc drives; its mapped volume is the target gain.
     pub fn new(mixer: Arc<dyn Mixer>) -> Self {
         let start = mixer.get_soft_volume().attenuation_factor() as f32;
-        RampSink { mixer, gain: Arc::new(AtomicU32::new(start.to_bits())), out: None }
+        RampSink { mixer, gain: Arc::new(AtomicU32::new(start.to_bits())), out: None, failed_at: None }
     }
 
-    fn opened(&mut self) -> SinkResult<&rodio::Sink> {
+    /// The open output, or None while the device can't be opened (retried every RETRY_OPEN).
+    /// Never an error to librespot: an Err from start()/write() pauses the player inside its
+    /// playing loop, which then hits its "Invalid PlayerState" check and calls exit(1).
+    fn opened(&mut self) -> Option<&rodio::Sink> {
         if self.out.is_none() {
-            let out = open_device().map_err(|e| {
-                log::error!("audio output: could not open the device: {e}");
-                SinkError::ConnectionRefused(e)
-            })?;
+            if self.failed_at.is_some_and(|t| t.elapsed() < RETRY_OPEN) {
+                return None;
+            }
+            let out = match open_device() {
+                Ok(out) => out,
+                Err(e) => {
+                    if self.failed_at.is_none() {
+                        log::error!("audio output: could not open the device: {e} (playing silence, retrying)");
+                    }
+                    self.failed_at = Some(std::time::Instant::now());
+                    return None;
+                }
+            };
+            self.failed_at = None;
             let sink = Arc::new(out.0);
             if let Ok(mut g) = CURRENT.lock() {
                 *g = Some(Arc::downgrade(&sink));
             }
             self.out = Some((sink, out.1));
         }
-        Ok(&self.out.as_ref().expect("opened above").0)
+        self.out.as_ref().map(|(sink, _)| sink.as_ref())
     }
 }
 
 impl Sink for RampSink {
     fn start(&mut self) -> SinkResult<()> {
-        self.opened()?.play();
+        if let Some(sink) = self.opened() {
+            sink.play();
+        }
         Ok(())
     }
 
@@ -105,10 +125,16 @@ impl Sink for RampSink {
     }
 
     fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
-        let samples = packet.samples().map_err(|e| SinkError::OnWrite(e.to_string()))?;
+        // a packet without PCM samples is skipped: an Err here would take the same exit(1) path
+        let Ok(samples) = packet.samples() else { return Ok(()) };
         let samples = converter.f64_to_f32(samples);
+        let frames = samples.len() / NUM_CHANNELS as usize;
         let source = Ramped::new(samples, self.mixer.get_soft_volume(), self.gain.clone());
-        let sink = self.opened()?;
+        // no device: drop the packet but keep real time, so the track doesn't race to its end
+        let Some(sink) = self.opened() else {
+            std::thread::sleep(Duration::from_secs_f64(frames as f64 / f64::from(SAMPLE_RATE)));
+            return Ok(());
+        };
         sink.append(source);
         while sink.len() > MAX_QUEUED {
             std::thread::sleep(Duration::from_millis(10));
