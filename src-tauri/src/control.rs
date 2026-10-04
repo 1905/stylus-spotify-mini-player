@@ -3,8 +3,12 @@
 //! directly (player.rs, no Web API); any other device through the Web API (spotify.rs, quota-
 //! guarded). Used by the MCP server (mcp_app.rs).
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use serde_json::{json, Value};
 
+use crate::nowplaying::Now;
 use crate::spotify;
 
 pub const NO_DEVICE: &str = "No device to play on: open Needle or Spotify somewhere";
@@ -62,17 +66,133 @@ fn engine() -> Result<crate::player::Engine, String> {
     crate::internal::engine().ok_or_else(|| NOT_READY.to_string())
 }
 
-/// The routing view now: the engine, and the active device from the Connect cluster (the Web
-/// API's player state while the player isn't up).
+/// This Mac's state from the player's own events (nowplaying.rs), None while the player isn't up.
+/// Live even while a track's metadata loads, when `Engine::now_state` says nothing.
+pub fn here() -> Option<Now> {
+    crate::nowplaying::live().map(|n| n.now())
+}
+
+/// This Mac is the active Connect device, by its own events.
+fn here_active() -> bool {
+    here().is_some_and(|n| n.engine_active)
+}
+
+/// The active device: This Mac when its own events say so (no Connect cluster or Web API
+/// needed); else the cluster's (or the Web API's) answer, minus This Mac: the cluster lags
+/// behind its events, and an inactive Spirc ignores commands.
+pub fn active_device(own: Option<&str>, ready: bool, here_active: bool, remote: Option<String>) -> Option<String> {
+    match own {
+        Some(o) if ready && here_active => Some(o.to_string()),
+        _ => remote.filter(|id| !(ready && own == Some(id.as_str()))),
+    }
+}
+
+/// The routing view now: the engine, and the active device (`active_device`; the Connect
+/// cluster, the Web API's player state only without a cluster).
 pub async fn view() -> View {
     let engine = crate::internal::engine();
     let ready = engine.as_ref().is_some_and(|e| e.is_ready());
     let own = crate::internal::own_device_id();
-    let active = match crate::internal::cluster_state() {
-        Ok(state) => state.and_then(|s| s["device_id"].as_str().map(str::to_string)),
-        Err(_) => spotify::playback_state().await.ok().filter(|s| s["active"] == true).and_then(|s| s["device_id"].as_str().map(str::to_string)),
+    let here = ready && here_active();
+    let remote = if here {
+        None
+    } else {
+        match crate::internal::cluster_state() {
+            Ok(state) => state.and_then(|s| s["device_id"].as_str().map(str::to_string)),
+            Err(_) => spotify::playback_state().await.ok().filter(|s| s["active"] == true).and_then(|s| s["device_id"].as_str().map(str::to_string)),
+        }
     };
-    View { own, ready, active }
+    View { active: active_device(own.as_deref(), ready, here, remote), own, ready }
+}
+
+/// The device a volume command is for: `device`, else the active one, else This Mac when ready.
+fn target(v: &View, device: Option<String>) -> Option<String> {
+    device.or_else(|| v.active.clone()).or_else(|| if v.ready { v.own.clone() } else { None })
+}
+
+/// The device list with This Mac's `is_active` from its own events (the cluster lags behind them).
+pub fn mark_here(list: Value, own: &str, here_active: bool) -> Value {
+    let Value::Array(mut items) = list else { return list };
+    for d in &mut items {
+        let mine = d["id"] == own;
+        if here_active || mine {
+            d["is_active"] = json!(here_active && mine);
+        }
+    }
+    Value::Array(items)
+}
+
+/// `list_devices`, with This Mac's activity from its own events while the player is up.
+pub async fn devices() -> Result<Value, String> {
+    let list = spotify::list_devices().await?;
+    let ready = crate::internal::engine().is_some_and(|e| e.is_ready());
+    Ok(match crate::internal::own_device_id() {
+        Some(own) if ready => mark_here(list, &own, here_active()),
+        _ => list,
+    })
+}
+
+// ---- This Mac's volume ------------------------------------------------------------------------
+
+/// This Mac's volume as last set while it was inactive. Spirc ignores volume then, and takes
+/// its old level back when it activates: the level waits here, reads report it, and the next
+/// load here sends it.
+#[derive(Debug, Default, PartialEq)]
+pub struct PendingVolume(Option<u8>);
+
+impl PendingVolume {
+    /// Sets `percent`: true when it goes to Spirc now (This Mac active), false when it waits.
+    pub fn set(&mut self, active: bool, percent: u8) -> bool {
+        self.0 = (!active).then_some(percent);
+        active
+    }
+
+    /// The level to report: the waiting one while inactive, else the player's (`live`).
+    pub fn read(&mut self, active: bool, live: u8) -> u8 {
+        if active {
+            // activated some other way (the UI, a phone): the player's level counts
+            self.0 = None;
+            return live;
+        }
+        self.0.unwrap_or(live)
+    }
+
+    pub fn take(&mut self) -> Option<u8> {
+        self.0.take()
+    }
+}
+
+static PENDING_VOLUME: Mutex<PendingVolume> = Mutex::new(PendingVolume(None));
+
+fn pending_volume() -> std::sync::MutexGuard<'static, PendingVolume> {
+    PENDING_VOLUME.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Sets This Mac's volume. True: applied now; false: waits for the next load here.
+fn set_here_volume(e: &crate::player::Engine, percent: u8) -> Result<bool, String> {
+    let now = pending_volume().set(here_active(), percent);
+    if now {
+        e.set_volume(percent)?;
+        // the player's VolumeChanged follows in a moment: reads right after see the level already
+        if let Some(n) = crate::nowplaying::live() {
+            n.set_volume(crate::nowplaying::volume_from_percent(percent));
+        }
+    }
+    Ok(now)
+}
+
+fn here_volume(e: &crate::player::Engine) -> u8 {
+    pending_volume().read(here_active(), e.volume_percent())
+}
+
+/// After a load here (it activates This Mac): the level set while inactive, if any.
+fn send_pending_volume(e: &crate::player::Engine) {
+    let pending = pending_volume().take();
+    if let Some(p) = pending {
+        if let Err(err) = e.set_volume(p) {
+            log::warn!(target: "needle::cmd", "pending volume {p} not sent: {err}");
+        }
+    }
 }
 
 /// What to play: a context (playlist, album, artist; from `track_uri` when given) or a track list.
@@ -83,22 +203,62 @@ pub struct Source {
     pub track_uri: Option<String>,
 }
 
-/// The current shuffle and repeat on This Mac, so a load keeps them.
-fn local_modes(engine: &crate::player::Engine) -> (Option<bool>, Option<String>) {
-    let s = engine.now_state().unwrap_or(Value::Null);
-    (s["shuffle"].as_bool(), s["repeat"].as_str().map(str::to_string))
+/// The current shuffle and repeat on This Mac while it's active, so a load keeps them.
+fn local_modes(here: Option<&Now>) -> (Option<bool>, Option<String>) {
+    match here.filter(|n| n.engine_active) {
+        Some(n) => (Some(n.shuffle), Some(n.repeat.as_str().to_string())),
+        None => (None, None),
+    }
 }
 
-/// Starts `src` on `device` (an id; None = the active device, else This Mac). `{device_id, path}`.
+/// How long `play` waits for This Mac to start what it loaded: measured 2026-10-03, load to
+/// Playing took 3.7 s cold (activation + first track) and ~3 s warm.
+const CONFIRM_WAIT: Duration = Duration::from_secs(5);
+
+/// `s` (This Mac's `now_state`) shows the load of `src`, `waited_ms` after it was sent: playing,
+/// the asked-for track (or one of the list), and a new track or the same one restarted.
+pub fn load_confirmed(before: Option<&str>, src: &Source, s: &Value, waited_ms: u64) -> bool {
+    if s["active"] != true || s["is_playing"] != true {
+        return false;
+    }
+    let Some(track) = s["track"]["uri"].as_str() else { return false };
+    let wanted = match &src.track_uri {
+        Some(t) => t == track,
+        None => src.uris.is_empty() || src.uris.iter().any(|u| u == track),
+    };
+    wanted && (before != Some(track) || s["progress_ms"].as_u64().is_some_and(|p| p <= waited_ms + 1_500))
+}
+
+/// This Mac's state once it plays what was just loaded, None after `CONFIRM_WAIT`.
+async fn confirm_load(e: &crate::player::Engine, before: Option<&str>, src: &Source) -> Option<Value> {
+    let t0 = Instant::now();
+    loop {
+        let waited = t0.elapsed();
+        if let Some(s) = e.now_state().filter(|s| load_confirmed(before, src, s, waited.as_millis() as u64)) {
+            return Some(s);
+        }
+        if waited >= CONFIRM_WAIT {
+            return None;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+}
+
+/// Starts `src` on `device` (an id; None = the active device, else This Mac). `{device_id, path}`;
+/// This Mac adds `confirmed` and, when confirmed, `state` (its `now_state`).
 pub async fn play(src: Source, device: Option<String>) -> Result<Value, String> {
     let v = view().await;
     match route_play(&v, device.as_deref())? {
         Path::Local => {
             let engine = engine()?;
-            let (shuffle, repeat) = local_modes(&engine);
+            let here = here();
+            let (shuffle, repeat) = local_modes(here.as_ref());
+            let before = here.and_then(|n| n.track_uri);
             let uris = (!src.uris.is_empty()).then(|| src.uris.clone());
-            engine.load(src.context_uri, uris, src.track_uri, 0, true, shuffle, repeat)?;
-            Ok(json!({ "device_id": v.own, "path": "this_mac" }))
+            engine.load(src.context_uri.clone(), uris, src.track_uri.clone(), 0, true, shuffle, repeat)?;
+            send_pending_volume(&engine);
+            let state = confirm_load(&engine, before.as_deref(), &src).await;
+            Ok(json!({ "device_id": v.own, "path": "this_mac", "confirmed": state.is_some(), "state": state }))
         }
         Path::Remote(id) => {
             match src.context_uri {
@@ -160,12 +320,13 @@ fn outcome(v: &View, path: &Path) -> Value {
     }
 }
 
-/// The volume (0–100) of `device` (None = the active one): This Mac's own, else the device list's.
+/// The volume (0–100) of `device` (None = the active one, else This Mac): This Mac's own (or the
+/// level waiting for its next load), else the device list's.
 pub async fn volume(device: Option<&str>) -> Result<u8, String> {
     let v = view().await;
-    let t = device.map(str::to_string).or(v.active.clone()).ok_or(NOTHING_PLAYING)?;
+    let t = target(&v, device.map(str::to_string)).ok_or(NOTHING_PLAYING)?;
     if v.ready && v.is_own(&t) {
-        return Ok(engine()?.volume_percent());
+        return Ok(here_volume(&engine()?));
     }
     let list = spotify::list_devices().await?;
     let d = list.as_array().into_iter().flatten().find(|d| d["id"] == t.as_str()).ok_or("That device isn't listed any more")?;
@@ -175,16 +336,22 @@ pub async fn volume(device: Option<&str>) -> Result<u8, String> {
     Ok(d["volume_percent"].as_u64().unwrap_or(0).min(100) as u8)
 }
 
-/// Sets the volume of `device` (None = the active one). This Mac: directly, active or not.
+/// Sets the volume of `device` (None = the active one, else This Mac). This Mac: directly while
+/// active, else at its next load here (`PendingVolume`).
 pub async fn set_volume(percent: u8, device: Option<String>) -> Result<Value, String> {
     let v = view().await;
-    let t = device.or(v.active.clone()).ok_or(NOTHING_PLAYING)?;
+    let t = target(&v, device).ok_or(NOTHING_PLAYING)?;
     let path = if v.ready && v.is_own(&t) { Path::Local } else { Path::Remote(t.clone()) };
+    let mut out = outcome(&v, &path);
     match &path {
-        Path::Local => engine()?.set_volume(percent.min(100))?,
+        Path::Local => {
+            if !set_here_volume(&engine()?, percent.min(100))? {
+                out["note"] = json!("This Mac isn't playing: the level applies when it starts playing here");
+            }
+        }
         Path::Remote(id) => spotify::set_volume(percent.min(100), Some(id.clone())).await?,
     }
-    Ok(outcome(&v, &path))
+    Ok(out)
 }
 
 /// Adds a track to the active device's queue (This Mac: a Connect command, no Web API).
@@ -208,6 +375,7 @@ pub async fn transfer(device: String, play: bool) -> Result<Value, String> {
                 let (shuffle, repeat) = (s["shuffle"].as_bool(), s["repeat"].as_str().map(str::to_string));
                 let pos = s["position_ms"].as_u64().unwrap_or(0).min(u64::from(u32::MAX)) as u32;
                 e.load(ctx, uris, Some(track.to_string()), pos, play, shuffle, repeat)?;
+                send_pending_volume(&e);
                 return Ok(json!({ "device_id": v.own, "path": "this_mac" }));
             }
         }
@@ -249,5 +417,80 @@ mod tests {
         assert_eq!(r(&view(Some("mac"), true, Some("mac")), Some("tv")), Ok(Path::Remote("tv".into())));
         // This Mac named while not ready
         assert_eq!(r(&view(Some("mac"), false, None), Some("mac")), Err(NOT_READY.into()));
+    }
+
+    #[test]
+    fn this_mac_active_by_its_own_events_without_cluster_or_web_api() {
+        // the observed bug: This Mac plays, no cluster yet, the Web API rate-limited (remote None)
+        let active = active_device(Some("mac"), true, true, None);
+        assert_eq!(active.as_deref(), Some("mac"));
+        assert_eq!(route_transport(&View { own: Some("mac".into()), ready: true, active }, None), Ok(Path::Local), "next goes to Spirc");
+        // its events win over a lagging cluster naming another device
+        assert_eq!(active_device(Some("mac"), true, true, Some("phone".into())).as_deref(), Some("mac"));
+        // the cluster still names This Mac after its events said it went inactive: stale
+        assert_eq!(active_device(Some("mac"), true, false, Some("mac".into())), None);
+        assert_eq!(active_device(Some("mac"), true, false, Some("phone".into())).as_deref(), Some("phone"));
+        // player not up: only the remote answer
+        assert_eq!(active_device(None, false, false, Some("phone".into())).as_deref(), Some("phone"));
+        assert_eq!(active_device(Some("mac"), false, true, Some("mac".into())).as_deref(), Some("mac"));
+    }
+
+    #[test]
+    fn volume_target_falls_back_to_this_mac() {
+        assert_eq!(target(&view(Some("mac"), true, None), None).as_deref(), Some("mac"));
+        assert_eq!(target(&view(Some("mac"), true, Some("tv")), None).as_deref(), Some("tv"));
+        assert_eq!(target(&view(Some("mac"), true, Some("tv")), Some("mac".into())).as_deref(), Some("mac"));
+        assert_eq!(target(&view(Some("mac"), false, None), None), None);
+    }
+
+    #[test]
+    fn volume_set_while_inactive_waits_for_the_load() {
+        // the observed bug: set_volume 35 while inactive was dropped by Spirc; the read said 73
+        let mut p = PendingVolume::default();
+        assert!(!p.set(false, 35), "inactive: not sent now");
+        assert_eq!(p.read(false, 73), 35, "reads report the level set");
+        assert_eq!(p.read(false, 73) as i64 + 10, 45, "volume_step +10 starts from it");
+        assert_eq!(p.take(), Some(35), "the load sends it");
+        assert_eq!(p.read(false, 73), 73);
+        // active: straight to Spirc, nothing waits
+        assert!(p.set(true, 30));
+        assert_eq!(p.read(true, 30), 30);
+        // activated some other way: the player's level counts, the old one is dropped
+        p.set(false, 20);
+        assert_eq!(p.read(true, 60), 60);
+        assert_eq!(p.take(), None);
+    }
+
+    fn state(track: &str, playing: bool, progress: u64) -> Value {
+        json!({ "active": true, "is_playing": playing, "progress_ms": progress, "track": { "uri": track }, "context_uri": null })
+    }
+
+    #[test]
+    fn load_confirmation() {
+        let ctx = Source { context_uri: Some("spotify:playlist:bonobo".into()), ..Source::default() };
+        // the observed bug: right after play, the old track still plays — not confirmed
+        assert!(!load_confirmed(Some("spotify:track:kerala"), &ctx, &state("spotify:track:kerala", true, 9_000), 140));
+        // loading (not playing yet), then the new track plays
+        assert!(!load_confirmed(Some("spotify:track:kerala"), &ctx, &state("spotify:track:cycles", false, 0), 1_000));
+        assert!(load_confirmed(Some("spotify:track:kerala"), &ctx, &state("spotify:track:cycles", true, 200), 2_800));
+        // the same track restarted: its position shows it
+        assert!(load_confirmed(Some("spotify:track:cycles"), &ctx, &state("spotify:track:cycles", true, 300), 1_000));
+        // a list: one of its tracks; an asked-for track: that one
+        let list = Source { uris: vec!["spotify:track:a".into(), "spotify:track:b".into()], ..Source::default() };
+        assert!(load_confirmed(None, &list, &state("spotify:track:b", true, 0), 500));
+        assert!(!load_confirmed(None, &list, &state("spotify:track:x", true, 0), 500));
+        let at = Source { track_uri: Some("spotify:track:b".into()), ..ctx.clone() };
+        assert!(!load_confirmed(None, &at, &state("spotify:track:a", true, 0), 500));
+        assert!(!load_confirmed(None, &ctx, &json!({ "active": false }), 500));
+    }
+
+    #[test]
+    fn devices_mark_this_mac_by_its_events() {
+        // the observed bug: the cluster (stale) said nothing/another device is active while This Mac played
+        let list = json!([{ "id": "mac", "is_active": false }, { "id": "phone", "is_active": true }]);
+        assert_eq!(mark_here(list.clone(), "mac", true), json!([{ "id": "mac", "is_active": true }, { "id": "phone", "is_active": false }]));
+        let stale = json!([{ "id": "mac", "is_active": true }, { "id": "phone", "is_active": false }]);
+        assert_eq!(mark_here(stale, "mac", false), json!([{ "id": "mac", "is_active": false }, { "id": "phone", "is_active": false }]));
+        assert_eq!(mark_here(list.clone(), "mac", false), list, "another device plays: unchanged");
     }
 }

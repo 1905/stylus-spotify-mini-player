@@ -511,8 +511,35 @@ impl NowPlaying {
     }
 }
 
+/// The holder `listen` feeds, for the MCP routing (control.rs, mcp_app.rs): it needs This Mac's
+/// raw state even while a track's metadata loads, when `snapshot` says nothing.
+static LIVE: Mutex<Option<std::sync::Weak<NowPlaying>>> = Mutex::new(None);
+
+/// The running holder, while the player is up.
+pub fn live() -> Option<Arc<NowPlaying>> {
+    lock(&LIVE).as_ref()?.upgrade()
+}
+
+impl NowPlaying {
+    /// The raw state as the player's events left it.
+    pub fn now(&self) -> Now {
+        lock(&self.now).clone()
+    }
+
+    /// What was last loaded here (the session), None with nothing loaded.
+    pub fn last_session(&self) -> Option<crate::session::Saved> {
+        self.tracker.current()
+    }
+}
+
+/// 0–100 % → 0–65535, the inverse of `volume_percent`.
+pub fn volume_from_percent(percent: u8) -> u16 {
+    ((u32::from(percent.min(100)) * 65535 + 50) / 100) as u16
+}
+
 /// Feeds the player's events into `np` until the player goes away (its channel closes).
 pub async fn listen(np: Arc<NowPlaying>, mut events: PlayerEventChannel) {
+    *lock(&LIVE) = Some(Arc::downgrade(&np));
     while let Some(event) = events.recv().await {
         np.on_event(&event);
     }
@@ -633,5 +660,8 @@ mod tests {
         assert_eq!(volume_percent(0), 0);
         assert_eq!(volume_percent(65535), 100);
         assert_eq!(volume_percent(32768), 50);
+        for p in [0, 1, 30, 35, 40, 73, 99, 100] {
+            assert_eq!(volume_percent(volume_from_percent(p)), p, "{p}");
+        }
     }
 }

@@ -508,14 +508,22 @@ async fn volume_of(b: &dyn Backend, device: Option<String>) -> Result<u8, String
 async fn now_playing(b: &dyn Backend) -> Result<Value, String> {
     let s = b.now_playing().await?;
     if s["active"] != true || s["track"].is_null() && s["device_id"].is_null() {
-        return Ok(json!({ "playing": false, "note": "Nothing is playing" }));
+        let mut out = json!({ "playing": false, "note": "Nothing is playing" });
+        if let Some(e) = s["unchecked"].as_str() {
+            out["note"] = json!(format!("Nothing is playing on This Mac. Other devices can't be checked now: {}", plain_error(e)));
+        }
+        if let Some(t) = s["last_here"]["track_uri"].as_str() {
+            let track = match b.resolve_link(t.into()).await {
+                Ok(r) if r["track"].is_object() => slim_track(&r["track"]),
+                _ => json!({ "uri": t }),
+            };
+            let context = context_of(b, s["last_here"]["context_uri"].as_str()).await;
+            out["last_played_here"] = json!({ "track": track, "context": context, "position_ms": s["last_here"]["position_ms"] });
+        }
+        return Ok(out);
     }
-    let ctx = s["context_uri"].as_str().filter(|c| !c.is_empty()).map(str::to_string);
-    let context = match &ctx {
-        Some(uri) => json!({ "uri": uri, "name": context_name(b, uri).await }),
-        None => Value::Null,
-    };
-    Ok(json!({
+    let context = context_of(b, s["context_uri"].as_str()).await;
+    let mut out = json!({
         "track": if s["track"].is_null() { Value::Null } else { slim_track(&s["track"]) },
         "is_playing": s["is_playing"],
         "position_ms": s["progress_ms"],
@@ -524,18 +532,32 @@ async fn now_playing(b: &dyn Backend) -> Result<Value, String> {
         "repeat": s["repeat"],
         "volume": s["volume_percent"],
         "context": context,
-    }))
+    });
+    if s["loading"] == true {
+        out["note"] = json!("The track is still loading: its name comes in a second");
+    }
+    Ok(out)
 }
 
-/// A playing context's name, from the user's lists (best effort; null when unknown).
+/// `{uri, name}` of a playing context, null without one.
+async fn context_of(b: &dyn Backend, uri: Option<&str>) -> Value {
+    match uri.filter(|c| !c.is_empty()) {
+        Some(uri) => json!({ "uri": uri, "name": context_name(b, uri).await }),
+        None => Value::Null,
+    }
+}
+
+/// A playing context's name: from the user's lists, else looked up like a link (the internal
+/// API, no Web API needed). Null when both fail.
 async fn context_name(b: &dyn Backend, uri: &str) -> Value {
-    let (pl, mixes, links) = futures_util::join!(b.playlists(), b.mixes(), b.links());
-    for list in [pl, mixes, links].into_iter().flatten() {
-        if let Some(it) = list.as_array().into_iter().flatten().find(|it| uri_of("playlist", it) == uri || it["uri"] == uri) {
+    let kind = uri.split(':').nth(1).unwrap_or("playlist");
+    let (pl, mixes, links, albums) = futures_util::join!(b.playlists(), b.mixes(), b.links(), b.albums());
+    for list in [pl, mixes, links, albums].into_iter().flatten() {
+        if let Some(it) = list.as_array().into_iter().flatten().find(|it| uri_of(kind, it) == uri) {
             return it["name"].clone();
         }
     }
-    Value::Null
+    b.resolve_link(uri.into()).await.map(|r| r["name"].clone()).unwrap_or(Value::Null)
 }
 
 async fn search(b: &dyn Backend, a: &Value) -> Result<Value, String> {
@@ -703,7 +725,23 @@ async fn play(b: &dyn Backend, a: &Value) -> Result<Value, String> {
         return Err("Give uri, name, query, uris or context_uri".into());
     };
     let r = b.play(src, device).await?;
-    Ok(json!({ "started": what, "device_id": r["device_id"], "note": "Check with now_playing in a second or two" }))
+    Ok(play_result(what, &r))
+}
+
+/// `play`'s answer. This Mac confirms within 5 s (`confirmed`, with its state): `status:
+/// playing` and the track. Not confirmed, or another device (no confirmation): `requested`.
+fn play_result(what: Value, r: &Value) -> Value {
+    if r["confirmed"] == true {
+        let s = &r["state"];
+        let track = if s["track"].is_null() { Value::Null } else { slim_track(&s["track"]) };
+        return json!({ "status": "playing", "started": what, "track": track, "device_id": r["device_id"] });
+    }
+    let note = if r["confirmed"] == false {
+        "Sent to This Mac, but it hasn't started within 5 s: check now_playing once in a few seconds"
+    } else {
+        "Sent: check now_playing once in a second or two"
+    };
+    json!({ "status": "requested", "requested": what, "device_id": r["device_id"], "note": note })
 }
 
 async fn artist(b: &dyn Backend, a: &Value) -> Result<Value, String> {
@@ -862,7 +900,8 @@ mod tests {
     async fn play_by_name_finds_mixes_and_links() {
         let b = Stub::default();
         let r = call(&b, "play", &json!({ "name": "bonobo radio" })).await.unwrap();
-        assert_eq!(r["started"]["uri"], "spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
+        assert_eq!(r["requested"]["uri"], "spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
+        assert_eq!(r["status"], "requested", "no confirmation from the stub");
         call(&b, "play", &json!({ "name": "OK Computer", "device": "living room" })).await.unwrap();
         call(&b, "play", &json!({ "uri": "https://open.spotify.com/track/7c378mlmubSu7NGkLFa4sN?si=1" })).await.unwrap();
         let sent = b.sent.lock().unwrap().clone();
@@ -895,5 +934,115 @@ mod tests {
         assert_eq!(call(&b, "pause", &json!({})).await.unwrap_err(), "not available");
         let r = call(&b, "list_playlists", &json!({})).await.unwrap();
         assert_eq!(r["playlists"][0]["uri"], "spotify:playlist:1A2b3C4d5E6f7G8h9I0jKl");
+    }
+
+    const RATE_LIMITED: &str = "RATE_LIMITED:41000: Spotify paused this app's library access";
+
+    /// This Mac is up, the Web API rate-limited: every Web-API-only call fails like the app's.
+    /// `now` is what mcp_app's now_playing answers; links resolve through the internal API.
+    struct Blocked {
+        now: Value,
+        confirmed: Option<bool>,
+    }
+
+    impl Backend for Blocked {
+        fn now_playing(&self) -> Fut<'_> {
+            let s = self.now.clone();
+            Box::pin(async move { Ok(s) })
+        }
+        fn playlists(&self) -> Fut<'_> {
+            Box::pin(async { Err(RATE_LIMITED.to_string()) })
+        }
+        fn albums(&self) -> Fut<'_> {
+            Box::pin(async { Err(RATE_LIMITED.to_string()) })
+        }
+        fn followed(&self) -> Fut<'_> {
+            Box::pin(async { Err(RATE_LIMITED.to_string()) })
+        }
+        fn mixes(&self) -> Fut<'_> {
+            Box::pin(async { Ok(json!([{ "uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb", "name": "Bonobo Radio" }])) })
+        }
+        fn links(&self) -> Fut<'_> {
+            Box::pin(async { Ok(json!([])) })
+        }
+        fn resolve_link(&self, text: String) -> Fut<'_> {
+            Box::pin(async move {
+                match text.as_str() {
+                    "spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs" => Ok(json!({ "kind": "album", "uri": text, "name": "Migration" })),
+                    "spotify:track:5DAjrJqXqYtgr67pVhmUeR" => Ok(json!({ "kind": "track", "uri": text, "name": "Kerala", "track": { "uri": text, "name": "Kerala", "artists": "Bonobo" } })),
+                    _ => Err("Spotify didn't return this playlist".into()),
+                }
+            })
+        }
+        fn play(&self, _src: Source, _device: Option<String>) -> Fut<'_> {
+            let confirmed = self.confirmed;
+            Box::pin(async move {
+                Ok(match confirmed {
+                    Some(true) => json!({ "device_id": "mac", "path": "this_mac", "confirmed": true, "state": { "active": true, "is_playing": true, "track": { "uri": "spotify:track:5UAVcondwGsdqnnumvEUXw", "name": "Cycles", "artists": "Bonobo" }, "context_uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb" } }),
+                    Some(false) => json!({ "device_id": "mac", "path": "this_mac", "confirmed": false, "state": null }),
+                    None => json!({ "device_id": "tv", "path": "web_api" }),
+                })
+            })
+        }
+    }
+
+    fn here_playing(context: &str) -> Value {
+        json!({
+            "active": true, "is_playing": true, "progress_ms": 1000, "device_id": "mac", "device_name": "This Mac",
+            "track": { "uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR", "name": "Kerala", "artists": "Bonobo" },
+            "shuffle": false, "repeat": "off", "volume_percent": 40, "context_uri": context,
+        })
+    }
+
+    #[tokio::test]
+    async fn now_playing_names_the_context_while_rate_limited() {
+        // a mix: from the Mixes list
+        let b = Blocked { now: here_playing("spotify:playlist:37i9dQZF1E4yLltmVk3nyb"), confirmed: None };
+        let r = call(&b, "now_playing", &json!({})).await.unwrap();
+        assert_eq!(r["track"]["name"], "Kerala");
+        assert_eq!(r["context"]["name"], "Bonobo Radio");
+        // an album (saved albums blocked): looked up like a link
+        let b = Blocked { now: here_playing("spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs"), confirmed: None };
+        assert_eq!(call(&b, "now_playing", &json!({})).await.unwrap()["context"]["name"], "Migration");
+        // unknown everywhere: the uri, name null, no error
+        let b = Blocked { now: here_playing("spotify:playlist:0000000000000000000000"), confirmed: None };
+        let r = call(&b, "now_playing", &json!({})).await.unwrap();
+        assert_eq!((r["context"]["uri"].clone(), r["context"]["name"].clone()), (json!("spotify:playlist:0000000000000000000000"), Value::Null));
+    }
+
+    #[tokio::test]
+    async fn now_playing_idle_while_rate_limited_is_not_an_error() {
+        let now = json!({ "active": false, "unchecked": RATE_LIMITED, "last_here": { "track_uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR", "context_uri": "spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs", "position_ms": 5000 } });
+        let r = call(&Blocked { now, confirmed: None }, "now_playing", &json!({})).await.unwrap();
+        assert_eq!(r["playing"], false);
+        assert!(r["note"].as_str().unwrap().starts_with("Nothing is playing on This Mac. Other devices can't be checked now"), "{r}");
+        assert_eq!(r["last_played_here"]["track"]["name"], "Kerala");
+        assert_eq!(r["last_played_here"]["context"]["name"], "Migration");
+        // nothing known at all
+        let r = call(&Blocked { now: json!({ "active": false }), confirmed: None }, "now_playing", &json!({})).await.unwrap();
+        assert_eq!(r, json!({ "playing": false, "note": "Nothing is playing" }));
+        // the track's metadata still loading
+        let mut s = here_playing("spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
+        s["loading"] = json!(true);
+        s["track"] = json!({ "uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR" });
+        let r = call(&Blocked { now: s, confirmed: None }, "now_playing", &json!({})).await.unwrap();
+        assert_eq!(r["track"]["uri"], "spotify:track:5DAjrJqXqYtgr67pVhmUeR");
+        assert!(r["note"].as_str().unwrap().contains("loading"));
+    }
+
+    #[tokio::test]
+    async fn play_says_whether_this_mac_started() {
+        let b = Blocked { now: json!({}), confirmed: Some(true) };
+        let r = call(&b, "play", &json!({ "name": "Bonobo Radio" })).await.unwrap();
+        assert_eq!(r["status"], "playing");
+        assert_eq!(r["started"]["uri"], "spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
+        assert_eq!(r["track"]["name"], "Cycles");
+        let b = Blocked { now: json!({}), confirmed: Some(false) };
+        let r = call(&b, "play", &json!({ "name": "Bonobo Radio" })).await.unwrap();
+        assert_eq!(r["status"], "requested");
+        assert!(r["note"].as_str().unwrap().contains("hasn't started within 5 s"), "{r}");
+        assert!(r.get("started").is_none());
+        let b = Blocked { now: json!({}), confirmed: None };
+        assert_eq!(call(&b, "play", &json!({ "uri": "spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs" })).await.unwrap()["status"], "requested");
     }
 }

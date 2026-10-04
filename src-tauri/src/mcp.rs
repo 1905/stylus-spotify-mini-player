@@ -94,7 +94,7 @@ pub struct Needle {
     backend: Arc<dyn Backend>,
 }
 
-const INSTRUCTIONS: &str = "Needle is a Spotify player on this Mac. Search before you play; prefer the user's own playlists and mixes when they name one (play with `name`). This Mac is Needle's own speaker. After play, check now_playing once.";
+const INSTRUCTIONS: &str = "Needle is a Spotify player on this Mac. Search before you play; prefer the user's own playlists and mixes when they name one (play with `name`). This Mac is Needle's own speaker. play reports status playing (with the track) or requested; after requested, check now_playing once.";
 
 /// One line per call: tool, args (cut at 160 chars), ok or the error, ms.
 fn log_call(tool: &str, args: &Value, result: &Result<Value, String>, ms: u128) {
@@ -369,7 +369,7 @@ Needle's MCP server (`needle`) controls Spotify through the Needle app on this M
 - When the user names a playlist or mix (\"my Bonobo Radio\", \"Daily Mix 2\", \"Discover Weekly\"), play it with `play` `name`; `list_mixes` and `list_playlists` show what exists.
 - A Spotify share link (open.spotify.com/...) goes to `open_link`; `save: true` keeps it in Needle's library, `play: true` plays it.
 - \"This Mac\" is Needle's own speaker. It keeps working when Spotify rate-limits Needle's Web API; other devices need the Web API.
-- After `play` or `transfer`, call `now_playing` once to confirm what started. Never poll it in a loop.
+- `play` on This Mac waits up to 5 s: `status: playing` names the track that started. `status: requested` means not confirmed yet: call `now_playing` once a few seconds later. After `transfer`, call `now_playing` once. Never poll it in a loop.
 - Volume: `set_volume` (0-100), `volume_step` (+/-), `mute` / `unmute`.
 - If a name matches several items, the error lists them with uris: pick one, or ask the user.
 - Errors are plain sentences: tell the user what they say, don't retry the same call more than once.
