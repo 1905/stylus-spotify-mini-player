@@ -636,7 +636,7 @@ fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
     match session.dealer().listen_for("hm://connect-state/v1/cluster", Message::from_raw::<ClusterUpdate>) {
         Ok(stream) => stream,
         Err(e) => {
-            log::warn!(target: "needle::session", "no cluster updates, loads by other clients keep their first track only: {e}");
+            log::warn!(target: "stylus::session", "no cluster updates, loads by other clients keep their first track only: {e}");
             Box::pin(futures_util::stream::pending())
         }
     }
@@ -656,7 +656,7 @@ fn follow_cluster(tracker: &Tracker, update: &ClusterUpdate, device_id: &str) {
 /// Loads the saved session back, paused, on the first ready of the launch. Skipped when
 /// there is none, when this player already has a track, or when another device is playing.
 async fn restore(engine: Engine, device_id: String) {
-    const LOG: &str = "needle::session";
+    const LOG: &str = "stylus::session";
     let tracker = engine.0.session.clone();
     let Some(saved) = tracker.current() else {
         log::info!(target: LOG, "restore skipped: no saved session for this account");
@@ -873,8 +873,8 @@ fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32,
 /// A local command's result, logged (an error as a warning).
 fn logged(what: &str, r: Result<(), String>) -> Result<(), String> {
     match &r {
-        Ok(()) => log::info!(target: "needle::cmd", "{what}"),
-        Err(e) => log::warn!(target: "needle::cmd", "{what} failed: {e}"),
+        Ok(()) => log::info!(target: "stylus::cmd", "{what}"),
+        Err(e) => log::warn!(target: "stylus::cmd", "{what} failed: {e}"),
     }
     r
 }
@@ -957,7 +957,7 @@ impl Engine {
             LoadSource::Context(c) => Source::Context { context_uri: c.clone() },
             LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
         };
-        log::info!(target: "needle::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
+        log::info!(target: "stylus::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
         let request = load_request(source, track_uri.clone(), position_ms, play, m);
         crate::audio_out::flush();
         self.with_spirc(|s| {
@@ -1224,7 +1224,7 @@ mod tests {
     }
 
     fn temp_path(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("needle-test-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stylus-test-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("player-device-id")
     }

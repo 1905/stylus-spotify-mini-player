@@ -1,4 +1,4 @@
-// Needle — stage UI: boot, sequential poll loop, the run of covers, transport.
+// Stylus — stage UI: boot, sequential poll loop, the run of covers, transport.
 import { fmtTime, esc } from "./lib/format.js";
 import { FALLBACK } from "./lib/color.js";
 import { extractGlow, glowVars, fallbackVars } from "./lib/glow.js";
@@ -84,7 +84,7 @@ const state = {
 // ---------- errors ----------
 
 const isCode = (e, code) => String(e).startsWith(code);
-/** A line in the app log file (<app dir>/logs/needle.log). Never throws. */
+/** A line in the app log file (<app dir>/logs/stylus.log). Never throws. */
 const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
 const reason = (e) =>
   rateLimitedSecs(e) ? `Spotify limits this for ${waitText(rateLimitedSecs(e))}` : String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
@@ -1179,9 +1179,15 @@ function renderChrome() {
 
 const REPEAT_LABEL = { off: "Repeat", context: "Repeat: on", track: "Repeat: this song" };
 
+let volShown = null; // the level on screen; held while a play loads
+
 function renderVolume() {
   const box = $("volume");
   const v = state.volume;
+  // a load reports the old level, then the held one: the slider would jump around. Hold what's
+  // on screen (faded, see styles.css) until the play lands; a drag of the user's own still shows
+  if (playPending() && !volTimer && volShown !== null) return;
+  volShown = v;
   box.hidden = state.mode === "idle" || !state.supportsVolume || v == null;
   if (box.hidden) return closeVolume();
   box.classList.toggle("is-muted", v === 0);
@@ -2193,7 +2199,7 @@ function syncMini(force = false) {
   if (!storeLoaded || !getSettings().menuBar) return;
   let next;
   if ($("stage").hidden) {
-    next = miniPayload({ mode: "idle", status: "Log in to Spotify in Needle" });
+    next = miniPayload({ mode: "idle", status: "Log in to Spotify in Stylus" });
   } else {
     const t = shownTrack();
     const heart = $("heartBtn");
@@ -4112,7 +4118,7 @@ function onSearchInput() {
   const q = $("searchInput").value.trim();
   const link = parseLink(q);
   if (link) return void openLink(link, gen);
-  if (looksLikeLink(q)) return void searchMessage("Needle opens Spotify links to playlists, albums, artists and songs. This one isn't one of those.");
+  if (looksLikeLink(q)) return void searchMessage("Stylus opens Spotify links to playlists, albums, artists and songs. This one isn't one of those.");
   if (!q) {
     searchHits = NO_HITS;
     $("searchResults").innerHTML = "";

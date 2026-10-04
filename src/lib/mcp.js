@@ -2,7 +2,7 @@
 
 /** The line under the MCP switch, from mcp_status ({enabled, running, port, error, callsToday}). */
 export function mcpStatusLine(s) {
-  if (!s || !s.enabled) return "Off. Lets AI tools on this Mac (Claude Code, Cursor…) control Needle.";
+  if (!s || !s.enabled) return "Off. Lets AI tools on this Mac (Claude Code, Cursor…) control Stylus.";
   if (s.error) return `Not running: ${s.error}`;
   if (!s.running) return "Starting…";
   const n = Number(s.callsToday) || 0;

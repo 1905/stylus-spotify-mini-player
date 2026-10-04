@@ -13,7 +13,7 @@ use librespot_playback::player::{PlayerEvent, PlayerEventChannel};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-const LOG: &str = "needle::session";
+const LOG: &str = "stylus::session";
 /// While playing, the position is written this often.
 const SAVE_EVERY: Duration = Duration::from_secs(10);
 /// A volume change is written once the volume stayed put this long.
@@ -505,10 +505,10 @@ fn log_event(event: &PlayerEvent) {
     match event {
         PlayerEvent::PositionCorrection { .. } | PlayerEvent::PositionChanged { .. } => {}
         PlayerEvent::TrackChanged { audio_item } => {
-            log::info!(target: "needle::player", "track {} \"{}\" ({} ms)", audio_item.uri, audio_item.name, audio_item.duration_ms)
+            log::info!(target: "stylus::player", "track {} \"{}\" ({} ms)", audio_item.uri, audio_item.name, audio_item.duration_ms)
         }
-        PlayerEvent::Unavailable { track_id, .. } => log::warn!(target: "needle::player", "unavailable: {track_id:?}"),
-        other => log::info!(target: "needle::player", "{}", event_summary(other)),
+        PlayerEvent::Unavailable { track_id, .. } => log::warn!(target: "stylus::player", "unavailable: {track_id:?}"),
+        other => log::info!(target: "stylus::player", "{}", event_summary(other)),
     }
 }
 
@@ -523,7 +523,7 @@ mod tests {
     use super::*;
 
     fn temp_file(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("needle-session-{}-{name}-{}", std::process::id(), unix_ms()));
+        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), unix_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("session.json")
     }

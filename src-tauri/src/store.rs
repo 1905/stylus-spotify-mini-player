@@ -27,7 +27,7 @@ fn with_state<T>(f: impl FnOnce(&mut Map<String, Value>) -> T) -> T {
         let p = path();
         match std::fs::read_to_string(&p) {
             Ok(s) => parse(&s).unwrap_or_else(|| {
-                log::warn!(target: "needle::store", "state.json doesn't parse: moved to state.json.bad");
+                log::warn!(target: "stylus::store", "state.json doesn't parse: moved to state.json.bad");
                 let _ = std::fs::rename(&p, p.with_extension("json.bad"));
                 Map::new()
             }),
@@ -40,7 +40,7 @@ fn with_state<T>(f: impl FnOnce(&mut Map<String, Value>) -> T) -> T {
 fn save(state: &Map<String, Value>) -> Result<(), String> {
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
     crate::auth::write_private(&path(), &json).map_err(|e| {
-        log::warn!(target: "needle::store", "could not save state.json: {e}");
+        log::warn!(target: "stylus::store", "could not save state.json: {e}");
         format!("could not save state: {e}")
     })
 }

@@ -8,7 +8,7 @@ use librespot_core::Session;
 use serde_json::{json, Value};
 
 pub const PATHFINDER: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
-const LOG: &str = "needle::internal";
+const LOG: &str = "stylus::internal";
 
 static ENGINE: OnceLock<crate::player::Engine> = OnceLock::new();
 
@@ -838,14 +838,14 @@ mod tests {
 /// Live probes against Spotify (ignored by default; never part of a normal test run).
 /// `cargo test --lib internal::live -- --ignored --nocapture` with `PROBE=name,name`.
 /// Logs in a Session (no Spirc, a fresh device id) with the stored player credentials and
-/// writes the raw answers to /tmp/needle-probe. Prints statuses and sizes, never tokens.
+/// writes the raw answers to /tmp/stylus-probe. Prints statuses and sizes, never tokens.
 #[cfg(test)]
 mod live {
     use super::*;
     use librespot_core::{authentication::Credentials, SessionConfig};
 
     pub async fn api() -> Api {
-        let path = dirs::config_dir().unwrap().join("needle/player-credentials.json");
+        let path = dirs::config_dir().unwrap().join("stylus/player-credentials.json");
         let creds: Credentials = serde_json::from_str(&std::fs::read_to_string(path).expect("credentials")).expect("credentials json");
         let session = Session::new(SessionConfig::default(), None);
         session.connect(creds, false).await.expect("session connect");
@@ -857,7 +857,7 @@ mod live {
     }
 
     fn dump(name: &str, r: &Result<Value, String>) {
-        let dir = std::path::Path::new("/tmp/needle-probe");
+        let dir = std::path::Path::new("/tmp/stylus-probe");
         std::fs::create_dir_all(dir).unwrap();
         match r {
             Ok(v) => {
@@ -870,7 +870,7 @@ mod live {
     }
 
     fn dump_raw(name: &str, r: &Result<Vec<u8>, String>) {
-        let dir = std::path::Path::new("/tmp/needle-probe");
+        let dir = std::path::Path::new("/tmp/stylus-probe");
         std::fs::create_dir_all(dir).unwrap();
         match r {
             Ok(b) => {

@@ -1,43 +1,43 @@
-# MCP — control Needle from any MCP client
+# MCP — control Stylus from any MCP client
 
 **Date:** 2026-10-03
-**Scope:** ~/dev/rust-spotify (Needle)
+**Scope:** ~/dev/rust-spotify (Stylus)
 **Status:** pending review
 
 ## TL;DR
 
-**1. An MCP server inside Needle, local only.** When you turn it on in Settings, Needle serves MCP at `http://127.0.0.1:5590/mcp` while the app is open. Any MCP client on this Mac (Claude Code, Claude Desktop, Cursor, others) connects to it and gets tools to search, play, pause, skip, change volume, list your playlists/albums/liked songs, queue songs, switch devices and like songs. Changes show in the open app within a second. *Why:* you want to say "find X and play it" in your AI tools. *You do:* nothing. *Does NOT:* listen on any network address but this Mac's loopback, and doesn't work while Needle is closed.
+**1. An MCP server inside Stylus, local only.** When you turn it on in Settings, Stylus serves MCP at `http://127.0.0.1:5590/mcp` while the app is open. Any MCP client on this Mac (Claude Code, Claude Desktop, Cursor, others) connects to it and gets tools to search, play, pause, skip, change volume, list your playlists/albums/liked songs, queue songs, switch devices and like songs. Changes show in the open app within a second. *Why:* you want to say "find X and play it" in your AI tools. *You do:* nothing. *Does NOT:* listen on any network address but this Mac's loopback, and doesn't work while Stylus is closed.
 
-**2. Settings: on/off + two copy buttons.** In the cog menu: "MCP server" toggle, off by default. Under it: "Copy connect" with a choice of format — the generic JSON block most MCP clients take (`{"mcpServers":{"needle":{"type":"http","url":…,"headers":{"Authorization":"Bearer <key>"}}}}`), or the `claude mcp add …` line for Claude Code — and "Copy skill" (a short SKILL.md / instructions text that tells an agent how to use the tools well). *Why:* one paste connects any client. *You do:* paste once into your client; optionally save the skill. *Does NOT:* edit any client's config by itself.
+**2. Settings: on/off + two copy buttons.** In the cog menu: "MCP server" toggle, off by default. Under it: "Copy connect" with a choice of format — the generic JSON block most MCP clients take (`{"mcpServers":{"stylus":{"type":"http","url":…,"headers":{"Authorization":"Bearer <key>"}}}}`), or the `claude mcp add …` line for Claude Code — and "Copy skill" (a short SKILL.md / instructions text that tells an agent how to use the tools well). *Why:* one paste connects any client. *You do:* paste once into your client; optionally save the skill. *Does NOT:* edit any client's config by itself.
 
 **3. A key on every request.** The server only answers requests that carry a random key (made once, kept in `settings.json`, 0600). "Reset key" makes a new one. *Why:* any program or web page on this Mac could otherwise reach a localhost port and control your Spotify. *You do:* nothing, the key is inside the copied command. *Does NOT:* use OAuth or any account.
 
 ## Problem(s)
 
-1. **No outside control surface.** Needle's only entry points are Tauri commands for its own webview (`src-tauri/src/lib.rs`, the `invoke_handler` list). Claude Code speaks MCP and can call none of them.
+1. **No outside control surface.** Stylus's only entry points are Tauri commands for its own webview (`src-tauri/src/lib.rs`, the `invoke_handler` list). Claude Code speaks MCP and can call none of them.
 2. **Control logic is split.** Local commands to the in-app speaker go through Spirc in Rust (`player.rs` `local_*`), remote devices through the Web API (`spotify.rs`), but the choice between them is made in JS (`src/lib/route.js` `isLocal`, `src/app.js` `routed`/`playSource`). An MCP server in Rust needs that choice in Rust too.
 3. **A localhost port is reachable by any local process and by web pages** (DNS rebinding, `fetch` to 127.0.0.1). Without a key and an Origin check, a web page could drive the player.
 
 ## Goals
 
-1. MCP server (streamable HTTP) in Needle on `127.0.0.1:5590`, started and stopped by a setting, only while the app runs. (P1)
+1. MCP server (streamable HTTP) in Stylus on `127.0.0.1:5590`, started and stopped by a setting, only while the app runs. (P1)
 2. Tools covering search, playback control, library listing, queue, devices, like/unlike, now playing. (P1)
 3. Device routing in Rust: the in-app speaker gets Spirc commands, other devices get Web API calls, same rule as the UI. (P2)
 4. Bearer key + Origin/Host checks on every request. (P1)
 5. Settings UI: toggle, status line, copy connect command, copy skill, reset key. (P3)
-6. Every tool call logged to `needle.log` (tool name, args summary, result or error). (P1)
+6. Every tool call logged to `stylus.log` (tool name, args summary, result or error). (P1)
 
 ## Non-goals
 
 - Remote clients (ChatGPT web, phones), tunnels, public URLs, Cloudflare, OAuth. Local clients only.
-- A server that runs while Needle is closed.
+- A server that runs while Stylus is closed.
 - Writing Claude Code's config or skills folder automatically.
 - New Spotify features the app doesn't have (no recommendations: that API is gone, see `docs/spotify-web-api-reality.md`).
 
 ## Server
 
 ```
-MCP client ──HTTP POST /mcp (Authorization: Bearer <key>)──▶ 127.0.0.1:5590 (Needle, rmcp streamable-http)
+MCP client ──HTTP POST /mcp (Authorization: Bearer <key>)──▶ 127.0.0.1:5590 (Stylus, rmcp streamable-http)
                                                                │
                                      ┌─────────────────────────┴──────────────────────────┐
                                spotify.rs (Web API: search, library, remote devices)   player.rs (Spirc: This Mac)
@@ -52,7 +52,7 @@ MCP client ──HTTP POST /mcp (Authorization: Bearer <key>)──▶ 127.0.0.1
 
 ## Tools
 
-All return short JSON. Track = `{uri, name, artists, album, duration_ms}`. Errors are plain sentences ("Nothing is playing", "No device to play on: open Needle or Spotify somewhere").
+All return short JSON. Track = `{uri, name, artists, album, duration_ms}`. Errors are plain sentences ("Nothing is playing", "No device to play on: open Stylus or Spotify somewhere").
 
 | Tool | Args | Does |
 |---|---|---|
@@ -95,15 +95,15 @@ Names are resolved case-insensitively against the user's own lists first (playli
 Copied connect text — generic JSON (most clients), and the Claude Code line (flags verified against `claude mcp add --help` during the plan):
 
 ```json
-{"mcpServers": {"needle": {"type": "http", "url": "http://127.0.0.1:5590/mcp", "headers": {"Authorization": "Bearer <key>"}}}}
+{"mcpServers": {"stylus": {"type": "http", "url": "http://127.0.0.1:5590/mcp", "headers": {"Authorization": "Bearer <key>"}}}}
 ```
 
 
 ```
-claude mcp add --transport http needle http://127.0.0.1:5590/mcp --header "Authorization: Bearer <key>"
+claude mcp add --transport http stylus http://127.0.0.1:5590/mcp --header "Authorization: Bearer <key>"
 ```
 
-Copied skill: a SKILL.md with frontmatter (`name: needle`, description "Control the Needle Spotify player: find and play music, control playback, browse the library") and short rules: search before play, prefer the user's playlists for names, confirm what started from `now_playing`, never loop calls.
+Copied skill: a SKILL.md with frontmatter (`name: stylus`, description "Control the Stylus Spotify player: find and play music, control playback, browse the library") and short rules: search before play, prefer the user's playlists for names, confirm what started from `now_playing`, never loop calls.
 
 ## File-level changes
 
@@ -123,14 +123,14 @@ Copied skill: a SKILL.md with frontmatter (`name: needle`, description "Control 
 - Rust unit: auth check (missing/wrong/right key, constant-time path), Host/Origin rules, name resolution (exact, case-insensitive, ambiguous → error listing matches), routing decision (`is_local`) as a pure function, settings round-trip with the new fields.
 - Rust integration: start the server on a random port in a test, `initialize` + `tools/list` + one read tool against a stubbed Spotify client; 401 without key.
 - JS (vitest): settings rows render from `mcp_status`; copy builds the right text.
-- Manual: `claude mcp add …` from the copied command, then in Claude Code "play <song>" → it plays in Needle; toggle off → Claude Code shows the server as failed.
+- Manual: `claude mcp add …` from the copied command, then in Claude Code "play <song>" → it plays in Stylus; toggle off → Claude Code shows the server as failed.
 
 ## Failure modes & decisions
 
 | Failure | Behaviour |
 |---|---|
 | Port 5590 taken | Server off, status line says so; toggle stays on and retries at next launch. |
-| Needle closed | Claude Code reports the server unreachable. |
+| Stylus closed | Claude Code reports the server unreachable. |
 | No active device | Play tools start on This Mac (the in-app speaker) when it's ready, else return "No device to play on". |
 | Spotify 429 / errors | Returned as the tool error text; logged. |
 | Wrong key / browser Origin | 401 / 403, logged once per minute (no log spam). |

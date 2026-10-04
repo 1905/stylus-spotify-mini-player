@@ -1,4 +1,4 @@
-//! The app log: `<app dir>/logs/needle.log`, rolled to `needle.1.log` at 2 MB.
+//! The app log: `<app dir>/logs/stylus.log`, rolled to `stylus.1.log` at 2 MB.
 //! Gets librespot's own log lines (info and up: track loads, unavailable tracks, connection drops),
 //! ours (warn and up), and lines the UI sends through `app_log` (play attempts and failures).
 
@@ -21,7 +21,7 @@ impl FileLog {
         let Ok(mut guard) = self.file.lock() else { return };
         let too_big = guard.as_ref().and_then(|f| f.metadata().ok()).is_some_and(|m| m.len() > MAX_BYTES);
         if too_big {
-            let _ = std::fs::rename(&self.path, self.path.with_file_name("needle.1.log"));
+            let _ = std::fs::rename(&self.path, self.path.with_file_name("stylus.1.log"));
             *guard = Self::open(&self.path);
         }
         if let Some(f) = guard.as_mut() {
@@ -32,7 +32,7 @@ impl FileLog {
 
 impl log::Log for FileLog {
     fn enabled(&self, m: &log::Metadata) -> bool {
-        let ours = m.target().starts_with("librespot") || m.target().starts_with("needle");
+        let ours = m.target().starts_with("librespot") || m.target().starts_with("stylus");
         m.level() <= if ours { log::Level::Info } else { log::Level::Warn }
     }
 
@@ -51,14 +51,14 @@ static LOGGER: std::sync::OnceLock<FileLog> = std::sync::OnceLock::new();
 pub fn init() {
     let dir = crate::auth::app_dir().join("logs");
     let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join("needle.log");
+    let path = dir.join("stylus.log");
     let logger = LOGGER.get_or_init(|| FileLog { file: Mutex::new(FileLog::open(&path)), path });
     if log::set_logger(logger).is_ok() {
         log::set_max_level(log::LevelFilter::Info);
     }
-    log::info!(target: "needle", "--- start v{}", env!("CARGO_PKG_VERSION"));
+    log::info!(target: "stylus", "--- start v{}", env!("CARGO_PKG_VERSION"));
     if let Some((level, note)) = crate::auth::app_dir_note() {
-        log::log!(target: "needle", *level, "app folder: {note}");
+        log::log!(target: "stylus", *level, "app folder: {note}");
     }
 }
 
@@ -66,7 +66,7 @@ pub fn init() {
 #[tauri::command]
 pub fn app_log(level: String, msg: String) {
     let level = if level == "error" { log::Level::Error } else if level == "warn" { log::Level::Warn } else { log::Level::Info };
-    log::log!(target: "needle::ui", level, "{msg}");
+    log::log!(target: "stylus::ui", level, "{msg}");
 }
 
 /// Local time is not worth a dependency: UTC seconds with millis.

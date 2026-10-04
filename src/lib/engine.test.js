@@ -72,7 +72,7 @@ describe("isHere", () => {
   it("matches by the engine's device id, never by name", () => {
     expect(isHere(RUN, READY)).toBe(true);
     expect(isHere(MACBOOK, READY)).toBe(false);
-    expect(isHere({ id: "x", name: "Needle" }, READY)).toBe(false);
+    expect(isHere({ id: "x", name: "Stylus" }, READY)).toBe(false);
     expect(isHere({ id: "x", name: "This Mac" }, READY)).toBe(false);
     expect(isHere(RUN, { state: "starting", device_id: null })).toBe(false);
     expect(isHere(RUN, null)).toBe(false);

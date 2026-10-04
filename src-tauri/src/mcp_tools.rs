@@ -162,16 +162,16 @@ pub fn tools() -> Vec<(&'static str, &'static str, Value)> {
         ("set_repeat", "Repeat mode.", obj(json!({ "mode": { "type": "string", "enum": ["off", "context", "track"] } }), &["mode"])),
         ("queue_add", "Add a song to the up-next queue: a track `uri` or a `query` (its top hit).", obj(json!({ "uri": s("Track uri or link"), "query": s("A song to search for") }), &[])),
         ("get_queue", "The next songs in the queue.", none()),
-        ("list_playlists", "Your playlists, and playlists added in Needle by link (saved_in_app).", none()),
-        ("list_mixes", "Your Spotify mixes as Needle's Mixes tab shows them: Made For You (Daily Mixes, Discover Weekly, Release Radar, artist radios…), mixes added by link, and mixes you played.", none()),
+        ("list_playlists", "Your playlists, and playlists added in Stylus by link (saved_in_app).", none()),
+        ("list_mixes", "Your Spotify mixes as Stylus's Mixes tab shows them: Made For You (Daily Mixes, Discover Weekly, Release Radar, artist radios…), mixes added by link, and mixes you played.", none()),
         (
             "playlist_tracks",
             "The songs of a playlist or mix.",
             obj(json!({ "playlist": s("Playlist uri, id, link or name"), "limit": n("Default 50", 1, 1000), "offset": n("Default 0", 0, 100_000) }), &["playlist"]),
         ),
-        ("list_albums", "Your saved albums, and albums added in Needle by link (saved_in_app).", none()),
+        ("list_albums", "Your saved albums, and albums added in Stylus by link (saved_in_app).", none()),
         ("album_tracks", "The songs of an album.", obj(json!({ "album": s("Album uri, id, link or name") }), &["album"])),
-        ("list_artists", "Artists you follow, and artists added in Needle by link (saved_in_app).", none()),
+        ("list_artists", "Artists you follow, and artists added in Stylus by link (saved_in_app).", none()),
         ("liked_songs", "Your Liked Songs, newest first.", obj(json!({ "limit": n("Default 20", 1, 1000), "offset": n("Default 0", 0, 1000) }), &[])),
         ("recently_played", "What you played lately (one entry per playlist/album played).", obj(json!({ "limit": n("Default 10", 1, 50) }), &[])),
         (
@@ -180,13 +180,13 @@ pub fn tools() -> Vec<(&'static str, &'static str, Value)> {
             obj(json!({ "kind": { "type": "string", "enum": ["tracks", "artists"] }, "range": { "type": "string", "enum": ["short", "medium", "long"], "description": "4 weeks, 6 months, all time (default short)" } }), &["kind"]),
         ),
         ("artist", "An artist: popular tracks, albums, and your liked songs by them.", obj(json!({ "artist": s("Artist uri, id, link or name") }), &["artist"])),
-        ("devices", "Spotify Connect devices; the active one and This Mac (Needle's own player) are marked.", none()),
+        ("devices", "Spotify Connect devices; the active one and This Mac (Stylus's own player) are marked.", none()),
         ("transfer", "Move playback to another device.", obj(json!({ "device": s("Device name or id"), "play": { "type": "boolean", "description": "Start playing there (default true)" } }), &["device"])),
         ("like", "Add a song to Liked Songs (default: the current song).", obj(json!({ "uri": s("Track uri or link") }), &[])),
         ("unlike", "Remove a song from Liked Songs (default: the current song).", obj(json!({ "uri": s("Track uri or link") }), &[])),
         (
             "open_link",
-            "Look up a Spotify share link or uri (playlist, album, artist, song). `save: true` adds it to Needle's library (mixes to the Mixes tab); `play: true` plays it.",
+            "Look up a Spotify share link or uri (playlist, album, artist, song). `save: true` adds it to Stylus's library (mixes to the Mixes tab); `play: true` plays it.",
             obj(json!({ "link": s("open.spotify.com link or spotify: uri"), "save": { "type": "boolean" }, "play": { "type": "boolean" }, "device": s(DEVICE) }), &["link"]),
         ),
     ]
@@ -287,16 +287,16 @@ pub fn plain_error(e: &str) -> String {
     if let Some(rest) = e.strip_prefix("RATE_LIMITED:") {
         let secs: u64 = rest.split(':').next().and_then(|s| s.parse().ok()).unwrap_or(0);
         let mins = secs.div_ceil(60).max(1);
-        return format!("Spotify is rate-limiting Needle's Web API for about {mins} more min, and this needs it. Commands for This Mac (Needle's own player) still work: play there with device \"This Mac\".");
+        return format!("Spotify is rate-limiting Stylus's Web API for about {mins} more min, and this needs it. Commands for This Mac (Stylus's own player) still work: play there with device \"This Mac\".");
     }
     if e.starts_with("ENGINE_NOT_READY") {
-        return "Needle's player isn't connected yet: try again in a moment.".into();
+        return "Stylus's player isn't connected yet: try again in a moment.".into();
     }
     if e.starts_with("NO_ACTIVE_DEVICE") {
         return crate::control::NO_DEVICE.into();
     }
     if e.starts_with("AUTH_EXPIRED") {
-        return "Needle's Spotify login expired: open Needle and log in again.".into();
+        return "Stylus's Spotify login expired: open Stylus and log in again.".into();
     }
     if let Some(rest) = e.strip_prefix("BAD_ARGS: ") {
         return rest.to_string();
@@ -591,18 +591,18 @@ async fn devices(b: &dyn Backend) -> Result<(Vec<Value>, Option<String>), String
     Ok((list, own))
 }
 
-/// A device by id or name; "here", "mac", "needle" mean This Mac.
+/// A device by id or name; "here", "mac", "stylus" (and the old name "needle") mean This Mac.
 async fn find_device(b: &dyn Backend, q: &str) -> Result<Value, String> {
     let (list, own) = devices(b).await?;
     if let Some(d) = list.iter().find(|d| d["id"] == q) {
         return Ok(d.clone());
     }
-    let alias = matches!(q.to_lowercase().as_str(), "here" | "mac" | "this mac" | "needle" | "this computer" | "computer");
+    let alias = matches!(q.to_lowercase().as_str(), "here" | "mac" | "this mac" | "stylus" | "needle" | "this computer" | "computer");
     if alias {
         if let Some(d) = list.iter().find(|d| d["id"].as_str() == own.as_deref()) {
             return Ok(d.clone());
         }
-        return Err("This Mac isn't listed: Needle's player isn't connected yet".into());
+        return Err("This Mac isn't listed: Stylus's player isn't connected yet".into());
     }
     let named: Vec<(String, Value)> = list.iter().filter_map(|d| Some((d["name"].as_str()?.to_string(), json!({ "uri": d["id"], "id": d["id"], "name": d["name"] })))).collect();
     pick(q, &named)?.ok_or_else(|| {
@@ -847,7 +847,7 @@ mod tests {
         assert!(plain_error("RATE_LIMITED:600: x").contains("about 10 more min"));
         assert_eq!(plain_error("NO_ACTIVE_DEVICE: Spotify API 404"), crate::control::NO_DEVICE);
         assert_eq!(plain_error("BAD_ARGS: bad repeat mode: x"), "bad repeat mode: x");
-        assert!(plain_error("ENGINE_NOT_READY: the player is starting").starts_with("Needle's player isn't connected"));
+        assert!(plain_error("ENGINE_NOT_READY: the player is starting").starts_with("Stylus's player isn't connected"));
         assert_eq!(plain_error("Spotify API 500: boom"), "Spotify API 500: boom");
     }
 

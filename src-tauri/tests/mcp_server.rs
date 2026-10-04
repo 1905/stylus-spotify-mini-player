@@ -4,8 +4,8 @@
 
 use std::sync::{Arc, RwLock};
 
-use needle_lib::mcp;
-use needle_lib::mcp_tools::{Backend, Fut};
+use stylus_lib::mcp;
+use stylus_lib::mcp_tools::{Backend, Fut};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
@@ -68,7 +68,7 @@ async fn initialize_list_and_call() {
     let r = post(&url, Some(KEY), &[], init).await;
     assert_eq!(r.status(), 200);
     let v: Value = r.json().await.unwrap();
-    assert_eq!(v["result"]["serverInfo"]["name"], "needle");
+    assert_eq!(v["result"]["serverInfo"]["name"], "stylus");
     assert!(v["result"]["capabilities"]["tools"].is_object());
 
     let r = post(&url, Some(KEY), &[("mcp-protocol-version", "2025-06-18")], json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;

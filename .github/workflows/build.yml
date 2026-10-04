@@ -1,4 +1,4 @@
-# Needle is a macOS app (AppKit, CoreAudio): it builds on a macOS runner, never on the dev Mac
+# Stylus is a macOS app (AppKit, CoreAudio): it builds on a macOS runner, never on the dev Mac
 # (small disk) or Linux. Every push tests and builds; a v* tag also publishes the DMG as a release.
 name: build
 
@@ -42,19 +42,19 @@ jobs:
       - name: Backend tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Build Needle.app and DMG
+      - name: Build Stylus.app and DMG
         run: npx tauri build --bundles app,dmg
 
       - name: Collect artifacts
         run: |
           mkdir -p out
-          ditto -c -k --keepParent src-tauri/target/release/bundle/macos/Needle.app out/Needle.app.zip
-          cp src-tauri/target/release/bundle/dmg/*.dmg out/Needle.dmg
-          shasum -a 256 out/Needle.dmg | tee out/Needle.dmg.sha256
+          ditto -c -k --keepParent src-tauri/target/release/bundle/macos/Stylus.app out/Stylus.app.zip
+          cp src-tauri/target/release/bundle/dmg/*.dmg out/Stylus.dmg
+          shasum -a 256 out/Stylus.dmg | tee out/Stylus.dmg.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: needle-macos
+          name: stylus-macos
           path: out/
           retention-days: 14
 
@@ -63,6 +63,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            out/Needle.dmg
-            out/Needle.dmg.sha256
+            out/Stylus.dmg
+            out/Stylus.dmg.sha256
           generate_release_notes: true

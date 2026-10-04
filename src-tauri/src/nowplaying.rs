@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter};
 use crate::session::{Repeat, Source, Tracker};
 
 pub const EVENT: &str = "player-state";
-const LOG: &str = "needle::now";
+const LOG: &str = "stylus::now";
 /// Up-next tracks in the payload: as many as the cover row shows.
 pub const QUEUE_MAX: usize = 20;
 /// Track metadata kept; past this the cache starts over.

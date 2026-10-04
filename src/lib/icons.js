@@ -1,4 +1,4 @@
-// Needle's icons: one hand-drawn family, the only place an icon is defined. src/index.html inlines
+// Stylus's icons: one hand-drawn family, the only place an icon is defined. src/index.html inlines
 // the same strings (icons.test.js keeps them equal), app.js imports them.
 //
 // The system: a 24×24 grid with a 2-3 px margin; line icons use a 1.75 stroke with round caps and

@@ -14,7 +14,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 pub const MINI: &str = "mini";
-const TRAY_ID: &str = "needle";
+const TRAY_ID: &str = "stylus";
 /// The popover, logical px.
 const MINI_W: f64 = 320.0;
 const MINI_H: f64 = 140.0;
@@ -123,8 +123,8 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Play", false, None::<&str>)?;
     let next = MenuItem::with_id(app, "next", "Next", false, None::<&str>)?;
     let previous = MenuItem::with_id(app, "previous", "Previous", false, None::<&str>)?;
-    let show = MenuItem::with_id(app, "show", "Show Needle", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Needle", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Show Stylus", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Stylus", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&toggle, &next, &previous, &sep, &show, &sep2, &quit])?;
@@ -155,7 +155,7 @@ fn build_mini<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<WebviewWindow<R>>
     // dark vibrancy (HUD: dark in light mode too, like the app) under mini.css's translucent panel; the radius rounds both
     let effects = EffectsBuilder::new().effect(Effect::HudWindow).state(EffectState::Active).radius(12.0).build();
     WebviewWindowBuilder::new(app, MINI, WebviewUrl::App("mini.html".into()))
-        .title("Needle")
+        .title("Stylus")
         .inner_size(MINI_W, MINI_H)
         .resizable(false)
         .maximizable(false)
@@ -223,7 +223,7 @@ fn toggle_mini<R: Runtime>(icon: &TrayIcon<R>, rect: tauri::Rect) {
     let _ = app.emit_to("main", "mini-visible", json!({ "open": true }));
 }
 
-/// Hides the popover (blur, Esc, a click on the icon, Show Needle).
+/// Hides the popover (blur, Esc, a click on the icon, Show Stylus).
 pub fn hide_mini<R: Runtime>(app: &AppHandle<R>) {
     let Some(win) = app.get_webview_window(MINI) else { return };
     if !win.is_visible().unwrap_or(false) {

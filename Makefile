@@ -1,18 +1,18 @@
-APP_NAME := Needle
-APP_ID   := com.kass.needle
-BIN_NAME := needle
+APP_NAME := Stylus
+APP_ID   := com.kass.stylus
+BIN_NAME := stylus
 DEST     := /Applications/$(APP_NAME).app
 # builds run on the MacBook Air (`ssh air`), never on this Mac: its disk is small and Rust
 # target dirs grew ~40 GB. Only the finished app comes back, into a temp dir.
 AIR      := air
-REMOTE   := builds/needle
+REMOTE   := builds/stylus
 AIR_ENV  := export PATH=/opt/homebrew/bin:$$HOME/.cargo/bin:$$PATH; cd $(REMOTE)
-OUT      := /tmp/needle-build
+OUT      := /tmp/stylus-build
 BUNDLE   := $(OUT)/$(APP_NAME).app
 BIN      := $(OUT)/$(BIN_NAME)
-# the app before the rename: quit it too, it shares the Connect device id
-OLD_APP_ID   := com.kass.rustspotify
-OLD_BIN_NAME := rust-spotify
+# the app under its old names (Needle, rust-spotify): quit it too, it shares the Connect device id
+OLD_APP_IDS   := com.kass.needle com.kass.rustspotify
+OLD_BIN_NAMES := Needle needle rust-spotify
 
 .PHONY: install run stop sync test dmg
 
@@ -25,13 +25,15 @@ sync:
 test: sync
 	ssh $(AIR) '$(AIR_ENV) && npm ci --silent && npx vitest run && cargo test --manifest-path src-tauri/Cargo.toml --quiet'
 
-## install: release Needle.app built on the Air, copied here into /Applications, then opened
+## install: release Stylus.app built on the Air, copied here into /Applications, then opened
 install: sync
 	ssh $(AIR) '$(AIR_ENV) && npm ci --silent && npx tauri build --bundles app'
 	mkdir -p $(OUT)
 	rsync -a --delete $(AIR):$(REMOTE)/src-tauri/target/release/bundle/macos/$(APP_NAME).app/ $(BUNDLE)/
 	$(MAKE) stop
 	@if [ -d "$(DEST)" ]; then mkdir -p /tmp/trash && mv "$(DEST)" "/tmp/trash/$(APP_NAME).app.$$(date +%Y%m%d-%H%M%S)"; fi
+	@# the app under its old names: a second copy would be a second "This Mac" speaker
+	@for old in Needle rust-spotify; do if [ -d "/Applications/$$old.app" ]; then mkdir -p /tmp/trash && mv "/Applications/$$old.app" "/tmp/trash/$$old.app.$$(date +%Y%m%d-%H%M%S)"; fi; done
 	ditto "$(BUNDLE)" "$(DEST)"
 	@# LaunchServices refuses (-600) while the old copy is still exiting: wait, then retry once
 	@sleep 2; open "$(DEST)" || { sleep 3; open "$(DEST)"; }
@@ -50,8 +52,8 @@ dmg: sync
 	mkdir -p $(OUT)
 	rsync -a "$(AIR):$(REMOTE)/src-tauri/target/release/bundle/dmg/" $(OUT)/dmg/
 
-## stop: quit every copy, installed (binary may be named Needle) or dev, new name or old (two copies = two "This Mac" speakers with one device id)
+## stop: quit every copy, installed (binary may be named Stylus) or dev, new name or old (two copies = two "This Mac" speakers with one device id)
 stop:
 	-@osascript -e 'if application id "$(APP_ID)" is running then tell application id "$(APP_ID)" to quit' >/dev/null 2>&1
-	-@osascript -e 'if application id "$(OLD_APP_ID)" is running then tell application id "$(OLD_APP_ID)" to quit' >/dev/null 2>&1
-	-@sleep 1; for p in $(APP_NAME) $(BIN_NAME) $(OLD_BIN_NAME); do pkill -x $$p || true; done
+	-@for id in $(OLD_APP_IDS); do osascript -e "if application id \"$$id\" is running then tell application id \"$$id\" to quit" >/dev/null 2>&1; done
+	-@sleep 1; for p in $(APP_NAME) $(BIN_NAME) $(OLD_BIN_NAMES); do pkill -x $$p || true; done

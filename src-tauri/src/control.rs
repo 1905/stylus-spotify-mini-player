@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::nowplaying::Now;
 use crate::spotify;
 
-pub const NO_DEVICE: &str = "No device to play on: open Needle or Spotify somewhere";
+pub const NO_DEVICE: &str = "No device to play on: open Stylus or Spotify somewhere";
 pub const NOTHING_PLAYING: &str = "Nothing is playing";
 pub const NOT_READY: &str = "This Mac isn't ready: the player is still connecting";
 pub const NOTHING_AFTER: &str = "Nothing after this track: next would stop playback";
@@ -192,7 +192,7 @@ fn send_pending_volume(e: &crate::player::Engine) {
     let pending = pending_volume().take();
     if let Some(p) = pending {
         if let Err(err) = e.set_volume(p) {
-            log::warn!(target: "needle::cmd", "pending volume {p} not sent: {err}");
+            log::warn!(target: "stylus::cmd", "pending volume {p} not sent: {err}");
         }
     }
 }

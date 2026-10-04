@@ -1,24 +1,24 @@
-# Needle MCP server
+# Stylus MCP server
 
-Needle can serve the Model Context Protocol (MCP) on this Mac, so AI tools such as Claude Code, Claude Desktop or Cursor can search, play and control music in Needle.
+Stylus can serve the Model Context Protocol (MCP) on this Mac, so AI tools such as Claude Code, Claude Desktop or Cursor can search, play and control music in Stylus.
 
 - Address: `http://127.0.0.1:5590/mcp` (streamable HTTP, stateless, JSON answers).
-- Runs only while Needle is open and the setting is on. Off by default.
+- Runs only while Stylus is open and the setting is on. Off by default.
 - Listens on the loopback address only. Nothing outside this Mac can reach it.
 
 ## Turn it on
 
-1. Open Needle, click the cog (Settings).
+1. Open Stylus, click the cog (Settings).
 2. Turn on **MCP server**. The line under it says `Running on 127.0.0.1:5590 · N calls today`, or why it is not running (for example `port 5590 is in use`).
 3. Click **JSON config** or **Claude Code** to copy the connect text. Paste it into your client.
-4. Optional: click **Copy skill** and save the text as `~/.claude/skills/needle/SKILL.md`. It tells an agent how to use the tools well.
+4. Optional: click **Copy skill** and save the text as `~/.claude/skills/stylus/SKILL.md`. It tells an agent how to use the tools well.
 
 ## Connect
 
 Claude Code (the copied line; `--scope user` makes it available in every project):
 
 ```
-claude mcp add --scope user --transport http needle http://127.0.0.1:5590/mcp --header "Authorization: Bearer <key>"
+claude mcp add --scope user --transport http stylus http://127.0.0.1:5590/mcp --header "Authorization: Bearer <key>"
 ```
 
 Most other clients take this JSON block (Claude Desktop, Cursor and others: `mcpServers` in their config file):
@@ -26,7 +26,7 @@ Most other clients take this JSON block (Claude Desktop, Cursor and others: `mcp
 ```json
 {
   "mcpServers": {
-    "needle": {
+    "stylus": {
       "type": "http",
       "url": "http://127.0.0.1:5590/mcp",
       "headers": { "Authorization": "Bearer <key>" }
@@ -55,7 +55,7 @@ All tools return short JSON. Errors are plain sentences. A track is `{uri, name,
 | `set_repeat` | `mode`: off, context, track | Repeat mode. |
 | `queue_add` | `uri` or `query` | Adds a song to the queue. |
 | `get_queue` | – | The next songs. |
-| `list_playlists` | – | Your playlists, plus playlists added in Needle by link (`saved_in_app`). |
+| `list_playlists` | – | Your playlists, plus playlists added in Stylus by link (`saved_in_app`). |
 | `list_mixes` | – | The Mixes tab: Made For You mixes from your Spotify home (Daily Mixes, Discover Weekly, Release Radar, artist radios and mixes), mixes added by link, and mixes you played. |
 | `playlist_tracks` | `playlist` (uri, id, link or name), `limit`, `offset` | The songs of a playlist or mix. |
 | `list_albums` | – | Saved albums, plus albums added by link. |
@@ -68,18 +68,18 @@ All tools return short JSON. Errors are plain sentences. A track is `{uri, name,
 | `devices` | – | Spotify Connect devices. The active one and This Mac are marked. |
 | `transfer` | `device` (name or id), `play` (default true) | Moves playback to a device. |
 | `like`, `unlike` | optional `uri` (default: the current song) | Liked Songs. |
-| `open_link` | `link`, optional `save`, `play`, `device` | Looks up a Spotify share link or uri. `save: true` adds it to Needle's library; `play: true` plays it. |
+| `open_link` | `link`, optional `save`, `play`, `device` | Looks up a Spotify share link or uri. `save: true` adds it to Stylus's library; `play: true` plays it. |
 
 ### Devices and the Web API
 
-"This Mac" is Needle's own speaker. Commands for it go straight to the player in Needle. Commands for other devices use Spotify's Web API. When Spotify rate-limits Needle's Web API, the tools for other devices fail with a sentence that says so, and This Mac keeps working. Library lists, search and the mixes come from Spotify's internal API first, so they also keep working.
+"This Mac" is Stylus's own speaker. Commands for it go straight to the player in Stylus. Commands for other devices use Spotify's Web API. When Spotify rate-limits Stylus's Web API, the tools for other devices fail with a sentence that says so, and This Mac keeps working. Library lists, search and the mixes come from Spotify's internal API first, so they also keep working.
 
 ## Security
 
 - The server listens on `127.0.0.1:5590` only.
-- Every request needs `Authorization: Bearer <key>`. A missing or wrong key gets HTTP 401. The key is 32 random bytes (base64url), made the first time you turn the server on and kept in Needle's `settings.json` (file mode 0600). The compare runs in constant time.
+- Every request needs `Authorization: Bearer <key>`. A missing or wrong key gets HTTP 401. The key is 32 random bytes (base64url), made the first time you turn the server on and kept in Stylus's `settings.json` (file mode 0600). The compare runs in constant time.
 - The `Host` header must be `127.0.0.1:5590` or `localhost:5590`, else HTTP 403. This blocks DNS rebinding from web pages.
 - A request with an `Origin` header (browsers send one, MCP clients do not; `null` counts too) gets HTTP 403. A web page open in your browser cannot drive the player.
-- Refused requests are logged once a minute per reason. Every tool call is logged as one line in `needle.log` (tool, arguments cut at 160 characters, ok or the error, time in ms).
+- Refused requests are logged once a minute per reason. Every tool call is logged as one line in `stylus.log` (tool, arguments cut at 160 characters, ok or the error, time in ms).
 - **Reset key** in Settings makes a new key at once. Copied connect texts with the old key stop working; copy them again.
 - Any program that runs as your user can read `settings.json` and so the key. The key keeps out web pages and other users, not programs you run yourself.

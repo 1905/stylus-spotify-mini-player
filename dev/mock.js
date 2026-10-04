@@ -717,11 +717,11 @@
     mcp_connect_text: ({ format }) => {
       if (!mcp.key) mcp.key = "mock-key-0123456789abcdefghijklmnopqrstuvwxyzAB";
       const url = "http://127.0.0.1:5590/mcp";
-      if (format === "json") return JSON.stringify({ mcpServers: { needle: { type: "http", url, headers: { Authorization: "Bearer " + mcp.key } } } }, null, 2);
-      if (format === "claude") return `claude mcp add --scope user --transport http needle ${url} --header "Authorization: Bearer ${mcp.key}"`;
+      if (format === "json") return JSON.stringify({ mcpServers: { stylus: { type: "http", url, headers: { Authorization: "Bearer " + mcp.key } } } }, null, 2);
+      if (format === "claude") return `claude mcp add --scope user --transport http stylus ${url} --header "Authorization: Bearer ${mcp.key}"`;
       throw "BAD_ARGS: unknown format " + format;
     },
-    mcp_skill_text: () => "---\nname: needle\ndescription: Control the Needle Spotify player (mock)\n---\n",
+    mcp_skill_text: () => "---\nname: stylus\ndescription: Control the Stylus Spotify player (mock)\n---\n",
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network

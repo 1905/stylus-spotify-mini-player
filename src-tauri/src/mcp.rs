@@ -21,7 +21,7 @@ use tokio_util::sync::CancellationToken;
 use crate::mcp_tools::{self, Backend};
 
 pub const PORT: u16 = 5590;
-const LOG: &str = "needle::mcp";
+const LOG: &str = "stylus::mcp";
 
 pub fn url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/mcp")
@@ -90,11 +90,11 @@ async fn guard(State(g): State<Guard>, req: Request, next: Next) -> Response {
 // ---- the MCP handler -----------------------------------------------------------------------------
 
 #[derive(Clone)]
-pub struct Needle {
+pub struct Stylus {
     backend: Arc<dyn Backend>,
 }
 
-const INSTRUCTIONS: &str = "Needle is a Spotify player on this Mac. Search before you play; prefer the user's own playlists and mixes when they name one (play with `name`). This Mac is Needle's own speaker. play reports status playing (with the track) or requested; after requested, check now_playing once.";
+const INSTRUCTIONS: &str = "Stylus is a Spotify player on this Mac. Search before you play; prefer the user's own playlists and mixes when they name one (play with `name`). This Mac is Stylus's own speaker. play reports status playing (with the track) or requested; after requested, check now_playing once.";
 
 /// One line per call: tool, args (cut at 160 chars), ok or the error, ms.
 fn log_call(tool: &str, args: &Value, result: &Result<Value, String>, ms: u128) {
@@ -130,10 +130,10 @@ pub fn calls_today() -> u64 {
     }
 }
 
-impl ServerHandler for Needle {
+impl ServerHandler for Stylus {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("needle", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("stylus", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
 
@@ -176,8 +176,8 @@ pub async fn serve(listener: tokio::net::TcpListener, backend: Arc<dyn Backend>,
         .with_sse_keep_alive(None)
         .with_allowed_hosts([format!("127.0.0.1:{port}"), format!("localhost:{port}")])
         .with_cancellation_token(stop.child_token());
-    let handler = Needle { backend };
-    let service: StreamableHttpService<Needle, LocalSessionManager> = StreamableHttpService::new(move || Ok(handler.clone()), Default::default(), config);
+    let handler = Stylus { backend };
+    let service: StreamableHttpService<Stylus, LocalSessionManager> = StreamableHttpService::new(move || Ok(handler.clone()), Default::default(), config);
     let router = axum::Router::new().nest_service("/mcp", service).layer(axum::middleware::from_fn_with_state(Guard { key, port }, guard));
     axum::serve(listener, router).with_graceful_shutdown(async move { stop.cancelled_owned().await }).await
 }
@@ -340,10 +340,10 @@ pub async fn mcp_connect_text(format: String) -> Result<String, String> {
 pub fn connect_text(format: &str, key: &str, port: u16) -> Result<String, String> {
     match format {
         "json" => {
-            let v = json!({ "mcpServers": { "needle": { "type": "http", "url": url(port), "headers": { "Authorization": format!("Bearer {key}") } } } });
+            let v = json!({ "mcpServers": { "stylus": { "type": "http", "url": url(port), "headers": { "Authorization": format!("Bearer {key}") } } } });
             serde_json::to_string_pretty(&v).map_err(|e| e.to_string())
         }
-        "claude" => Ok(format!("claude mcp add --scope user --transport http needle {} --header \"Authorization: Bearer {key}\"", url(port))),
+        "claude" => Ok(format!("claude mcp add --scope user --transport http stylus {} --header \"Authorization: Bearer {key}\"", url(port))),
         f => Err(format!("BAD_ARGS: unknown format {f}")),
     }
 }
@@ -355,20 +355,20 @@ pub fn mcp_skill_text() -> String {
 }
 
 const SKILL: &str = "---
-name: needle
-description: Control the Needle Spotify player on this Mac - find and play music, control playback, browse the library. Use when the user asks to play, pause, skip, queue or find music, or asks what is playing.
+name: stylus
+description: Control the Stylus Spotify player on this Mac - find and play music, control playback, browse the library. Use when the user asks to play, pause, skip, queue or find music, or asks what is playing.
 ---
 
-# Needle
+# Stylus
 
-Needle's MCP server (`needle`) controls Spotify through the Needle app on this Mac. It works while Needle is open.
+Stylus's MCP server (`stylus`) controls Spotify through the Stylus app on this Mac. It works while Stylus is open.
 
 ## Rules
 
 - Search before you play when the user names a song or album you don't have a uri for (`search`, then `play` with the `uri`).
 - When the user names a playlist or mix (\"my Bonobo Radio\", \"Daily Mix 2\", \"Discover Weekly\"), play it with `play` `name`; `list_mixes` and `list_playlists` show what exists.
-- A Spotify share link (open.spotify.com/...) goes to `open_link`; `save: true` keeps it in Needle's library, `play: true` plays it.
-- \"This Mac\" is Needle's own speaker. It keeps working when Spotify rate-limits Needle's Web API; other devices need the Web API.
+- A Spotify share link (open.spotify.com/...) goes to `open_link`; `save: true` keeps it in Stylus's library, `play: true` plays it.
+- \"This Mac\" is Stylus's own speaker. It keeps working when Spotify rate-limits Stylus's Web API; other devices need the Web API.
 - `play` on This Mac waits up to 5 s: `status: playing` names the track that started. `status: requested` means not confirmed yet: call `now_playing` once a few seconds later. After `transfer`, call `now_playing` once. Never poll it in a loop.
 - Volume: `set_volume` (0-100), `volume_step` (+/-), `mute` / `unmute`.
 - If a name matches several items, the error lists them with uris: pick one, or ask the user.
@@ -421,10 +421,10 @@ mod tests {
     #[test]
     fn connect_texts() {
         let j: Value = serde_json::from_str(&connect_text("json", "abc", 5590).unwrap()).unwrap();
-        assert_eq!(j, json!({"mcpServers": {"needle": {"type": "http", "url": "http://127.0.0.1:5590/mcp", "headers": {"Authorization": "Bearer abc"}}}}));
-        assert_eq!(connect_text("claude", "abc", 5590).unwrap(), "claude mcp add --scope user --transport http needle http://127.0.0.1:5590/mcp --header \"Authorization: Bearer abc\"");
+        assert_eq!(j, json!({"mcpServers": {"stylus": {"type": "http", "url": "http://127.0.0.1:5590/mcp", "headers": {"Authorization": "Bearer abc"}}}}));
+        assert_eq!(connect_text("claude", "abc", 5590).unwrap(), "claude mcp add --scope user --transport http stylus http://127.0.0.1:5590/mcp --header \"Authorization: Bearer abc\"");
         assert!(connect_text("yaml", "abc", 5590).is_err());
-        assert!(SKILL.starts_with("---\nname: needle\n"));
+        assert!(SKILL.starts_with("---\nname: stylus\n"));
     }
 
     #[test]

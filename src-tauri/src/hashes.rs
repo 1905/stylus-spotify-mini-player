@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use serde_json::Value;
 
-const LOG: &str = "needle::internal";
+const LOG: &str = "stylus::internal";
 
 /// The operations internal.rs uses, with their default hashes.
 const DEFAULTS: &[(&str, &str)] = &[
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn load_from_dir() {
-        let dir = std::env::temp_dir().join(format!("needle-hashes-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stylus-hashes-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::fs::remove_file(dir.join("hashes.json"));
         assert_eq!(load_from(&dir), merged(HashMap::new()), "no file: defaults");

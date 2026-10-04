@@ -16,7 +16,7 @@ use tauri::{AppHandle, Emitter};
 use crate::internal::{serve, with_api, Source::Fallback, Source::Primary};
 use crate::links::{self, Kind, Link};
 
-const LOG: &str = "needle::library";
+const LOG: &str = "stylus::library";
 pub const EVENT: &str = "library-changed";
 const LINKS_KEY: &str = "savedLinks";
 const KNOWN_KEY: &str = "knownMixes";

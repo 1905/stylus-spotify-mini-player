@@ -1,11 +1,11 @@
 [package]
-name = "needle"
+name = "stylus"
 version = "0.1.0"
-description = "Needle — a small Spotify player"
+description = "Stylus — a small Spotify player"
 edition = "2021"
 
 [lib]
-name = "needle_lib"
+name = "stylus_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

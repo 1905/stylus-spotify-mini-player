@@ -37,7 +37,7 @@ function render() {
   $("miniArtist").hidden = !song;
   $("miniDevice").hidden = !st.device;
   setText($("miniDevice"), st.device ? `On ${st.device}` : "");
-  $("miniOpen").setAttribute("aria-label", song ? `${st.title}, ${st.artist || ""}. Show Needle` : "Show Needle");
+  $("miniOpen").setAttribute("aria-label", song ? `${st.title}, ${st.artist || ""}. Show Stylus` : "Show Stylus");
   renderCover(st.cover);
 
   const play = $("miniPlay");

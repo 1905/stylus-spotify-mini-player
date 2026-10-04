@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-const LOG: &str = "needle::quota";
+const LOG: &str = "stylus::quota";
 /// The store key of the block's end, unix seconds.
 pub const STORE_KEY: &str = "apiBlockedUntil";
 /// A 429 without a usable Retry-After blocks this long.

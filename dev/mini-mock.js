@@ -32,7 +32,7 @@
     volume: scenario === "no-volume" || scenario === "idle" || scenario === "login" ? null : 64,
     heart: scenario === "saved" ? true : ["idle", "login", "ad"].includes(scenario) ? null : false,
     device: scenario === "remote" ? "Kitchen" : null,
-    status: { idle: "Nothing playing", login: "Log in to Spotify in Needle", ad: "Playing here" }[scenario] || null,
+    status: { idle: "Nothing playing", login: "Log in to Spotify in Stylus", ad: "Playing here" }[scenario] || null,
     sentAt: 0,
   };
   const calls = [];
