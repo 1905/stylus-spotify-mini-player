@@ -355,7 +355,7 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         }
         "mute" => {
             let device = device_arg(b, a).await?;
-            let key = device.clone().unwrap_or_default();
+            let key = mute_key(b, device.as_deref()).await;
             let now = volume_of(b, device.clone()).await?;
             if now == 0 {
                 return Ok(json!({ "volume": 0, "note": "Already muted" }));
@@ -365,7 +365,7 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         }
         "unmute" => {
             let device = device_arg(b, a).await?;
-            let key = device.clone().unwrap_or_default();
+            let key = mute_key(b, device.as_deref()).await;
             let level = match muted(&key) {
                 Some(l) => l,
                 None if volume_of(b, device.clone()).await? > 0 => return Ok(json!({ "note": "Not muted" })),
@@ -502,6 +502,23 @@ fn with(mut r: Value, k: &str, v: Value) -> Value {
     }
     r[k] = v;
     r
+}
+
+/// The device a mute is saved under: the one asked for, else the active one (else This Mac), so
+/// `mute` without a device and `unmute` with that device's name meet on the same key.
+async fn mute_key(b: &dyn Backend, device: Option<&str>) -> String {
+    if let Some(d) = device {
+        return d.to_string();
+    }
+    match devices(b).await {
+        Ok((list, own)) => list
+            .iter()
+            .find(|d| d["is_active"] == true)
+            .and_then(|d| d["id"].as_str().map(str::to_string))
+            .or(own)
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    }
 }
 
 async fn volume_of(b: &dyn Backend, device: Option<String>) -> Result<u8, String> {
@@ -804,8 +821,11 @@ async fn open_link(b: &dyn Backend, a: &Value) -> Result<Value, String> {
     }
     if a["play"].as_bool() == Some(true) {
         let device = device_arg(b, a).await?;
-        b.play(source_of(b, info["uri"].as_str().unwrap_or("")).await, device).await?;
-        out["playing"] = json!(true);
+        let r = b.play(source_of(b, info["uri"].as_str().unwrap_or("")).await, device).await?;
+        // like `play`: playing only once confirmed, else requested with a note
+        let result = play_result(info["uri"].clone(), &r);
+        out["playing"] = json!(result["status"] == "playing");
+        out["play"] = result;
     }
     Ok(out)
 }

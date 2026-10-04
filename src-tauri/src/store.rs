@@ -63,8 +63,12 @@ pub fn update<T>(key: &str, f: impl FnOnce(Option<&Value>) -> (Option<Value>, T)
         let (next, out) = f(s.get(key));
         if let Some(v) = next {
             if s.get(key) != Some(&v) {
-                s.insert(key.to_string(), v);
-                save(s)?;
+                // write a changed copy first: a failed save must leave memory as on disk, or a
+                // retry would see "no change" and never write
+                let mut changed = s.clone();
+                changed.insert(key.to_string(), v);
+                save(&changed)?;
+                *s = changed;
             }
         }
         Ok(out)
@@ -75,19 +79,19 @@ pub fn update<T>(key: &str, f: impl FnOnce(Option<&Value>) -> (Option<Value>, T)
 #[tauri::command]
 pub fn store_set(key: String, value: Value) -> Result<(), String> {
     with_state(|s| {
-        let changed = if value.is_null() {
-            s.remove(&key).is_some()
-        } else if s.get(&key) == Some(&value) {
-            false
-        } else {
-            s.insert(key, value);
-            true
-        };
-        if changed {
-            save(s)
-        } else {
-            Ok(())
+        if (value.is_null() && !s.contains_key(&key)) || s.get(&key) == Some(&value) {
+            return Ok(());
         }
+        // a changed copy is written first, then kept: a failed save leaves memory as on disk
+        let mut changed = s.clone();
+        if value.is_null() {
+            changed.remove(&key);
+        } else {
+            changed.insert(key, value);
+        }
+        save(&changed)?;
+        *s = changed;
+        Ok(())
     })
 }
 
