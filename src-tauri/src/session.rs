@@ -348,11 +348,14 @@ impl Live {
 pub struct Tracker {
     path: PathBuf,
     live: Mutex<Live>,
+    /// Held across "take a snapshot + write it": the background save and the exit save never
+    /// overlap (one temp file), and the last write is always the newest snapshot.
+    writing: Mutex<()>,
 }
 
 impl Tracker {
     pub fn new(path: PathBuf) -> Tracker {
-        Tracker { path, live: Mutex::new(Live::new(Instant::now())) }
+        Tracker { path, live: Mutex::new(Live::new(Instant::now())), writing: Mutex::new(()) }
     }
 
     fn live(&self) -> std::sync::MutexGuard<'_, Live> {
@@ -444,6 +447,8 @@ impl Tracker {
 
     /// Writes the session if a write is due (see `write_due`).
     pub fn save_if_due(&self) {
+        let _writing = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        // after an exit save this is None (take_due checks `closed` under the same write lock)
         let due = self.live().take_due(Instant::now());
         if let Some(saved) = due {
             write(&self.path, &saved);
@@ -452,6 +457,8 @@ impl Tracker {
 
     /// On app exit: writes the current position now, then stops writing.
     pub fn save_and_close(&self) {
+        // waits for a background save in flight, so this exit snapshot is the last one written
+        let _writing = self.writing.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = {
             let mut live = self.live();
             if live.closed {
