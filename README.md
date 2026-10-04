@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="media/og.jpg" alt="Stylus — a small Spotify player for macOS" width="100%" />
+  <img src="media/og.png" alt="Stylus — a small Spotify player for macOS" width="100%" />
 </p>
 
 <h1 align="center">Stylus</h1>
