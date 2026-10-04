@@ -5,7 +5,7 @@
 //! localhost port, so the key and the Origin check keep them from driving the player.
 
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -18,7 +18,9 @@ use rmcp::{ErrorData, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
+use crate::internal::WarnGate;
 use crate::mcp_tools::{self, Backend};
+use crate::nowplaying::lock;
 
 pub const PORT: u16 = 5590;
 const LOG: &str = "stylus::mcp";
@@ -65,13 +67,10 @@ struct Guard {
 
 /// One refusal warning per reason per minute: a page hammering the port can't flood the log.
 fn warn_refused(why: &str) {
-    static GATE: Mutex<Option<crate::internal::WarnGate>> = Mutex::new(None);
-    let now = Instant::now();
-    let mut g = GATE.lock().unwrap_or_else(|e| e.into_inner());
-    let gate = g.get_or_insert_with(Default::default);
-    // WarnGate's window is 10 min; a minute is enough here, so the key carries the minute
-    let minute = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 60).unwrap_or(0);
-    if gate.allow(&format!("{why}/{minute}"), now) {
+    static GATE: Mutex<Option<WarnGate>> = Mutex::new(None);
+    let mut g = lock(&GATE);
+    let gate = g.get_or_insert_with(|| WarnGate::every(Duration::from_secs(60)));
+    if gate.allow(why, Instant::now()) {
         log::warn!(target: LOG, "refused a request: {why}");
     }
 }
@@ -109,11 +108,11 @@ fn log_call(tool: &str, args: &Value, result: &Result<Value, String>, ms: u128) 
 static CALLS: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 fn today() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0)
+    crate::auth::now() / 86_400
 }
 
 fn count_call() {
-    let mut c = CALLS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = lock(&CALLS);
     let d = today();
     if c.0 != d {
         *c = (d, 0);
@@ -122,7 +121,7 @@ fn count_call() {
 }
 
 pub fn calls_today() -> u64 {
-    let c = CALLS.lock().unwrap_or_else(|e| e.into_inner());
+    let c = lock(&CALLS);
     if c.0 == today() {
         c.1
     } else {
@@ -197,7 +196,7 @@ static KEY: OnceLock<Arc<RwLock<String>>> = OnceLock::new();
 use std::sync::OnceLock;
 
 fn with_server<T>(f: impl FnOnce(&mut Server) -> T) -> T {
-    let mut g = SERVER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut g = lock(&SERVER);
     f(g.get_or_insert_with(Server::default))
 }
 

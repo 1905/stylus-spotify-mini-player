@@ -13,7 +13,6 @@ export const HIDDEN_POLL_MS = 30000; // another device or nothing, window hidden
 export const BLOCKED_TICK_MS = 5000; // blocked: a local tick, no request
 export const SANITY_MS = 60000; // events mode: one playback_state a minute, to catch a missed event
 export const LIST_MIN_MS = 30000; // queue / recently played / devices: at most this often each
-export const ERROR_POLL_MS = POLL_MS;
 // failed polls retry from 1s up to the normal poll period: ~15 s of quiet "Connecting…" before an error shows
 export const RETRY_FIRST_MS = 1000;
 export const GIVE_UP_FAILURES = 6;

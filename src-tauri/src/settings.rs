@@ -48,7 +48,7 @@ pub fn save(settings: &Settings) -> Result<(), String> {
 /// Load, change with `f`, save: one at a time, so two writers can't drop each other's change.
 pub fn update<T>(f: impl FnOnce(&mut Settings) -> T) -> Result<(T, Settings), String> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::nowplaying::lock(&LOCK);
     let mut s = load();
     let out = f(&mut s);
     save(&s)?;

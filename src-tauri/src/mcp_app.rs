@@ -1,12 +1,18 @@
 //! The MCP tools' `Backend` in the app: the same commands the UI calls (spotify.rs, internal API
 //! first, the Web API last), control.rs for playback, library.rs for mixes and added links.
-//! List calls pass the account so they read and fill the same disk cache as the UI.
+//! The library lists read the UI's disk cache first and fill it (cache, then network, like the UI).
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use futures_util::future::BoxFuture;
 use futures_util::FutureExt;
 use serde_json::{json, Value};
 
 use crate::control::{self, Cmd, Source};
 use crate::mcp_tools::{Backend, Fut};
+use crate::nowplaying::lock;
 use crate::spotify;
 
 pub struct App;
@@ -14,6 +20,55 @@ pub struct App;
 /// The account the list cache is scoped to (None: no cache).
 async fn account() -> Option<String> {
     spotify::me_id().await.ok()
+}
+
+/// A cached list is fetched again in the background at most this often.
+const REFRESH_EVERY: Duration = Duration::from_secs(300);
+
+/// A library list by its cache key, fetched (which stores it in the cache).
+async fn fetch(key: &str, account: Option<String>) -> Result<Value, String> {
+    match key {
+        "playlists" => spotify::get_playlists(account).await,
+        "albums" => spotify::get_saved_albums(account).await,
+        "following" => spotify::get_followed_artists(account).await,
+        "liked" => spotify::get_saved_tracks(account).await,
+        k => Err(format!("no list {k}")),
+    }
+}
+
+/// True when list `key` wasn't fetched in the last `REFRESH_EVERY` (and counts it as fetched now).
+fn refresh_due(key: &'static str) -> bool {
+    static LAST: Mutex<Option<HashMap<&'static str, Instant>>> = Mutex::new(None);
+    let now = Instant::now();
+    let mut g = lock(&LAST);
+    let last = g.get_or_insert_with(HashMap::new);
+    let due = last.get(key).is_none_or(|t| now.saturating_duration_since(*t) >= REFRESH_EVERY);
+    if due {
+        last.insert(key, now);
+    }
+    due
+}
+
+/// A library list (`fetch`): the UI's cached copy when there is one, fetched again in the background
+/// now and then (`refresh_due`); else `miss` (it fills the cache).
+async fn cache_first(key: &'static str, miss: impl FnOnce(Option<String>) -> BoxFuture<'static, Result<Value, String>>) -> Result<Value, String> {
+    let account = account().await;
+    let Some(hit) = spotify::cached(&account, key).await else {
+        refresh_due(key);
+        return miss(account).await;
+    };
+    if refresh_due(key) {
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = fetch(key, account).await {
+                log::debug!(target: "stylus::mcp", "{key} not refreshed: {e}");
+            }
+        });
+    }
+    Ok(hit)
+}
+
+fn list(key: &'static str) -> Fut<'static> {
+    cache_first(key, move |account| async move { fetch(key, account).await }.boxed()).boxed()
 }
 
 fn unit(r: Result<(), String>) -> Result<Value, String> {
@@ -50,7 +105,7 @@ fn now_from(here_active: bool, own: Option<&str>, cluster: Result<Option<Value>,
 /// Nothing plays (as far as can be told): `{active:false}`, with what was last loaded here
 /// (`last_here`) and, when other devices couldn't be checked, why (`unchecked`).
 fn idle(unchecked: Option<String>) -> Value {
-    let last = crate::nowplaying::live().and_then(|n| n.last_session()).map(|s| {
+    let last = crate::internal::engine().and_then(|e| e.now_playing().last_session()).map(|s| {
         let context = match &s.source {
             Some(crate::session::Source::Context { context_uri }) => Some(context_uri.clone()),
             _ => None,
@@ -69,7 +124,7 @@ async fn here_state(e: &crate::player::Engine, own: Option<String>) -> Option<Va
         }
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     }
-    let n = control::here().filter(|n| n.engine_active)?;
+    let n = Some(e.now_playing().now()).filter(|n| n.engine_active)?;
     let track = n.track_uri.clone()?;
     Some(json!({
         "active": true, "loading": true, "is_playing": n.playing, "progress_ms": n.position(std::time::Instant::now()),
@@ -82,7 +137,7 @@ async fn here_state(e: &crate::player::Engine, own: Option<String>) -> Option<Va
 /// gives "nothing plays here, other devices unchecked" rather than an error.
 async fn now_playing() -> Result<Value, String> {
     let engine = crate::internal::engine().filter(|e| e.is_ready());
-    let here_active = engine.is_some() && control::here().is_some_and(|n| n.engine_active);
+    let here_active = engine.is_some() && control::here_active();
     let own = crate::internal::own_device_id();
     match now_from(here_active, own.as_deref(), crate::internal::cluster_state()) {
         NowFrom::Here => match &engine {
@@ -123,19 +178,20 @@ impl Backend for App {
         spotify::search(query).boxed()
     }
     fn playlists(&self) -> Fut<'_> {
-        async { spotify::get_playlists(account().await).await }.boxed()
+        list("playlists")
     }
     fn playlist_tracks(&self, id: String) -> Fut<'_> {
         async move { spotify::get_playlist_tracks(id, None, account().await).await }.boxed()
     }
     fn albums(&self) -> Fut<'_> {
-        async { spotify::get_saved_albums(account().await).await }.boxed()
+        list("albums")
     }
     fn album_tracks(&self, id: String) -> Fut<'_> {
         async move { spotify::get_album_tracks(id, account().await).await }.boxed()
     }
-    fn liked(&self) -> Fut<'_> {
-        async { spotify::get_saved_tracks(account().await).await }.boxed()
+    fn liked(&self, max: usize) -> Fut<'_> {
+        // without a cached copy only the `max` newest are fetched (not cached: it isn't all of them)
+        cache_first("liked", move |account| spotify::saved_tracks(max, account).boxed()).boxed()
     }
     fn recent(&self) -> Fut<'_> {
         spotify::get_recently_played().boxed()
@@ -150,7 +206,10 @@ impl Backend for App {
         spotify::get_artist_albums(id).boxed()
     }
     fn followed(&self) -> Fut<'_> {
-        async { spotify::get_followed_artists(account().await).await }.boxed()
+        list("following")
+    }
+    fn cached(&self, key: &'static str) -> BoxFuture<'_, Option<Value>> {
+        async move { spotify::cached(&account().await, key).await }.boxed()
     }
     fn devices(&self) -> Fut<'_> {
         control::devices().boxed()
@@ -174,8 +233,8 @@ impl Backend for App {
         control::play(src, device).boxed()
     }
     fn album_of_track(&self, track_id: String) -> Fut<'_> {
-        // the internal API (the album-info card's lookup): works while the Web API is rate-limited
-        async move { Ok(json!(format!("spotify:album:{}", crate::internal::Api::current()?.album_id_of_track(&track_id).await?))) }.boxed()
+        // the album-info card's lookup (internal API first, cached on disk)
+        async move { Ok(json!(format!("spotify:album:{}", spotify::album_of_track(&track_id, &account().await).await?))) }.boxed()
     }
     fn transport(&self, cmd: Cmd) -> Fut<'_> {
         control::transport(cmd).boxed()

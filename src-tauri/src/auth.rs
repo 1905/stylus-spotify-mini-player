@@ -90,8 +90,14 @@ fn is_terminal_refresh_failure(status: u16, body: &str) -> bool {
     status == 401 || (status == 400 && body.contains("invalid_grant"))
 }
 
+/// Unix time, seconds.
 pub(crate) fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Unix time, ms.
+pub(crate) fn now_ms() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 // ---- token persistence -----------------------------------------------------

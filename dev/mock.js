@@ -460,8 +460,6 @@
     local_state: () => (localSeen || runActive() ? localPayload() : null),
     api_status: () => ({
       blockedForSecs: limited ? 50000 : 0,
-      requestsLastMinute: calls.filter((c) => !LOCAL.test(c.cmd) && Date.now() - c.at < 60e3).length,
-      requestsLastHour: calls.filter((c) => !LOCAL.test(c.cmd)).length,
     }),
     play_on_device: ({ deviceId, uris }) => {
       useDevice(deviceId);
@@ -506,7 +504,7 @@
       return spirc(() => (state.repeat = mode))();
     },
     // activates the player, then loads: Ok only means queued (the poll shows the result)
-    local_load: ({ contextUri, uris, trackUri, positionMs, play }) => {
+    local_load: ({ spec: { contextUri, uris, trackUri, positionMs, play } }) => {
       engineReady();
       if (!!contextUri === !!(uris && uris.length)) throw "BAD_ARGS: exactly one of contextUri and uris (mock)";
       if (uris && uris.length > 200) throw "BAD_ARGS: more than 200 uris (mock)";
@@ -726,7 +724,7 @@
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
   const LOCAL = /^(auth_status|login$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|api_status$|mcp_|links_list$|link_remove$)/;
-  // commands with no source but the Web API (Rust's spotify.rs; src/lib/quota.js WEB_ONLY)
+  // commands with no source but the Web API (Rust's spotify.rs): Rust refuses these while rate-limited
   const WEB_ONLY = /^(playback_state|transfer_playback|set_volume|set_shuffle|set_repeat|play_context|play_on_device|resume|resume_at|pause|next_track|previous_track|seek)$/;
   // commands that can change what the in-app player plays: a player-state follows them
   const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
@@ -815,7 +813,7 @@
   // resume: Rust loads the saved session back (paused) once the player is up, then tells the UI
   if (scenario === "resume" && savedSession) {
     setTimeout(() => {
-      handlers.local_load({ ...savedSession, uris: undefined, play: false });
+      handlers.local_load({ spec: { ...savedSession, uris: undefined, play: false } });
       emit("session-restored", savedSession);
     }, 2500);
   }

@@ -26,11 +26,11 @@ use librespot_playback::{
 };
 use librespot_protocol::authentication::AuthenticationType;
 use librespot_protocol::connect::ClusterUpdate;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter, State as Managed};
 use tokio::sync::watch;
 
-use crate::nowplaying::{self, NowPlaying};
+use crate::nowplaying::{self, lock, volume_from_percent, Now, NowPlaying};
 use crate::session::{self, Repeat, Source, Tracker};
 
 /// The Connect device name other Spotify clients show. Renaming keeps the device id.
@@ -273,6 +273,8 @@ struct Inner {
     restore_tried: AtomicBool,
     /// What plays here, for the UI (`player-state` events, nowplaying.rs).
     now: Arc<NowPlaying>,
+    /// The volume set while This Mac was inactive, for its next load (`PendingVolume`).
+    pending_volume: Mutex<PendingVolume>,
 }
 
 impl Engine {
@@ -291,6 +293,7 @@ impl Engine {
             session,
             restore_tried: AtomicBool::new(false),
             now,
+            pending_volume: Mutex::new(PendingVolume::default()),
         }))
     }
 
@@ -324,15 +327,22 @@ impl Engine {
 
     /// What Spotify Connect looks like from here while ready: the latest cluster, this Mac's
     /// device id and its volume %. None before the first cluster update of the session.
-    pub fn connect_view(&self) -> Option<(librespot_protocol::connect::Cluster, String, u8)> {
+    pub fn connect_view(&self) -> Option<(Arc<librespot_protocol::connect::Cluster>, String, u8)> {
         let session = self.live_session()?;
         let cluster = self.0.now.cluster()?;
-        Some((cluster, session.device_id().to_string(), self.0.now.volume_percent()))
+        Some((cluster, session.device_id().to_string(), self.volume_percent()))
     }
 
-    /// This Mac's volume, 0–100 %.
+    /// What plays here, from the player's own events (nowplaying.rs).
+    pub fn now_playing(&self) -> Arc<NowPlaying> {
+        self.0.now.clone()
+    }
+
+    /// This Mac's volume, 0–100 %: the level waiting for the next load while inactive
+    /// (`PendingVolume`), else the player's.
     pub fn volume_percent(&self) -> u8 {
-        self.0.now.volume_percent()
+        let active = self.0.now.engine_active();
+        lock(&self.0.pending_volume).read(active, self.0.now.volume_percent())
     }
 
     /// Runs `f` on the current Spirc. Err `ENGINE_NOT_READY` when the engine isn't
@@ -816,11 +826,6 @@ pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Resul
 /// Most tracks one `local_load` takes.
 const MAX_LOAD_URIS: usize = 200;
 
-/// 0–100 % → Spirc's 0–65535, rounded. Above 100 counts as 100.
-fn volume_from_percent(percent: u8) -> u16 {
-    ((u32::from(percent.min(100)) * 65535 + 50) / 100) as u16
-}
-
 #[derive(Debug)]
 enum LoadSource {
     Context(String),
@@ -870,6 +875,77 @@ fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32,
     }
 }
 
+/// What `Engine::load` loads: a context or a track list (exactly one), from `track_uri` (None:
+/// the first) at `position_ms`, playing or paused. `shuffle`/`repeat` ("off" | "context" |
+/// "track") are kept across the load. The UI's `local_load` sends it camelCase.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadSpec {
+    pub context_uri: Option<String>,
+    pub uris: Option<Vec<String>>,
+    pub track_uri: Option<String>,
+    #[serde(default)]
+    pub position_ms: u32,
+    #[serde(default)]
+    pub play: bool,
+    pub shuffle: Option<bool>,
+    pub repeat: Option<String>,
+}
+
+/// This Mac's volume as last set while it was inactive. Spirc ignores volume then, and takes
+/// its old level back when it activates: the level waits here, reads report it, and the next
+/// load here sends it.
+#[derive(Debug, Default, PartialEq)]
+pub struct PendingVolume(Option<u8>);
+
+impl PendingVolume {
+    /// Sets `percent`: true when it goes to Spirc now (This Mac active), false when it waits.
+    pub fn set(&mut self, active: bool, percent: u8) -> bool {
+        self.0 = (!active).then_some(percent);
+        active
+    }
+
+    /// The level to report: the waiting one while inactive, else the player's (`live`).
+    pub fn read(&mut self, active: bool, live: u8) -> u8 {
+        if active {
+            // activated some other way (the UI, a phone): the player's level counts
+            self.0 = None;
+            return live;
+        }
+        self.0.unwrap_or(live)
+    }
+
+    pub fn take(&mut self) -> Option<u8> {
+        self.0.take()
+    }
+}
+
+pub const NOTHING_AFTER: &str = "Nothing after this track: next would stop playback";
+pub const NOTHING_BEFORE: &str = "Nothing before this track: previous would stop playback";
+
+/// Under this position `previous` goes to the track before (Spirc: 3 s); a margin for the trip.
+const PREV_RESTARTS_AFTER_MS: u32 = 2_500;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Skip {
+    Next,
+    Previous,
+}
+
+/// Why a next/previous on This Mac would only stop playback (Spirc stops when there is no track
+/// to go to), None when it may go. Only when the cluster's up-next is known for this track and
+/// repeat is off; anything uncertain goes through.
+pub fn skip_blocked(skip: Skip, n: &Now, now: Instant) -> Option<&'static str> {
+    if !n.skips_fresh || n.repeat != Repeat::Off {
+        return None;
+    }
+    match skip {
+        Skip::Next if n.next.as_ref().is_some_and(Vec::is_empty) => Some(NOTHING_AFTER),
+        Skip::Previous if n.prev == Some(false) && n.position(now) < PREV_RESTARTS_AFTER_MS => Some(NOTHING_BEFORE),
+        _ => None,
+    }
+}
+
 /// A local command's result, logged (an error as a warning).
 fn logged(what: &str, r: Result<(), String>) -> Result<(), String> {
     match &r {
@@ -895,14 +971,26 @@ impl Engine {
         logged("pause", self.with_spirc(Spirc::pause))
     }
 
+    /// Err `NOTHING_AFTER` when next would only stop playback (`skip_blocked`).
     pub fn next(&self) -> Result<(), String> {
+        self.may_skip(Skip::Next)?;
         crate::audio_out::flush();
         logged("next", self.with_spirc(Spirc::next))
     }
 
+    /// Err `NOTHING_BEFORE` when previous would only stop playback (`skip_blocked`).
     pub fn prev(&self) -> Result<(), String> {
+        self.may_skip(Skip::Previous)?;
         crate::audio_out::flush();
         logged("prev", self.with_spirc(Spirc::prev))
+    }
+
+    fn may_skip(&self, skip: Skip) -> Result<(), String> {
+        let n = self.0.now.now();
+        match skip_blocked(skip, &n, Instant::now()).filter(|_| n.engine_active) {
+            Some(why) => Err(why.into()),
+            None => Ok(()),
+        }
     }
 
     pub fn seek(&self, position_ms: u32) -> Result<(), String> {
@@ -910,9 +998,18 @@ impl Engine {
         logged(&format!("seek {position_ms}"), self.with_spirc(|s| s.set_position_ms(position_ms)))
     }
 
-    /// `percent` 0–100.
-    pub fn set_volume(&self, percent: u8) -> Result<(), String> {
-        logged(&format!("volume {percent}"), self.with_spirc(|s| s.set_volume(volume_from_percent(percent))))
+    /// `percent` 0–100. True: sent to Spirc now; false: This Mac is inactive, so the level waits
+    /// for its next load (`PendingVolume`).
+    pub fn set_volume(&self, percent: u8) -> Result<bool, String> {
+        let percent = percent.min(100);
+        if !lock(&self.0.pending_volume).set(self.0.now.engine_active(), percent) {
+            log::info!(target: "stylus::cmd", "volume {percent} waits for the next load here");
+            return Ok(false);
+        }
+        logged(&format!("volume {percent}"), self.with_spirc(|s| s.set_volume(volume_from_percent(percent))))?;
+        // the player's VolumeChanged follows in a moment: reads right after see the level already
+        self.0.now.set_volume(volume_from_percent(percent));
+        Ok(true)
     }
 
     pub fn set_shuffle(&self, on: bool) -> Result<(), String> {
@@ -939,18 +1036,10 @@ impl Engine {
     }
 
     /// Loads a context or a track list here. Activates the device first: Spirc ignores every
-    /// command, Load included, while inactive. Ok only means queued.
-    #[allow(clippy::too_many_arguments)]
-    pub fn load(
-        &self,
-        context_uri: Option<String>,
-        uris: Option<Vec<String>>,
-        track_uri: Option<String>,
-        position_ms: u32,
-        play: bool,
-        shuffle: Option<bool>,
-        repeat: Option<String>,
-    ) -> Result<(), String> {
+    /// command, Load included, while inactive. Then the volume set while inactive, if any.
+    /// Ok only means queued.
+    pub fn load(&self, spec: LoadSpec) -> Result<(), String> {
+        let LoadSpec { context_uri, uris, track_uri, position_ms, play, shuffle, repeat } = spec;
         let source = load_source(context_uri, uris)?;
         let m = modes(shuffle, repeat);
         let saved = match &source {
@@ -965,6 +1054,11 @@ impl Engine {
             s.load(request)
         })?;
         self.0.session.loaded(saved, track_uri, position_ms, m.shuffle, Repeat::from_flags(m.repeat, m.repeat_track));
+        let pending = lock(&self.0.pending_volume).take();
+        if let Some(p) = pending {
+            // best effort: the load went through, a lost level isn't worth failing it
+            let _ = logged(&format!("pending volume {p}"), self.with_spirc(|s| s.set_volume(volume_from_percent(p))));
+        }
         Ok(())
     }
 }
@@ -997,7 +1091,7 @@ pub fn local_seek(engine: Managed<'_, Engine>, position_ms: u32) -> Result<(), S
 /// `percent` 0–100.
 #[tauri::command]
 pub fn local_volume(engine: Managed<'_, Engine>, percent: u8) -> Result<(), String> {
-    engine.set_volume(percent)
+    engine.set_volume(percent).map(|_| ())
 }
 
 #[tauri::command]
@@ -1021,18 +1115,8 @@ pub fn local_state(engine: Managed<'_, Engine>) -> Option<serde_json::Value> {
 /// Loads a context or a track list on this Mac's speaker (`Engine::load`). Ok only means
 /// queued; the UI confirms the track from the player-state events.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub fn local_load(
-    engine: Managed<'_, Engine>,
-    context_uri: Option<String>,
-    uris: Option<Vec<String>>,
-    track_uri: Option<String>,
-    position_ms: u32,
-    play: bool,
-    shuffle: Option<bool>,
-    repeat: Option<String>,
-) -> Result<(), String> {
-    engine.load(context_uri, uris, track_uri, position_ms, play, shuffle, repeat)
+pub fn local_load(engine: Managed<'_, Engine>, spec: LoadSpec) -> Result<(), String> {
+    engine.load(spec)
 }
 
 /// The saved playback session of the player's account, for the UI to show before its first
@@ -1263,15 +1347,6 @@ mod tests {
             && matches!(parts[3].chars().next(), Some('8' | '9' | 'a' | 'b'))
     }
 
-    #[test]
-    fn volume_percent_to_u16() {
-        assert_eq!(volume_from_percent(0), 0);
-        assert_eq!(volume_from_percent(50), 32768);
-        assert_eq!(volume_from_percent(100), 65535);
-        assert_eq!(volume_from_percent(1), 655);
-        assert_eq!(volume_from_percent(255), 65535);
-    }
-
     fn uris(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("spotify:track:{i}")).collect()
     }
@@ -1315,6 +1390,73 @@ mod tests {
         assert!(dbg.contains("shuffle: true") && dbg.contains("repeat: true") && dbg.contains("repeat_track: false"), "{dbg}");
         let m = modes(None, Some("track".into()));
         assert!(!m.shuffle && !m.repeat && m.repeat_track);
+    }
+
+    #[test]
+    fn volume_set_while_inactive_waits_for_the_load() {
+        // the observed bug: set_volume 35 while inactive was dropped by Spirc; the read said 73
+        let mut p = PendingVolume::default();
+        assert!(!p.set(false, 35), "inactive: not sent now");
+        assert_eq!(p.read(false, 73), 35, "reads report the level set");
+        assert_eq!(p.read(false, 73) as i64 + 10, 45, "volume_step +10 starts from it");
+        assert_eq!(p.take(), Some(35), "the load sends it");
+        assert_eq!(p.read(false, 73), 73);
+        // active: straight to Spirc, nothing waits
+        assert!(p.set(true, 30));
+        assert_eq!(p.read(true, 30), 30);
+        // activated some other way: the player's level counts, the old one is dropped
+        p.set(false, 20);
+        assert_eq!(p.read(true, 60), 60);
+        assert_eq!(p.take(), None);
+    }
+
+    #[test]
+    fn inactive_engine_volume_waits_for_the_load() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        assert_eq!(engine.set_volume(35), Ok(false), "not the active device: queued, no Spirc needed");
+        assert_eq!(engine.volume_percent(), 35);
+        assert!(engine.load(LoadSpec::default()).unwrap_err().starts_with("BAD_ARGS"));
+        assert_eq!(engine.volume_percent(), 35, "a refused load keeps it waiting");
+    }
+
+    #[test]
+    fn next_and_previous_refuse_only_when_they_would_stop() {
+        let t0 = Instant::now();
+        let at = |next: Option<Vec<&str>>, prev: Option<bool>, fresh: bool, pos: u32| {
+            let mut n = Now::new(t0);
+            n.track_uri = Some("spotify:track:kerala".into());
+            n.next = next.map(|l| l.into_iter().map(String::from).collect());
+            n.prev = prev;
+            n.skips_fresh = fresh;
+            n.position_ms = pos;
+            n
+        };
+        // the observed bug: Kerala played on its own (uris:[track]), next stopped it silently
+        assert_eq!(skip_blocked(Skip::Next, &at(Some(vec![]), Some(false), true, 6_000), t0), Some(NOTHING_AFTER));
+        assert_eq!(skip_blocked(Skip::Next, &at(Some(vec!["spotify:track:b"]), Some(false), true, 6_000), t0), None);
+        // up-next not known, or from before this track loaded: Spirc decides
+        assert_eq!(skip_blocked(Skip::Next, &at(None, None, true, 6_000), t0), None);
+        assert_eq!(skip_blocked(Skip::Next, &at(Some(vec![]), Some(false), false, 6_000), t0), None);
+        // repeat on: Spirc wraps or repeats
+        let mut rep = at(Some(vec![]), Some(false), true, 0);
+        rep.repeat = Repeat::Context;
+        assert_eq!(skip_blocked(Skip::Next, &rep, t0), None);
+        // previous: no track before and under 3 s stops; later it restarts the track
+        assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, 1_000), t0), Some(NOTHING_BEFORE));
+        assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(false), true, 6_000), t0), None);
+        assert_eq!(skip_blocked(Skip::Previous, &at(Some(vec![]), Some(true), true, 1_000), t0), None);
+    }
+
+    #[test]
+    fn a_load_makes_up_next_stale_until_the_cluster_speaks() {
+        let t0 = Instant::now();
+        let mut n = Now::new(t0);
+        n.next = Some(vec![]);
+        n.skips_fresh = true;
+        let id = librespot_core::SpotifyUri::from_uri("spotify:track:5DAjrJqXqYtgr67pVhmUeR").unwrap();
+        n.on_event(&librespot_playback::player::PlayerEvent::Loading { play_request_id: 2, track_id: id, position_ms: 0 }, t0);
+        assert!(!n.skips_fresh, "the old track's up-next must not block the new one");
+        assert_eq!(skip_blocked(Skip::Next, &n, t0), None);
     }
 
     #[test]

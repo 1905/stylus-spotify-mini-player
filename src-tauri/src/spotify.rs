@@ -106,8 +106,8 @@ async fn items_up_to(mut page: Value, max: usize) -> Result<Vec<Value>, String> 
     }
 }
 
-/// How many page requests a list fetch keeps in flight.
-const PAGE_CONCURRENCY: usize = 4;
+/// How many page requests a list fetch keeps in flight (the internal API's too).
+pub(crate) const PAGE_CONCURRENCY: usize = 4;
 
 /// The offsets still to fetch after the first page (offset 0) of an offset-paged
 /// list holding `total` items, up to `max_items`.
@@ -166,7 +166,7 @@ fn cache_store(account: &Option<String>, key: String, value: &Value) {
 }
 
 /// The account's cached `key`, or None without an account.
-async fn cached(account: &Option<String>, key: &str) -> Option<Value> {
+pub(crate) async fn cached(account: &Option<String>, key: &str) -> Option<Value> {
     cache_get(account.clone()?, key.to_string()).await
 }
 
@@ -484,7 +484,7 @@ pub async fn get_album_info(album_id: Option<String>, track_id: Option<String>, 
 }
 
 /// The id of the album `track_id` is on, cached under `album-of:<track id>`.
-async fn album_of_track(track_id: &str, account: &Option<String>) -> Result<String, String> {
+pub(crate) async fn album_of_track(track_id: &str, account: &Option<String>) -> Result<String, String> {
     let key = format!("album-of:{track_id}");
     if let Some(Value::String(hit)) = cached(account, &key).await {
         return Ok(hit);
@@ -542,7 +542,7 @@ async fn web_album_tracks(album_id: &str) -> Result<Value, String> {
 
 // ---- library, taste, artists, mixes ------------------------------------------
 
-const MAX_SAVED_TRACKS: usize = 1000;
+pub(crate) const MAX_SAVED_TRACKS: usize = 1000;
 const MAX_SAVED_ALBUMS: usize = 200;
 const MAX_FOLLOWED: usize = 200;
 
@@ -557,24 +557,32 @@ pub async fn liked_count() -> Result<u64, String> {
 /// the full count, so the UI can say when the cap cut some off. Cached as `liked`.
 #[tauri::command]
 pub async fn get_saved_tracks(account: Option<String>) -> Result<Value, String> {
+    saved_tracks(MAX_SAVED_TRACKS, account).await
+}
+
+/// The newest `max` Liked Songs (at most 1000) and the full count. Only the whole list is cached.
+pub(crate) async fn saved_tracks(max: usize, account: Option<String>) -> Result<Value, String> {
+    let max = max.min(MAX_SAVED_TRACKS);
     let shape = |(tracks, total): (Vec<Value>, u64)| json!({ "tracks": tracks, "total": total });
     let out = serve(
         "get_saved_tracks",
         vec![
-            with_api(Primary, move |api| async move { api.liked(MAX_SAVED_TRACKS).await.map(shape) }),
-            with_api(Fallback, move |api| async move { api.liked_pb(MAX_SAVED_TRACKS).await.map(shape) }),
-            web(web_saved_tracks()),
+            with_api(Primary, move |api| async move { api.liked(max).await.map(shape) }),
+            with_api(Fallback, move |api| async move { api.liked_pb(max).await.map(shape) }),
+            web(web_saved_tracks(max)),
         ],
     )
     .await?;
-    cache_store(&account, "liked".into(), &out);
+    if max == MAX_SAVED_TRACKS {
+        cache_store(&account, "liked".into(), &out);
+    }
     Ok(out)
 }
 
-async fn web_saved_tracks() -> Result<Value, String> {
+async fn web_saved_tracks(max: usize) -> Result<Value, String> {
     let first = get("/me/tracks?limit=50").await?;
     let total = first["total"].clone();
-    let tracks: Vec<Value> = pages_parallel(first, |o| format!("/me/tracks?limit=50&offset={o}"), 50, MAX_SAVED_TRACKS)
+    let tracks: Vec<Value> = pages_parallel(first, |o| format!("/me/tracks?limit=50&offset={o}"), 50, max)
         .await?
         .iter()
         .map(track_of_row)
@@ -756,7 +764,7 @@ pub async fn mix_info(playlist_id: String) -> Result<Value, String> {
     serve(
         "mix_info",
         vec![
-            with_api(Primary, move |api| async move { api.playlist_info(id).await }),
+            with_api(Primary, move |api| async move { api.playlist_meta(id).await.map(|m| json!({ "name": m["name"], "cover": m["cover"] })) }),
             with_api(Fallback, move |api| async move { api.playlist_info_pb(id).await }),
             web(web_mix_info(id)),
         ],

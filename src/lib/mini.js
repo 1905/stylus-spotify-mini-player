@@ -1,5 +1,6 @@
 // The menu-bar mini player (Rust tray.rs, src/mini.js): what the main window sends it, when, and
 // what the popover derives from it. The main window stays the only brain; this is its summary.
+import { drifted } from "./media.js";
 
 /** A position this far off the expected one is a jump (a seek, a restart): the popover needs it. */
 export const MINI_DRIFT_MS = 3000;
@@ -36,8 +37,7 @@ const KEYS = ["mode", "title", "artist", "cover", "status", "playing", "pending"
 export function miniChanged(prev, next) {
   if (!prev || !next) return prev !== next;
   if (KEYS.some((k) => prev[k] !== next[k])) return true;
-  const expected = prev.positionMs + (prev.playing ? next.sentAt - prev.sentAt : 0);
-  return Math.abs(next.positionMs - expected) > MINI_DRIFT_MS;
+  return drifted(prev, next, next.sentAt - prev.sentAt, MINI_DRIFT_MS);
 }
 
 /** The bar's fill, 0–1, at wall-clock time nowMs. */

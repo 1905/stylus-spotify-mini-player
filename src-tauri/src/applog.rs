@@ -71,7 +71,7 @@ pub fn app_log(level: String, msg: String) {
 
 /// Local time is not worth a dependency: UTC seconds with millis.
 fn stamp() -> String {
-    let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let s = d.as_secs();
-    format!("{:02}:{:02}:{:02}.{:03}Z", s / 3600 % 24, s / 60 % 60, s % 60, d.subsec_millis())
+    let ms = crate::auth::now_ms();
+    let s = ms / 1000;
+    format!("{:02}:{:02}:{:02}.{:03}Z", s / 3600 % 24, s / 60 % 60, s % 60, ms % 1000)
 }

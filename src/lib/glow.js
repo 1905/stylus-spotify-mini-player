@@ -336,7 +336,10 @@ export function glowVars(glow) {
   return v;
 }
 
-/** the look before any cover: FALLBACK colours, the old single glow */
+/** The colours before any cover (and when one can't be read). */
+export const FALLBACK = { vivid: [139, 124, 240], ink: [21, 19, 27] };
+
+/** the look before any cover: FALLBACK colours, one wash and no blobs */
 export const fallbackVars = ({ vivid, ink }) => glowVars({ ink, vivid, wash: { rgb: vivid, a: 0.22 }, blobs: [] });
 
 // ---------- DOM: load, sample, cache ----------

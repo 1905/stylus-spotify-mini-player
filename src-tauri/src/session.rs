@@ -13,6 +13,8 @@ use librespot_playback::player::{PlayerEvent, PlayerEventChannel};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::nowplaying::lock;
+
 const LOG: &str = "stylus::session";
 /// While playing, the position is written this often.
 const SAVE_EVERY: Duration = Duration::from_secs(10);
@@ -162,10 +164,6 @@ fn write(path: &Path, saved: &Saved) {
     }
 }
 
-fn unix_ms() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
 // ---- pure rules ------------------------------------------------------------
 
 /// The source after `track` starts. A context is kept: its tracks aren't known here (a
@@ -279,13 +277,17 @@ impl Live {
             shuffle: self.shuffle,
             repeat: self.repeat,
             volume: self.volume,
-            saved_at: unix_ms(),
+            saved_at: crate::auth::now_ms(),
         })
+    }
+
+    fn is_due(&self, now: Instant) -> bool {
+        !self.closed && self.account.is_some() && write_due(&self.clock, now)
     }
 
     /// The snapshot to write now, if one is due; resets the clock.
     fn take_due(&mut self, now: Instant) -> Option<Saved> {
-        if self.closed || self.account.is_none() || !write_due(&self.clock, now) {
+        if !self.is_due(now) {
             return None;
         }
         self.clock.dirty = false;
@@ -359,7 +361,7 @@ impl Tracker {
     }
 
     fn live(&self) -> std::sync::MutexGuard<'_, Live> {
-        self.live.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.live)
     }
 
     /// Scope the session to `account`: the first call (or a new account) reads its saved
@@ -451,9 +453,14 @@ impl Tracker {
         self.live().snapshot(Instant::now()).filter(|s| s.source.is_some())
     }
 
+    /// A write is due (see `write_due`): a cheap in-memory check before `save_if_due`.
+    pub fn is_due(&self) -> bool {
+        self.live().is_due(Instant::now())
+    }
+
     /// Writes the session if a write is due (see `write_due`).
     pub fn save_if_due(&self) {
-        let _writing = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        let _writing = lock(&self.writing);
         // after an exit save this is None (take_due checks `closed` under the same write lock)
         let due = self.live().take_due(Instant::now());
         if let Some(saved) = due {
@@ -464,7 +471,7 @@ impl Tracker {
     /// On app exit: writes the current position now, then stops writing.
     pub fn save_and_close(&self) {
         // waits for a background save in flight, so this exit snapshot is the last one written
-        let _writing = self.writing.lock().unwrap_or_else(|e| e.into_inner());
+        let _writing = lock(&self.writing);
         let snapshot = {
             let mut live = self.live();
             if live.closed {
@@ -480,8 +487,8 @@ impl Tracker {
     }
 }
 
-/// Feeds librespot's player events into `tracker` and writes when due, until the player
-/// goes away (its channel closes).
+/// Feeds librespot's player events into `tracker` and writes when due (off the async thread,
+/// only then), until the player goes away (its channel closes).
 pub async fn listen(tracker: std::sync::Arc<Tracker>, mut events: PlayerEventChannel) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -493,8 +500,10 @@ pub async fn listen(tracker: std::sync::Arc<Tracker>, mut events: PlayerEventCha
             },
             _ = tick.tick() => {}
         }
-        let t = tracker.clone();
-        let _ = tokio::task::spawn_blocking(move || t.save_if_due()).await;
+        if tracker.is_due() {
+            let t = tracker.clone();
+            let _ = tokio::task::spawn_blocking(move || t.save_if_due()).await;
+        }
     }
 }
 
@@ -536,7 +545,7 @@ mod tests {
     use super::*;
 
     fn temp_file(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), unix_ms()));
+        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), crate::auth::now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("session.json")
     }

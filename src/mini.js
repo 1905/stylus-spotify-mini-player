@@ -3,6 +3,7 @@
 // routing, spinners and quota guards are the main window's own.
 import { ICONS } from "./lib/icons.js";
 import { miniProgress, volumeIcon } from "./lib/mini.js";
+import { stepVolume } from "./lib/transport.js";
 
 const $ = (id) => document.getElementById(id);
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
@@ -129,10 +130,11 @@ function onKey(ev) {
     invoke("mini_hide").catch(() => {});
     return;
   }
-  if (ev.target === $("miniSlider") && (ev.key === "ArrowLeft" || ev.key === "ArrowRight" || ev.key === "ArrowUp" || ev.key === "ArrowDown")) {
+  // the main window's slider keys: arrows step, Home and End go to 0 and 100
+  const v = ev.target === $("miniSlider") && s && s.volume != null ? stepVolume(s.volume, ev.key) : null;
+  if (v !== null) {
     ev.preventDefault();
-    const step = ev.key === "ArrowLeft" || ev.key === "ArrowDown" ? -5 : 5;
-    if (s && s.volume != null) setVolume(s.volume + step);
+    setVolume(v);
     return;
   }
   // space anywhere but on a button plays or pauses, as in the main window

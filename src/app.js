@@ -1,7 +1,6 @@
 // Stylus — stage UI: boot, sequential poll loop, the run of covers, transport.
 import { fmtTime, esc } from "./lib/format.js";
-import { FALLBACK } from "./lib/color.js";
-import { extractGlow, glowVars, fallbackVars } from "./lib/glow.js";
+import { extractGlow, glowVars, fallbackVars, FALLBACK } from "./lib/glow.js";
 import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeline.js";
 import { panelRows } from "./lib/playlist.js";
 import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
@@ -11,7 +10,7 @@ import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
-import { isWebOnly, rateLimitedSecs, rateLimitedError, quotaNotice, quotaStatus, waitText } from "./lib/quota.js";
+import { rateLimitedSecs, rateLimitedError, quotaNotice, quotaStatus, waitText } from "./lib/quota.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
 import { originUri, offsettable } from "./lib/source.js";
 import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
@@ -28,18 +27,19 @@ import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js
 // (still in flight across a logout) never settles, so it can't touch the new one.
 let authSession = 0;
 const STALE = new Promise(() => {});
-// While Spotify rate-limits the app, a command with no source but the Web API fails here without
-// reaching Rust (quota.rs would refuse it too, without a request): RATE_LIMITED:<secs>: …
-// The rest go to Rust, which tries Spotify's internal API first.
+// While Spotify rate-limits the app, Rust refuses a command that needs the Web API at once, without
+// a request (quota.rs): RATE_LIMITED:<secs>: … That error waits for the disk reads already asked
+// for, so a cached copy shows instead of it. Rust tries Spotify's internal API first where it can.
 function invoke(cmd, args) {
   const sess = authSession;
-  if (isWebOnly(cmd) && blockedMs() > 0) return blockedReject(cmd, sess);
   return window.__TAURI__.core.invoke(cmd, args).then(
     (v) => (sess === authSession ? v : STALE),
-    (e) => {
+    async (e) => {
       if (sess !== authSession) return STALE;
       noteRateLimited(e);
-      return Promise.reject(e);
+      // me_id: the disk reads wait for the account, so it must not wait for them
+      if (rateLimitedSecs(e) && cmd !== "me_id") await Promise.allSettled([...diskPending]);
+      return sess === authSession ? Promise.reject(e) : STALE;
     },
   );
 }
@@ -146,14 +146,6 @@ const quotaToasted = new Set(); // the kinds ("remote", "library") whose notice 
 const diskPending = new Set();
 
 const blockedMs = () => (blockedUntil ? Math.max(0, blockedUntil - performance.now()) : 0);
-
-/** The RATE_LIMITED rejection of a blocked Web API command, after the disk reads already asked for. */
-function blockedReject(cmd, sess) {
-  const err = rateLimitedError(blockedMs() / 1000);
-  // me_id: the disk reads wait for the account, so it must not wait for them
-  const wait = cmd === "me_id" ? Promise.resolve() : Promise.allSettled([...diskPending]);
-  return wait.then(() => (sess === authSession ? Promise.reject(err) : STALE));
-}
 
 /** A RATE_LIMITED error from Rust: block every Web API call from here for that long. */
 function noteRateLimited(e) {
@@ -1308,7 +1300,9 @@ async function withDeviceNow(fn) {
   } catch (e) {
     if (isCode(e, "AUTH_EXPIRED")) return expire(), false;
     if (!isCode(e, "NO_ACTIVE_DEVICE")) {
-      if (!limitedToast("remote", e)) toast(`Spotify didn't respond: ${reason(e)}`);
+      // This Mac refuses a next/previous that would only stop playback (Rust player.rs): its sentence as is
+      if (/^Nothing (after|before) this track/.test(String(e))) toast(String(e));
+      else if (!limitedToast("remote", e)) toast(`Spotify didn't respond: ${reason(e)}`);
       return false;
     }
   }
@@ -1399,7 +1393,7 @@ function devName(id) {
 async function playSource(deviceId, src) {
   if (isEngineDevice(engine, deviceId)) {
     try {
-      return await invoke("local_load", { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat });
+      return await invoke("local_load", { spec: { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat } });
     } catch (e) {
       if (!isCode(e, "ENGINE_NOT_READY")) throw e;
     }
@@ -2249,23 +2243,18 @@ function applyTray() {
   syncMini(true);
 }
 
-function toggleMenuBar() {
+/** Flip an on/off setting: save, log it as `label`, redraw Settings, then `after(on)`. */
+function flipSetting(key, label, after) {
   const s = getSettings();
-  s.menuBar = !s.menuBar;
+  s[key] = !s[key];
   saveSettings();
-  applog("info", `setting: menu bar ${s.menuBar ? "on" : "off"}`);
+  applog("info", `setting: ${label} ${s[key] ? "on" : "off"}`);
   renderSettings();
-  applyTray();
+  after(s[key]);
 }
 
-function toggleMenuBarTitle() {
-  const s = getSettings();
-  s.menuBarTitle = !s.menuBarTitle;
-  saveSettings();
-  applog("info", `setting: song in menu bar ${s.menuBarTitle ? "on" : "off"}`);
-  renderSettings();
-  applyTray();
-}
+const toggleMenuBar = () => flipSetting("menuBar", "menu bar", applyTray);
+const toggleMenuBarTitle = () => flipSetting("menuBarTitle", "song in menu bar", applyTray);
 
 const deviceRows = () => [...$("deviceList").querySelectorAll('.device-row:not([aria-disabled="true"])')];
 
@@ -2711,13 +2700,13 @@ function closeSettings(refocus = false) {
 
 const engineReady = () => Boolean(engine && engine.state === "ready");
 
+/** The settings switches: element id → setting. */
+const SWITCHES = { dockArtSwitch: "dockArt", coverRowSwitch: "coverRow", menuBarSwitch: "menuBar", menuBarTitleSwitch: "menuBarTitle" };
+
 function renderSettings() {
-  $("dockArtSwitch").setAttribute("aria-checked", String(getSettings().dockArt));
-  $("coverRowSwitch").setAttribute("aria-checked", String(getSettings().coverRow));
-  $("menuBarSwitch").setAttribute("aria-checked", String(getSettings().menuBar));
-  const titleSwitch = $("menuBarTitleSwitch");
-  titleSwitch.setAttribute("aria-checked", String(getSettings().menuBarTitle));
-  titleSwitch.disabled = !getSettings().menuBar; // no icon, no song next to it
+  const s = getSettings();
+  for (const [id, key] of Object.entries(SWITCHES)) $(id).setAttribute("aria-checked", String(s[key]));
+  $("menuBarTitleSwitch").disabled = !s.menuBar; // no icon, no song next to it
   const ready = engineReady();
   for (const b of $("qualityOpts").querySelectorAll("[data-kbps]")) {
     const kbps = Number(b.dataset.kbps);
@@ -2818,24 +2807,8 @@ async function loadQuality() {
   if (settingsOpen) renderSettings();
 }
 
-function toggleDockArt() {
-  const s = getSettings();
-  s.dockArt = !s.dockArt;
-  saveSettings();
-  applog("info", `setting: album art as app icon ${s.dockArt ? "on" : "off"}`);
-  renderSettings();
-  if (s.dockArt) syncDockArt();
-  else resetDockArt();
-}
-
-function toggleCoverRow() {
-  const s = getSettings();
-  s.coverRow = !s.coverRow;
-  saveSettings();
-  applog("info", `setting: cover row ${s.coverRow ? "on" : "off"}`);
-  renderSettings();
-  applyCoverRow();
-}
+const toggleDockArt = () => flipSetting("dockArt", "album art as app icon", (on) => (on ? syncDockArt() : resetDockArt()));
+const toggleCoverRow = () => flipSetting("coverRow", "cover row", applyCoverRow);
 
 /** The cover row on or off: off = the current cover alone, centred, with its title under it. */
 function applyCoverRow() {
@@ -2957,7 +2930,7 @@ async function restartOnQuality(kbps, sess, back) {
   const token = startPending("resume", back.trackUri, null, back.play);
   let failed = false;
   await changeTrack(() =>
-    invoke("local_load", { ...back, shuffle: state.shuffle, repeat: state.repeat }).catch((e) => {
+    invoke("local_load", { spec: { ...back, shuffle: state.shuffle, repeat: state.repeat } }).catch((e) => {
       if (isCode(e, "AUTH_EXPIRED")) throw e;
       failed = true;
     }),
@@ -3493,6 +3466,7 @@ let knownMixes = null; // [{id, seen}], newest first; null = not read from stora
 let notedContext = null; // the last playback context noted, so a poll doesn't note it every second
 const refusedMixes = new Set(); // mixes Spotify wouldn't start this session: history must not bring them back
 const mixInfo = new Map(); // playlist id → promise of {name, cover} or null
+let mixesFetched = []; // the last mixes_list answer
 let mixList = []; // the tiles on screen: {id, name, cover, source}
 let mixesGen = 0;
 
@@ -3529,7 +3503,10 @@ function mixInfoFor(id) {
   return p;
 }
 
-/** The Mixes tab from Rust's mixes_list ({id, uri, name, cover, source}); refresh asks Spotify's home feed now. */
+/**
+ * The Mixes tab from Rust's mixes_list ({id, uri, name, cover, source}), asked once per Library open
+ * and when the mixes change; refresh asks Spotify's home feed now.
+ */
 async function renderMixes(refresh = false) {
   const gen = ++mixesGen;
   let list;
@@ -3540,8 +3517,14 @@ async function renderMixes(refresh = false) {
     return; // the tiles on screen stay
   }
   if (gen !== mixesGen) return;
+  mixesFetched = list || [];
+  drawMixes();
+}
+
+/** The Mixes tab from the last mixes_list answer, without the user's own playlists (no request). */
+function drawMixes() {
   const own = new Set(ownIds()); // a playlist of the user's own isn't a mix
-  mixList = (list || []).filter((m) => m && m.id && !own.has(m.id)).map((m) => ({ id: m.id, name: m.name || "Spotify mix", cover: m.cover || null, source: m.source }));
+  mixList = mixesFetched.filter((m) => m && m.id && !own.has(m.id)).map((m) => ({ id: m.id, name: m.name || "Spotify mix", cover: m.cover || null, source: m.source }));
   for (const m of mixList) if (!mixInfo.has(m.id)) mixInfo.set(m.id, Promise.resolve({ name: m.name, cover: m.cover }));
   $("libMixes").hidden = !mixList.length;
   renderShelf("mixes");
@@ -3585,6 +3568,7 @@ function resetLibrary() {
   followed = [];
   topTrackList = [];
   topArtistList = [];
+  mixesFetched = [];
   mixList = [];
   detailAlbums = [];
   for (const id of ["libLiked", "libTop", "libAlbums", "libFollowing", "libMixes"]) $(id).hidden = true;
@@ -3661,7 +3645,7 @@ function renderPlaylists() {
       )
       .join("");
   noteContexts([]); // own playlists noted before this load aren't mixes
-  renderMixes();
+  drawMixes();
 }
 
 
@@ -3685,7 +3669,7 @@ async function loadLinks() {
     return;
   }
   if (playlists) renderPlaylists(); // it redraws the mixes too
-  else renderMixes();
+  else drawMixes();
   if (albumShelf().length) $("libAlbums").hidden = false;
   if (artistShelf().length) $("libFollowing").hidden = false;
   renderShelf("albums");
@@ -4590,7 +4574,11 @@ async function boot() {
   // this Mac's player: what plays, from librespot (no Web API); the loop renders from it
   listenEvent("player-state", onPlayerState);
   // an add or remove in the app's own library (also from MCP): the Library redraws
-  listenEvent("library-changed", () => loadLinks());
+  // an added or removed link can be a mix: the Mixes tab asks Rust again
+  listenEvent("library-changed", () => {
+    loadLinks();
+    renderMixes();
+  });
 
   await loadStore(); // settings and known mixes are read from it
   applyTray();

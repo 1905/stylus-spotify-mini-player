@@ -76,6 +76,8 @@ pub fn track(d: &Value, uri_hint: Option<&str>) -> Option<Value> {
         "artists": join_names(&artists),
         "artist_list": artists,
         "album": d["albumOfTrack"]["name"],
+        // the album to play the track inside (mcp_tools `play`), when the answer names it
+        "album_uri": d["albumOfTrack"]["uri"].as_str().filter(|u| u.starts_with("spotify:album:")),
         "cover": best_source(&d["albumOfTrack"]["coverArt"]["sources"]),
         "duration_ms": duration,
     }))
@@ -204,16 +206,8 @@ pub fn playlist_page(data: &Value) -> (Vec<Value>, u64, Option<String>) {
     (tracks, p["content"]["totalCount"].as_u64().unwrap_or(0), p["revisionId"].as_str().map(str::to_string))
 }
 
-/// `fetchPlaylist` (any page) → `{name, cover}` (`mix_info`'s shape), None when it has no name.
-pub fn playlist_info(data: &Value) -> Option<Value> {
-    let p = &data["playlistV2"];
-    let name = p["name"].as_str().filter(|n| !n.is_empty())?;
-    let cover = images(&p["images"]).first().and_then(|i| i["url"].as_str().map(str::to_string));
-    Some(json!({ "name": name, "cover": cover }))
-}
-
 /// `fetchPlaylist` → `{id, uri, name, cover, owner, owner_id, total, format, following}` for a link
-/// the user pastes (any playlist, theirs or not). None when it has no name.
+/// the user pastes (any playlist, theirs or not) and a mix's name and cover. None when it has no name.
 pub fn playlist_meta(data: &Value) -> Option<Value> {
     let p = &data["playlistV2"];
     let uri = p["uri"].as_str().filter(|u| u.starts_with("spotify:playlist:"))?;
@@ -601,6 +595,7 @@ mod tests {
         assert_eq!((t.len(), a.len()), (3, 2));
         assert_track_shape(&t[0]);
         assert_eq!(t[0]["artist_list"][0]["id"], "4Z8W4fKeB5YxbusRsdQVPb");
+        assert_eq!(t[0]["album_uri"], "spotify:album:3gBVdu4a1MMJVMy6vwPEb8", "a hit names its album");
         assert!(t[0]["cover"].as_str().unwrap().contains("ab67616d0000b273"), "640 px cover");
         assert!(t[0]["duration_ms"].as_u64().unwrap() > 0);
         assert_eq!(a[0]["artists"], "Radiohead");
@@ -647,9 +642,6 @@ mod tests {
         assert_eq!(rev.as_deref(), Some("AAAAAOuaTAK0A/u5OHDTUPj+eUBv59Mk"));
         assert_track_shape(&tracks[0]);
         assert!(tracks[0]["album"].as_str().is_some());
-        let info = playlist_info(&fx("fetchPlaylist")).unwrap();
-        assert!(info["name"].as_str().is_some() && info["cover"].as_str().unwrap().starts_with("https://"));
-        assert_eq!(playlist_info(&json!({"playlistV2": {"name": ""}})), None);
     }
 
     #[test]

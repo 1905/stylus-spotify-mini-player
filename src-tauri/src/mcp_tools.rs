@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use crate::control::{Cmd, Source};
 use crate::links::{self, Kind};
+use crate::nowplaying::lock;
 
 pub type Fut<'a> = BoxFuture<'a, Result<Value, String>>;
 
@@ -42,8 +43,8 @@ pub trait Backend: Send + Sync + 'static {
     fn album_tracks(&self, _id: String) -> Fut<'_> {
         unavailable()
     }
-    /// `{tracks, total}`.
-    fn liked(&self) -> Fut<'_> {
+    /// `{tracks, total}`: at least the newest `max` (all of them when cached).
+    fn liked(&self, _max: usize) -> Fut<'_> {
         unavailable()
     }
     fn recent(&self) -> Fut<'_> {
@@ -61,6 +62,11 @@ pub trait Backend: Send + Sync + 'static {
     }
     fn followed(&self) -> Fut<'_> {
         unavailable()
+    }
+    /// A list the UI keeps in its disk cache ("playlists", "albums", "following", "liked"), no
+    /// request; None when it isn't cached.
+    fn cached(&self, _key: &'static str) -> BoxFuture<'_, Option<Value>> {
+        Box::pin(async { None })
     }
     fn devices(&self) -> Fut<'_> {
         unavailable()
@@ -308,18 +314,27 @@ pub fn plain_error(e: &str) -> String {
 static MUTED: Mutex<Option<HashMap<String, u8>>> = Mutex::new(None);
 
 fn muted(device: &str) -> Option<u8> {
-    MUTED.lock().ok()?.as_ref()?.get(device).copied()
+    lock(&MUTED).as_ref()?.get(device).copied()
 }
 
 fn set_muted(device: &str, level: Option<u8>) {
-    if let Ok(mut g) = MUTED.lock() {
-        let m = g.get_or_insert_with(HashMap::new);
-        match level {
-            Some(l) => m.insert(device.to_string(), l),
-            None => m.remove(device),
-        };
-    }
+    let mut g = lock(&MUTED);
+    let m = g.get_or_insert_with(HashMap::new);
+    match level {
+        Some(l) => m.insert(device.to_string(), l),
+        None => m.remove(device),
+    };
 }
+
+/// The `uri` argument as a track (`{uri}`), None when it isn't given; `bad` when it isn't a track.
+fn track_uri_arg(a: &Value, bad: &str) -> Result<Option<Value>, String> {
+    arg_str(a, "uri")
+        .map(|u| uri_from(u, Some(Kind::Track)).filter(|u| u.starts_with("spotify:track:")).map(|u| json!({ "uri": u })).ok_or_else(|| bad.to_string()))
+        .transpose()
+}
+
+/// Every Liked Song the app keeps (it caps the list itself).
+const ALL: usize = usize::MAX;
 
 // ---- the tools ------------------------------------------------------------------------------------
 
@@ -348,31 +363,29 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         }
         "volume_step" => {
             let delta = arg_i64(a, "delta").ok_or("Give delta, e.g. 10 or -10")?;
-            let device = device_arg(b, a).await?;
-            let now = volume_of(b, device.clone()).await?;
+            let t = VolumeTarget::of(b, a).await?;
+            let now = t.volume(b).await?;
             let next = (i64::from(now) + delta).clamp(0, 100) as u8;
-            b.set_volume(next, device).await.map(|r| with(with(r, "from", json!(now)), "volume", json!(next)))
+            b.set_volume(next, Some(t.id)).await.map(|r| with(with(r, "from", json!(now)), "volume", json!(next)))
         }
         "mute" => {
-            let device = device_arg(b, a).await?;
-            let key = mute_key(b, device.as_deref()).await;
-            let now = volume_of(b, device.clone()).await?;
+            let t = VolumeTarget::of(b, a).await?;
+            let now = t.volume(b).await?;
             if now == 0 {
                 return Ok(json!({ "volume": 0, "note": "Already muted" }));
             }
-            set_muted(&key, Some(now));
-            b.set_volume(0, device).await.map(|r| with(with(r, "volume", json!(0)), "was", json!(now)))
+            set_muted(&t.id, Some(now));
+            b.set_volume(0, Some(t.id)).await.map(|r| with(with(r, "volume", json!(0)), "was", json!(now)))
         }
         "unmute" => {
-            let device = device_arg(b, a).await?;
-            let key = mute_key(b, device.as_deref()).await;
-            let level = match muted(&key) {
+            let t = VolumeTarget::of(b, a).await?;
+            let level = match muted(&t.id) {
                 Some(l) => l,
-                None if volume_of(b, device.clone()).await? > 0 => return Ok(json!({ "note": "Not muted" })),
+                None if t.volume(b).await? > 0 => return Ok(json!({ "note": "Not muted" })),
                 None => 50,
             };
-            let r = b.set_volume(level, device).await?;
-            set_muted(&key, None);
+            let r = b.set_volume(level, Some(t.id.clone())).await?;
+            set_muted(&t.id, None);
             Ok(with(r, "volume", json!(level)))
         }
         "set_shuffle" => {
@@ -387,8 +400,8 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
             b.transport(Cmd::Repeat(mode.into())).await.map(|r| with(r, "repeat", json!(mode)))
         }
         "queue_add" => {
-            let t = match arg_str(a, "uri") {
-                Some(u) => json!({ "uri": uri_from(u, Some(Kind::Track)).filter(|u| u.starts_with("spotify:track:")).ok_or("queue_add takes a track uri or link")? }),
+            let t = match track_uri_arg(a, "queue_add takes a track uri or link")? {
+                Some(t) => t,
                 None => top_track(b, arg_str(a, "query").ok_or("Give uri or query")?).await?,
             };
             b.queue_add(t["uri"].as_str().unwrap_or("").to_string()).await?;
@@ -396,15 +409,9 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         }
         "get_queue" => Ok(json!({ "next": slim_tracks(&b.queue().await?).into_iter().take(20).collect::<Vec<_>>() })),
         "list_playlists" => {
-            let (own, links) = futures_util::join!(b.playlists(), b.links());
-            let mut out: Vec<Value> = own?
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|p| json!({ "name": p["name"], "uri": uri_of("playlist", p), "tracks": p["tracks"]["total"], "owner": p["owner"]["display_name"] }))
-                .collect();
-            out.extend(links_of(&links.unwrap_or_default(), "playlists").as_array().into_iter().flatten().map(|p| json!({ "name": p["name"], "uri": p["uri"], "tracks": p["total"], "owner": p["owner"], "saved_in_app": true })));
-            Ok(json!({ "playlists": out }))
+            let own = |p: &Value| json!({ "name": p["name"], "uri": uri_of("playlist", p), "tracks": p["tracks"]["total"], "owner": p["owner"]["display_name"] });
+            let link = |p: &Value| json!({ "name": p["name"], "uri": p["uri"], "tracks": p["total"], "owner": p["owner"] });
+            list_tool(b, "playlists", b.playlists(), own, link).await
         }
         "list_mixes" => {
             let m = b.mixes().await?;
@@ -412,33 +419,29 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         }
         "playlist_tracks" => {
             let q = arg_str(a, "playlist").ok_or("Give playlist: a uri, link or name")?;
-            let p = find_playlist(b, q).await?;
+            let p = find_by_name(b, q, Kind::Playlist).await?;
             let id = links::parse(p["uri"].as_str().unwrap_or("")).map(|l| l.id).ok_or("Not a playlist")?;
             let all = slim_tracks(&b.playlist_tracks(id).await?);
             let (offset, limit) = (arg_u64(a, "offset").unwrap_or(0) as usize, arg_u64(a, "limit").unwrap_or(50) as usize);
             Ok(json!({ "name": p["name"], "uri": p["uri"], "total": all.len(), "tracks": all.into_iter().skip(offset).take(limit).collect::<Vec<_>>() }))
         }
         "list_albums" => {
-            let (own, links) = futures_util::join!(b.albums(), b.links());
-            let mut out: Vec<Value> = own?.as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "artists": x["artists"], "uri": uri_of("album", x) })).collect();
-            out.extend(links_of(&links.unwrap_or_default(), "albums").as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "artists": x["artists"], "uri": x["uri"], "saved_in_app": true })));
-            Ok(json!({ "albums": out }))
+            let row = |x: &Value| json!({ "name": x["name"], "artists": x["artists"], "uri": uri_of("album", x) });
+            list_tool(b, "albums", b.albums(), row, row).await
         }
         "album_tracks" => {
             let q = arg_str(a, "album").ok_or("Give album: a uri, link or name")?;
-            let al = find_album(b, q).await?;
+            let al = find_by_name(b, q, Kind::Album).await?;
             let id = links::parse(al["uri"].as_str().unwrap_or("")).map(|l| l.id).ok_or("Not an album")?;
             Ok(json!({ "name": al["name"], "uri": al["uri"], "tracks": slim_tracks(&b.album_tracks(id).await?) }))
         }
         "list_artists" => {
-            let (own, links) = futures_util::join!(b.followed(), b.links());
-            let mut out: Vec<Value> = own?.as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "uri": uri_of("artist", x) })).collect();
-            out.extend(links_of(&links.unwrap_or_default(), "artists").as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "uri": x["uri"], "saved_in_app": true })));
-            Ok(json!({ "artists": out }))
+            let row = |x: &Value| json!({ "name": x["name"], "uri": uri_of("artist", x) });
+            list_tool(b, "artists", b.followed(), row, row).await
         }
         "liked_songs" => {
-            let v = b.liked().await?;
             let (offset, limit) = (arg_u64(a, "offset").unwrap_or(0) as usize, arg_u64(a, "limit").unwrap_or(20) as usize);
+            let v = b.liked(offset.saturating_add(limit)).await?;
             let tracks: Vec<Value> = slim_tracks(&v).into_iter().skip(offset).take(limit).collect();
             Ok(json!({ "total": v["total"], "tracks": tracks }))
         }
@@ -476,8 +479,8 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         }
         "like" | "unlike" => {
             let on = name == "like";
-            let t = match arg_str(a, "uri") {
-                Some(u) => json!({ "uri": uri_from(u, Some(Kind::Track)).filter(|u| u.starts_with("spotify:track:")).ok_or("Give a track uri or link")? }),
+            let t = match track_uri_arg(a, "Give a track uri or link")? {
+                Some(t) => t,
                 None => {
                     let s = b.now_playing().await?;
                     if s["track"]["uri"].is_null() {
@@ -504,26 +507,41 @@ fn with(mut r: Value, k: &str, v: Value) -> Value {
     r
 }
 
-/// The device a mute is saved under: the one asked for, else the active one (else This Mac), so
-/// `mute` without a device and `unmute` with that device's name meet on the same key.
-async fn mute_key(b: &dyn Backend, device: Option<&str>) -> String {
-    if let Some(d) = device {
-        return d.to_string();
-    }
-    match devices(b).await {
-        Ok((list, own)) => list
-            .iter()
-            .find(|d| d["is_active"] == true)
-            .and_then(|d| d["id"].as_str().map(str::to_string))
-            .or(own)
-            .unwrap_or_default(),
-        Err(_) => String::new(),
-    }
+/// Your `own` list (each item as `row`) and the links of the same tab added in the app (as
+/// `link`, marked `saved_in_app`), under `tab` ("playlists" | "albums" | "artists").
+async fn list_tool(b: &dyn Backend, tab: &str, own: Fut<'_>, row: impl Fn(&Value) -> Value, link: impl Fn(&Value) -> Value) -> Result<Value, String> {
+    let (own, links) = futures_util::join!(own, b.links());
+    let mut out: Vec<Value> = own?.as_array().into_iter().flatten().map(row).collect();
+    out.extend(links_of(&links.unwrap_or_default(), tab).as_array().into_iter().flatten().map(|x| with(link(x), "saved_in_app", json!(true))));
+    Ok(json!({ tab: out }))
 }
 
-async fn volume_of(b: &dyn Backend, device: Option<String>) -> Result<u8, String> {
-    let v = b.volume(device).await?;
-    Ok(v.as_u64().unwrap_or(0).min(100) as u8)
+/// The device a volume tool works on, from one device list per call: the `device` argument, else
+/// the active device, else This Mac. A mute is saved under its id, so `mute` without a device and
+/// `unmute` with that device's name meet on the same key.
+struct VolumeTarget {
+    id: String,
+    list: Vec<Value>,
+    own: Option<String>,
+}
+
+impl VolumeTarget {
+    async fn of(b: &dyn Backend, a: &Value) -> Result<VolumeTarget, String> {
+        let (list, own) = devices(b).await?;
+        let id = match arg_str(a, "device") {
+            Some(q) => find_device_in(&list, own.as_deref(), q)?["id"].as_str().map(str::to_string),
+            None => list.iter().find(|d| d["is_active"] == true).and_then(|d| d["id"].as_str().map(str::to_string)).or_else(|| own.clone()),
+        };
+        Ok(VolumeTarget { id: id.ok_or(crate::control::NOTHING_PLAYING)?, list, own })
+    }
+
+    /// Its volume: This Mac's own (or the level waiting for its next load), else the list's.
+    async fn volume(&self, b: &dyn Backend) -> Result<u8, String> {
+        if self.own.as_deref() == Some(self.id.as_str()) {
+            return Ok(b.volume(Some(self.id.clone())).await?.as_u64().unwrap_or(0).min(100) as u8);
+        }
+        crate::control::listed_volume(&self.list, &self.id)
+    }
 }
 
 async fn now_playing(b: &dyn Backend) -> Result<Value, String> {
@@ -568,14 +586,33 @@ async fn context_of(b: &dyn Backend, uri: Option<&str>) -> Value {
     }
 }
 
-/// A playing context's name: from the user's lists, else looked up like a link (the internal
-/// API, no Web API needed). Null when both fail.
+/// Context names found, for the process: `now_playing` asks for the same one again and again.
+static NAMES: Mutex<Option<HashMap<String, Value>>> = Mutex::new(None);
+
+/// A playing context's name, null when nothing knows it (`lookup_name`).
 async fn context_name(b: &dyn Backend, uri: &str) -> Value {
+    if let Some(name) = lock(&NAMES).as_ref().and_then(|m| m.get(uri).cloned()) {
+        return name;
+    }
+    let name = lookup_name(b, uri).await;
+    if !name.is_null() {
+        lock(&NAMES).get_or_insert_with(HashMap::new).insert(uri.to_string(), name.clone());
+    }
+    name
+}
+
+/// Without a request first: the mixes and links the app keeps, then the lists the UI cached on
+/// disk. Else looked up like a link (the internal API, no Web API needed).
+async fn lookup_name(b: &dyn Backend, uri: &str) -> Value {
     let kind = uri.split(':').nth(1).unwrap_or("playlist");
-    let (pl, mixes, links, albums) = futures_util::join!(b.playlists(), b.mixes(), b.links(), b.albums());
-    for list in [pl, mixes, links, albums].into_iter().flatten() {
-        if let Some(it) = list.as_array().into_iter().flatten().find(|it| uri_of(kind, it) == uri) {
-            return it["name"].clone();
+    let name_in = |list: &Value| list.as_array().into_iter().flatten().find(|it| uri_of(kind, it) == uri).map(|it| it["name"].clone());
+    let (mixes, links) = futures_util::join!(b.mixes(), b.links());
+    if let Some(n) = [mixes, links].iter().flatten().find_map(name_in) {
+        return n;
+    }
+    for key in ["playlists", "albums", "following"] {
+        if let Some(n) = b.cached(key).await.as_ref().and_then(name_in) {
+            return n;
         }
     }
     b.resolve_link(uri.into()).await.map(|r| r["name"].clone()).unwrap_or(Value::Null)
@@ -611,12 +648,17 @@ async fn devices(b: &dyn Backend) -> Result<(Vec<Value>, Option<String>), String
 /// A device by id or name; "here", "mac", "stylus" (and the old name "needle") mean This Mac.
 async fn find_device(b: &dyn Backend, q: &str) -> Result<Value, String> {
     let (list, own) = devices(b).await?;
+    find_device_in(&list, own.as_deref(), q)
+}
+
+/// `find_device` in a device list (`own`: This Mac's id).
+fn find_device_in(list: &[Value], own: Option<&str>, q: &str) -> Result<Value, String> {
     if let Some(d) = list.iter().find(|d| d["id"] == q) {
         return Ok(d.clone());
     }
     let alias = matches!(q.to_lowercase().as_str(), "here" | "mac" | "this mac" | "stylus" | "needle" | "this computer" | "computer");
     if alias {
-        if let Some(d) = list.iter().find(|d| d["id"].as_str() == own.as_deref()) {
+        if let Some(d) = list.iter().find(|d| d["id"].as_str() == own) {
             return Ok(d.clone());
         }
         return Err("This Mac isn't listed: Stylus's player isn't connected yet".into());
@@ -636,66 +678,38 @@ async fn device_arg(b: &dyn Backend, a: &Value) -> Result<Option<String>, String
     }
 }
 
-/// A playlist or mix by uri, link, id or name (your playlists, mixes, links added in the app,
-/// then search).
-async fn find_playlist(b: &dyn Backend, q: &str) -> Result<Value, String> {
-    if let Some(uri) = uri_from(q, Some(Kind::Playlist)) {
-        if !uri.starts_with("spotify:playlist:") {
-            return Err(format!("{q} isn't a playlist"));
+/// A playlist (or mix), album or artist by uri, link, id or name: your own list (playlists: and
+/// the mixes), the links added in the app, then search.
+async fn find_by_name(b: &dyn Backend, q: &str, kind: Kind) -> Result<Value, String> {
+    let k = kind.as_str();
+    if let Some(uri) = uri_from(q, Some(kind)) {
+        if !uri.starts_with(&format!("spotify:{k}:")) {
+            let a = if kind == Kind::Playlist { "a" } else { "an" };
+            return Err(format!("{q} isn't {a} {k}"));
         }
         return Ok(json!({ "uri": uri }));
     }
-    let (pl, mixes, links) = futures_util::join!(b.playlists(), b.mixes(), b.links());
-    let mut c = named(&pl.unwrap_or_default(), "playlist");
-    c.extend(named(&mixes.unwrap_or_default(), "playlist"));
-    c.extend(named(&links_of(&links.unwrap_or_default(), "playlists"), "playlist"));
-    if let Some(p) = pick(q, &c)? {
-        return Ok(p);
-    }
-    let r = b.search(q.into()).await?;
-    pick(q, &named(&r["playlists"], "playlist"))?.ok_or_else(|| format!("No playlist called \"{q}\" in your playlists or mixes"))
-}
-
-async fn find_album(b: &dyn Backend, q: &str) -> Result<Value, String> {
-    if let Some(uri) = uri_from(q, Some(Kind::Album)) {
-        if !uri.starts_with("spotify:album:") {
-            return Err(format!("{q} isn't an album"));
-        }
-        return Ok(json!({ "uri": uri }));
-    }
-    let (al, links) = futures_util::join!(b.albums(), b.links());
-    let mut c = named(&al.unwrap_or_default(), "album");
-    c.extend(named(&links_of(&links.unwrap_or_default(), "albums"), "album"));
+    let (own, mixes): (Fut<'_>, Fut<'_>) = match kind {
+        Kind::Album => (b.albums(), Box::pin(async { Ok(json!([])) })),
+        Kind::Artist => (b.followed(), Box::pin(async { Ok(json!([])) })),
+        _ => (b.playlists(), b.mixes()),
+    };
+    let (own, mixes, links) = futures_util::join!(own, mixes, b.links());
+    let mut c = named(&own.unwrap_or_default(), k);
+    c.extend(named(&mixes.unwrap_or_default(), k));
+    c.extend(named(&links_of(&links.unwrap_or_default(), &format!("{k}s")), k));
     if let Some(x) = pick(q, &c)? {
         return Ok(x);
     }
     let r = b.search(q.into()).await?;
-    let hits = named(&r["albums"], "album");
+    let hits = named(&r[format!("{k}s")], k);
+    if kind == Kind::Playlist {
+        return pick(q, &hits)?.ok_or_else(|| format!("No playlist called \"{q}\" in your playlists or mixes"));
+    }
     match pick(q, &hits) {
         Ok(Some(x)) => Ok(x),
         // search ranks: its first hit is the best guess when names don't settle it
-        _ => hits.first().map(|h| h.1.clone()).ok_or_else(|| format!("No album found for \"{q}\"")),
-    }
-}
-
-async fn find_artist(b: &dyn Backend, q: &str) -> Result<Value, String> {
-    if let Some(uri) = uri_from(q, Some(Kind::Artist)) {
-        if !uri.starts_with("spotify:artist:") {
-            return Err(format!("{q} isn't an artist"));
-        }
-        return Ok(json!({ "uri": uri }));
-    }
-    let (fol, links) = futures_util::join!(b.followed(), b.links());
-    let mut c = named(&fol.unwrap_or_default(), "artist");
-    c.extend(named(&links_of(&links.unwrap_or_default(), "artists"), "artist"));
-    if let Some(x) = pick(q, &c)? {
-        return Ok(x);
-    }
-    let r = b.search(q.into()).await?;
-    let hits = named(&r["artists"], "artist");
-    match pick(q, &hits) {
-        Ok(Some(x)) => Ok(x),
-        _ => hits.first().map(|h| h.1.clone()).ok_or_else(|| format!("No artist found for \"{q}\"")),
+        _ => hits.first().map(|h| h.1.clone()).ok_or_else(|| format!("No {k} found for \"{q}\"")),
     }
 }
 
@@ -725,9 +739,13 @@ async fn source_of(b: &dyn Backend, uri: &str) -> Source {
 async fn track_source(b: &dyn Backend, uri: &str) -> Source {
     let id = uri.strip_prefix("spotify:track:").unwrap_or_default().to_string();
     match b.album_of_track(id).await {
-        Ok(Value::String(album)) if album.starts_with("spotify:album:") => Source { context_uri: Some(album), track_uri: Some(uri.to_string()), ..Source::default() },
+        Ok(Value::String(album)) if album.starts_with("spotify:album:") => in_album(album, uri),
         _ => Source { uris: vec![uri.to_string()], ..Source::default() },
     }
+}
+
+fn in_album(album: String, track_uri: &str) -> Source {
+    Source { context_uri: Some(album), track_uri: Some(track_uri.to_string()), ..Source::default() }
 }
 
 async fn play(b: &dyn Backend, a: &Value) -> Result<Value, String> {
@@ -752,7 +770,13 @@ async fn play(b: &dyn Backend, a: &Value) -> Result<Value, String> {
         (source_of(b, &uri).await, json!({ "name": it["name"], "uri": uri }))
     } else if let Some(q) = arg_str(a, "query") {
         let t = top_track(b, q).await?;
-        (source_of(b, t["uri"].as_str().unwrap_or("")).await, slim_track(&t))
+        let uri = t["uri"].as_str().unwrap_or("");
+        // a search hit names its album: no lookup
+        let src = match t["album_uri"].as_str().filter(|u| u.starts_with("spotify:album:")) {
+            Some(album) => in_album(album.to_string(), uri),
+            None => source_of(b, uri).await,
+        };
+        (src, slim_track(&t))
     } else {
         return Err("Give uri, name, query, uris or context_uri".into());
     };
@@ -778,9 +802,9 @@ fn play_result(what: Value, r: &Value) -> Value {
 
 async fn artist(b: &dyn Backend, a: &Value) -> Result<Value, String> {
     let q = arg_str(a, "artist").ok_or("Give artist: a uri, link or name")?;
-    let found = find_artist(b, q).await?;
+    let found = find_by_name(b, q, Kind::Artist).await?;
     let id = links::parse(found["uri"].as_str().unwrap_or("")).map(|l| l.id).ok_or("Not an artist")?;
-    let (info, albums, liked) = futures_util::join!(b.artist(id.clone()), b.artist_albums(id.clone()), b.liked());
+    let (info, albums, liked) = futures_util::join!(b.artist(id.clone()), b.artist_albums(id.clone()), b.liked(ALL));
     let info = info?;
     let by_them: Vec<Value> = liked
         .ok()

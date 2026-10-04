@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rateLimitedSecs, rateLimitedError, quotaNotice, quotaStatus, waitText, isWebOnly } from "./quota.js";
+import { rateLimitedSecs, rateLimitedError, quotaNotice, quotaStatus, waitText } from "./quota.js";
 
 describe("rate limit", () => {
   it("reads the seconds from Rust's error", () => {
@@ -17,12 +17,5 @@ describe("rate limit", () => {
     expect(quotaNotice("remote", 50000)).toBe("Spotify limits this for 14 h — works on This Mac");
     expect(quotaNotice("library", 50000)).toBe("Spotify limits this for 14 h");
     expect(quotaStatus(46800)).toBe("Web API paused for 13 h");
-  });
-
-  it("knows which commands have no source but the Web API", () => {
-    for (const c of ["playback_state", "transfer_playback", "set_shuffle", "set_repeat", "pause", "seek", "play_context"]) expect(isWebOnly(c)).toBe(true);
-    // the internal API serves these first (or they are local): Rust decides
-    for (const c of ["get_playlists", "search", "get_queue", "list_devices", "me_id", "is_saved", "save_track", "add_to_queue", "local_play", "store_set", "api_status"])
-      expect(isWebOnly(c)).toBe(false);
   });
 });

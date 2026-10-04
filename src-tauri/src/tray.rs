@@ -39,7 +39,7 @@ struct Tray {
 static TRAY: Mutex<Tray> = Mutex::new(Tray { state: None, show_title: false, hidden_at: None });
 
 fn tray() -> std::sync::MutexGuard<'static, Tray> {
-    TRAY.lock().unwrap_or_else(|e| e.into_inner())
+    crate::nowplaying::lock(&TRAY)
 }
 
 /// The right-click menu's items whose text or state follows the music.
@@ -118,7 +118,8 @@ fn stored_flags() -> (bool, bool) {
     (s["menuBar"].as_bool() != Some(false), s["menuBarTitle"].as_bool() == Some(true))
 }
 
-/// Builds the menu-bar icon, its menu and the hidden popover. Runs in `setup`.
+/// Builds the menu-bar icon and its menu. Runs in `setup`. The popover is built on the first
+/// click (`toggle_mini`): none while the icon is off or never clicked.
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Play", false, None::<&str>)?;
     let next = MenuItem::with_id(app, "next", "Next", false, None::<&str>)?;
@@ -145,8 +146,6 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         })
         .build(app)?;
     icon.set_visible(visible)?;
-
-    build_mini(app)?;
     Ok(())
 }
 
@@ -197,7 +196,17 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
 
 fn toggle_mini<R: Runtime>(icon: &TrayIcon<R>, rect: tauri::Rect) {
     let app = icon.app_handle();
-    let Some(win) = app.get_webview_window(MINI) else { return };
+    let win = match app.get_webview_window(MINI) {
+        Some(w) => w,
+        // the first click: the popover loads hidden and asks for the state (`mini_get`)
+        None => match build_mini(app) {
+            Ok(w) => w,
+            Err(e) => {
+                log::warn!(target: "stylus::tray", "mini player not built: {e}");
+                return;
+            }
+        },
+    };
     if win.is_visible().unwrap_or(false) {
         hide_mini(app);
         return;

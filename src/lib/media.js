@@ -22,16 +22,24 @@ export function mediaPayload({ mode, now, isPlaying, positionMs }) {
 }
 
 /**
+ * The position jumped (a seek, a restart): next's ({positionMs}) is more than maxMs off where
+ * prev's ({positionMs, playing}), sent elapsedMs before it, would be by now.
+ */
+export function drifted(prev, next, elapsedMs, maxMs) {
+  const expected = prev.positionMs + (prev.playing ? elapsedMs : 0);
+  return Math.abs(next.positionMs - expected) > maxMs;
+}
+
+/**
  * Should next replace prev (both payloads or null) in Now Playing? On a track or play-state change,
- * and when the position jumped (a seek) against where prev, sent elapsedMs ago, would be by now.
+ * and when the position jumped (`drifted`).
  */
 export function mediaChanged(prev, next, elapsedMs) {
   if (!prev || !next) return prev !== next;
   if (prev.title !== next.title || prev.artist !== next.artist || prev.album !== next.album) return true;
   if (prev.cover !== next.cover || prev.durationMs !== next.durationMs || prev.playing !== next.playing) return true;
   if (prev.positionMs == null || next.positionMs == null) return false;
-  const expected = prev.positionMs + (prev.playing ? elapsedMs : 0);
-  return Math.abs(next.positionMs - expected) > MEDIA_DRIFT_MS;
+  return drifted(prev, next, elapsedMs, MEDIA_DRIFT_MS);
 }
 
 /**

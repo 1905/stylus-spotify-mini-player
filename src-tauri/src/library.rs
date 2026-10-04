@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use futures_util::FutureExt;
 use serde_json::{json, Value};
@@ -15,6 +16,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::internal::{serve, with_api, Source::Fallback, Source::Primary};
 use crate::links::{self, Kind, Link};
+use crate::nowplaying::lock;
 
 const LOG: &str = "stylus::library";
 pub const EVENT: &str = "library-changed";
@@ -37,10 +39,6 @@ fn changed() {
     if let Some(app) = APP.get() {
         let _ = app.emit(EVENT, ());
     }
-}
-
-fn unix_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 // ---- added links ---------------------------------------------------------------------------
@@ -99,15 +97,13 @@ pub async fn resolve(link: &Link) -> Result<Value, String> {
     let id = link.id.as_str();
     let mut v = match link.kind {
         Kind::Playlist => {
-            let meta = serve("link playlist", vec![with_api(Primary, move |api| async move { api.playlist_meta(id).await })]).await;
+            let uri = link.uri();
             // the protobuf fallback has the name and cover only
-            match meta {
-                Ok(m) => m,
-                Err(e) => {
-                    let info = serve("link playlist", vec![with_api(Fallback, move |api| async move { api.playlist_info_pb(id).await })]).await.map_err(|_| e)?;
-                    json!({"id": id, "uri": link.uri(), "name": info["name"], "cover": info["cover"], "owner": null, "owner_id": null, "total": null})
-                }
-            }
+            let fallback = with_api(Fallback, move |api| async move {
+                let info = api.playlist_info_pb(id).await?;
+                Ok(json!({"id": id, "uri": uri, "name": info["name"], "cover": info["cover"], "owner": null, "owner_id": null, "total": null}))
+            });
+            serve("link playlist", vec![with_api(Primary, move |api| async move { api.playlist_meta(id).await }), fallback]).await?
         }
         Kind::Album => serve("link album", vec![with_api(Primary, move |api| async move { api.album_meta(id).await })]).await?,
         Kind::Artist => {
@@ -136,7 +132,7 @@ fn item_of(v: &Value) -> Value {
     json!({
         "kind": v["kind"], "id": v["id"], "uri": v["uri"], "name": v["name"], "cover": v["cover"],
         "owner": v["owner"], "owner_id": v["owner_id"], "artists": v["artists"], "total": v["total"],
-        "tab": v["tab"], "added": unix_now(),
+        "tab": v["tab"], "added": crate::auth::now(),
     })
 }
 
@@ -167,35 +163,40 @@ pub async fn save(text: &str) -> Result<Value, String> {
 /// Takes `uri` out of the app's library. True when it was there.
 pub fn remove(uri: &str) -> Result<bool, String> {
     let removed = update_links(|list| {
-        let next: Vec<Value> = list.iter().filter(|i| i["uri"] != uri).cloned().collect();
-        if next.len() == list.len() {
-            (None, false)
-        } else {
-            (Some(next), true)
-        }
+        let before = list.len();
+        let next: Vec<Value> = list.into_iter().filter(|i| i["uri"] != uri).collect();
+        let removed = next.len() != before;
+        (removed.then_some(next), removed)
     })?;
-    if !removed {
-        return Ok(false);
+    if removed {
+        log::info!(target: LOG, "removed {uri}");
     }
-    log::info!(target: LOG, "removed {uri}");
-    Ok(true)
+    Ok(removed)
 }
 
 pub const NOT_A_LINK: &str = "That link isn't a Spotify playlist, album, artist or song";
 
 // ---- the Mixes tab ---------------------------------------------------------------------------
 
-/// Names and covers of played mixes not on the home feed (mix_info), kept for the process.
-static INFO: Mutex<Option<HashMap<String, Value>>> = Mutex::new(None);
+/// Names and covers of played mixes not on the home feed (mix_info), kept for the process. A
+/// failed lookup is kept as None with its time: it isn't asked again for `RETRY_FAILED_SECS`.
+static INFO: Mutex<Option<HashMap<String, MixInfo>>> = Mutex::new(None);
+/// A lookup's answer (None: it failed) and when it came.
+type MixInfo = (Option<Value>, Instant);
+const RETRY_FAILED_SECS: u64 = 300;
 
-fn info_cached(id: &str) -> Option<Value> {
-    INFO.lock().ok()?.as_ref()?.get(id).cloned()
+/// Some(answer) when the lookup needn't run: the info, or None for a recent failure.
+fn info_cached(id: &str, now: Instant) -> Option<Option<Value>> {
+    let g = lock(&INFO);
+    match g.as_ref()?.get(id)? {
+        (Some(v), _) => Some(Some(v.clone())),
+        (None, at) if now.saturating_duration_since(*at).as_secs() < RETRY_FAILED_SECS => Some(None),
+        (None, _) => None,
+    }
 }
 
-fn remember_info(id: &str, v: &Value) {
-    if let Ok(mut g) = INFO.lock() {
-        g.get_or_insert_with(HashMap::new).insert(id.to_string(), v.clone());
-    }
+fn remember_info(id: &str, v: Option<Value>, now: Instant) {
+    lock(&INFO).get_or_insert_with(HashMap::new).insert(id.to_string(), (v, now));
 }
 
 /// The home feed's mixes for `account`: the stored copy while fresh (or when the feed fails),
@@ -204,14 +205,14 @@ async fn home_mixes(account: &str, refresh: bool) -> Vec<Value> {
     let stored = crate::store::get(HOME_KEY).filter(|v| v["account"] == account);
     let items = |v: &Value| v["items"].as_array().cloned().unwrap_or_default();
     if let Some(s) = &stored {
-        if !refresh && unix_now().saturating_sub(s["at"].as_u64().unwrap_or(0)) < HOME_FRESH_SECS {
+        if !refresh && crate::auth::now().saturating_sub(s["at"].as_u64().unwrap_or(0)) < HOME_FRESH_SECS {
             return items(s);
         }
     }
     match crate::internal::Api::current() {
         Ok(api) => match api.home_mixes().await {
             Ok(list) => {
-                let _ = crate::store::store_set(HOME_KEY.into(), json!({ "account": account, "at": unix_now(), "items": list }));
+                let _ = crate::store::store_set(HOME_KEY.into(), json!({ "account": account, "at": crate::auth::now(), "items": list }));
                 log::info!(target: LOG, "home feed: {} mixes", list.len());
                 list
             }
@@ -244,12 +245,13 @@ pub async fn mixes(refresh: bool) -> Vec<Value> {
         use futures_util::stream::{self, StreamExt};
         let infos: Vec<(String, Option<Value>)> = stream::iter(missing)
             .map(|id| async move {
-                if let Some(v) = info_cached(&id) {
-                    return (id, Some(v));
+                if let Some(v) = info_cached(&id, Instant::now()) {
+                    return (id, v);
                 }
                 let got = crate::spotify::mix_info(id.clone()).await.ok();
-                if let Some(v) = &got {
-                    remember_info(&id, v);
+                // a failure while the player isn't up yet (launch) is no answer: asked again next time
+                if got.is_some() || crate::internal::Api::current().is_ok() {
+                    remember_info(&id, got.clone(), Instant::now());
                 }
                 (id, got)
             })

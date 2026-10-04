@@ -162,18 +162,31 @@ pub fn final_error(errs: &[(Source, String)]) -> String {
     }
 }
 
-/// Lets one warning per key through per `WARN_EVERY`.
-#[derive(Debug, Default)]
-pub struct WarnGate(std::collections::HashMap<String, std::time::Instant>);
+/// Lets one warning per key through per window (`WARN_EVERY` by default).
+#[derive(Debug)]
+pub struct WarnGate {
+    seen: std::collections::HashMap<String, std::time::Instant>,
+    every: std::time::Duration,
+}
 
 pub const WARN_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
+impl Default for WarnGate {
+    fn default() -> Self {
+        WarnGate::every(WARN_EVERY)
+    }
+}
+
 impl WarnGate {
+    pub fn every(every: std::time::Duration) -> Self {
+        WarnGate { seen: std::collections::HashMap::new(), every }
+    }
+
     pub fn allow(&mut self, key: &str, now: std::time::Instant) -> bool {
-        match self.0.get(key) {
-            Some(t) if now.saturating_duration_since(*t) < WARN_EVERY => false,
+        match self.seen.get(key) {
+            Some(t) if now.saturating_duration_since(*t) < self.every => false,
             _ => {
-                self.0.insert(key.to_string(), now);
+                self.seen.insert(key.to_string(), now);
                 true
             }
         }
@@ -234,8 +247,7 @@ where
 
 // ---- operations ----------------------------------------------------------------------------
 
-/// Pages of a pathfinder list fetched at once.
-const PAGE_CONCURRENCY: usize = 4;
+use crate::spotify::PAGE_CONCURRENCY;
 /// Tracks per extended-metadata request.
 const META_BATCH: usize = 100;
 const COLLECTION_CT: &str = "application/vnd.collection-v2.spotify.proto";
@@ -381,13 +393,7 @@ impl Api {
         crate::spotify::pages_with(first, page, usize::MAX, PAGE_CONCURRENCY, |offset| async move { Ok(self.playlist_page(playlist_id, offset, page).await?.0) }).await
     }
 
-    /// `{name, cover}` of a playlist (mixes).
-    pub async fn playlist_info(&self, playlist_id: &str) -> Result<Value, String> {
-        let data = self.pathfinder("fetchPlaylist", json!({"uri": format!("spotify:playlist:{playlist_id}"), "offset": 0, "limit": 1, "enableWatchFeedEntrypoint": false})).await?;
-        crate::parse::playlist_info(&data).ok_or_else(|| "fetchPlaylist: no name".into())
-    }
-
-    /// A pasted playlist link's details (`parse::playlist_meta`).
+    /// A playlist's details (`parse::playlist_meta`): a pasted link, a mix's name and cover.
     pub async fn playlist_meta(&self, playlist_id: &str) -> Result<Value, String> {
         let data = self.pathfinder("fetchPlaylist", json!({"uri": format!("spotify:playlist:{playlist_id}"), "offset": 0, "limit": 1, "enableWatchFeedEntrypoint": false})).await?;
         crate::parse::playlist_meta(&data).ok_or_else(|| "Spotify didn't return this playlist".into())
@@ -494,8 +500,7 @@ impl Api {
 
     /// Adds (`saved`) or removes a track from Liked Songs. Changes real data.
     pub async fn set_saved(&self, track_id: &str, saved: bool) -> Result<(), String> {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
-        let item = crate::pb::CollectionItem { uri: format!("spotify:track:{track_id}"), added_at: if saved { now } else { 0 }, is_removed: !saved };
+        let item = crate::pb::CollectionItem { uri: format!("spotify:track:{track_id}"), added_at: if saved { crate::auth::now() as i64 } else { 0 }, is_removed: !saved };
         let update_id = format!("{:016x}", rand::random::<u64>());
         self.post_pb("/collection/v2/write", crate::pb::write_request(&self.username(), "collection", &[item], &update_id)).await.map(|_| ())
     }
@@ -651,7 +656,7 @@ pub fn merge_playlists(lib: Vec<Value>, root: &[crate::pb::RootEntry]) -> Vec<Va
 // ---- Spotify Connect (the player's cluster) --------------------------------------------------
 
 /// The engine's view of Connect: (cluster, this Mac's device id, its volume %), when ready.
-fn connect() -> Result<(librespot_protocol::connect::Cluster, String, u8), String> {
+fn connect() -> Result<(std::sync::Arc<librespot_protocol::connect::Cluster>, String, u8), String> {
     let engine = ENGINE.get().ok_or_else(|| not_ready("no engine"))?;
     engine.connect_view().ok_or_else(|| not_ready("no Connect cluster yet"))
 }
@@ -665,8 +670,7 @@ pub fn engine() -> Option<crate::player::Engine> {
 /// device is active. Err without a cluster (the player isn't up).
 pub fn cluster_state() -> Result<Option<Value>, String> {
     let (cluster, _, _) = connect()?;
-    let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-    Ok(crate::pb::cluster_state(&cluster, now_ms))
+    Ok(crate::pb::cluster_state(&cluster, crate::auth::now_ms() as i64))
 }
 
 /// This Mac's id while the engine is ready.
@@ -780,6 +784,10 @@ mod tests {
         assert!(!g.allow("search/internal", t0 + std::time::Duration::from_secs(599)));
         assert!(g.allow("liked/internal", t0), "per op");
         assert!(g.allow("search/internal", t0 + WARN_EVERY));
+        let mut minute = WarnGate::every(std::time::Duration::from_secs(60));
+        assert!(minute.allow("bad Host", t0));
+        assert!(!minute.allow("bad Host", t0 + std::time::Duration::from_secs(59)));
+        assert!(minute.allow("bad Host", t0 + std::time::Duration::from_secs(60)), "a window of its own");
     }
 
     #[test]
@@ -920,7 +928,7 @@ mod live {
             let ed = "37i9dQZF1DXcBWIGoYBM5M";
             show("playlist_page", api.playlist_page(ed, 0, 100).await.map(|(v, rev)| json!({"total": v["total"], "n": v["items"].as_array().map(Vec::len), "rev": rev})));
             show("playlist_pb", api.playlist_pb(ed).await.map(|(t, rev)| json!({"n": t.len(), "rev": rev, "first": t.first()})));
-            show("playlist_info", api.playlist_info("37i9dQZF1E4yLltmVk3nyb").await);
+            show("playlist_meta", api.playlist_meta("37i9dQZF1E4yLltmVk3nyb").await);
             show("playlist_info_pb", api.playlist_info_pb("37i9dQZF1E4yLltmVk3nyb").await);
             show("liked", api.liked(1000).await.map(|(t, total)| json!({"n": t.len(), "total": total, "first": t.first()})));
             show("liked_pb", api.liked_pb(1000).await.map(|(t, total)| json!({"n": t.len(), "total": total, "first": t.first()})));

@@ -671,12 +671,6 @@ body:has(.stage:not(.is-playing)) .bg {
   grid-template-columns: 40px minmax(0, 1fr);
 }
 
-.panel-status {
-  padding: 14px 10px;
-  color: var(--fg-2);
-  font-size: 13.5px;
-}
-
 /* ---------- the run ---------- */
 
 /* At rest the current cover sits at the left content edge, what's next to its right, what played
@@ -1565,18 +1559,12 @@ body:has(.stage:not(.is-playing)) .bg {
   border-radius: 50%;
 }
 
-/* Liked Songs: a heart tile, in the list row and the detail head */
-.liked-art,
+/* Liked Songs: a heart tile in the detail head */
 .detail-cover.is-liked {
   display: grid;
   place-items: center;
   color: var(--fg);
   background: linear-gradient(135deg, rgb(var(--v) / 0.9), rgb(var(--v) / 0.35));
-}
-
-.liked-art .ic-heart-filled {
-  width: 24px;
-  height: 24px;
 }
 
 .detail-cover.is-liked .ic-heart-filled {

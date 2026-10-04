@@ -8,11 +8,13 @@ use librespot_protocol::{
     connect::Cluster,
     extended_metadata::{BatchedEntityRequest, BatchedExtensionResponse, EntityRequest, ExtensionQuery},
     extension_kind::ExtensionKind,
-    metadata::{self, image::Size},
+    metadata,
     playlist4_external::SelectedListContent,
 };
 use protobuf::{EnumOrUnknown, Message};
 use serde_json::{json, Value};
+
+use crate::nowplaying::{pick_cover, volume_percent, Cover, TrackInfo};
 
 // ---- hand-rolled wire format (collection v2) ------------------------------------------
 
@@ -194,19 +196,14 @@ fn b62(gid: &[u8]) -> String {
     SpotifyId::from_raw(gid).ok().and_then(|i| i.to_base62().ok()).unwrap_or_default()
 }
 
-/// The UI's cover url of an image list: LARGE (640 px), else the biggest.
+/// The UI's cover url of an image list (`nowplaying::pick_cover`: LARGE, 640 px, else the biggest).
 fn cover(images: &[metadata::Image]) -> Option<String> {
-    let rank = |s: Size| match s {
-        Size::SMALL => 0,
-        Size::DEFAULT => 1,
-        Size::LARGE => 3,
-        Size::XLARGE => 2,
-    };
-    images
+    let covers: Vec<Cover> = images
         .iter()
         .filter(|i| !i.file_id().is_empty())
-        .max_by_key(|i| rank(i.size()))
-        .map(|i| format!("https://i.scdn.co/image/{}", hex(i.file_id())))
+        .map(|i| Cover { size: i.size(), width: i.width(), url: format!("https://i.scdn.co/image/{}", hex(i.file_id())) })
+        .collect();
+    pick_cover(&covers)
 }
 
 fn hex(b: &[u8]) -> String {
@@ -223,18 +220,16 @@ pub fn track(uri: &str, b: &[u8]) -> Option<Value> {
     if t.name().is_empty() {
         return None;
     }
-    let artists: Vec<Value> = t.artist.iter().map(|a| json!({ "id": b62(a.gid()), "name": a.name() })).collect();
-    let names: Vec<&str> = t.artist.iter().map(|a| a.name()).collect();
-    Some(json!({
-        "id": crate::parse::id_of(uri),
-        "uri": uri,
-        "name": t.name(),
-        "artists": names.join(", "),
-        "artist_list": artists,
-        "album": t.album.name(),
-        "cover": album_cover(&t.album),
-        "duration_ms": t.duration().max(0),
-    }))
+    let info = TrackInfo {
+        uri: uri.to_string(),
+        id: crate::parse::id_of(uri).to_string(),
+        name: t.name().to_string(),
+        artists: t.artist.iter().map(|a| (b62(a.gid()), a.name().to_string())).collect(),
+        album: t.album.name().to_string(),
+        cover: album_cover(&t.album),
+        duration_ms: t.duration().max(0) as u32,
+    };
+    Some(info.payload())
 }
 
 /// Tracks in `uris` order from TRACK_V4 payloads; uris without metadata are skipped.
@@ -398,7 +393,7 @@ pub fn devices(c: &Cluster) -> Vec<Value> {
                 "is_private_session": d.is_private_session,
                 "is_restricted": !d.capabilities.is_controllable,
                 "supports_volume": !d.capabilities.disable_volume,
-                "volume_percent": (u64::from(d.volume) * 100 + 32767) / 65535,
+                "volume_percent": volume_percent(d.volume.min(u32::from(u16::MAX)) as u16),
             })
         })
         .collect();

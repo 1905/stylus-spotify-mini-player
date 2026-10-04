@@ -22,7 +22,7 @@ fn parse(json: &str) -> Option<Map<String, Value>> {
 
 /// Run f on the loaded map (read from disk on first use).
 fn with_state<T>(f: impl FnOnce(&mut Map<String, Value>) -> T) -> T {
-    let mut guard = STATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut guard = crate::nowplaying::lock(&STATE);
     let state = guard.get_or_insert_with(|| {
         let p = path();
         match std::fs::read_to_string(&p) {

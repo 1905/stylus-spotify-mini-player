@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Glow lab: old (v1, one radial from the most saturated pixel) vs new (v2, src/lib/glow.js) per cover.
+<!-- Glow lab: the glow (src/lib/glow.js) per cover, with its palette.
      Serve the project root (npm run dev:web) and open /dev/glow.html  (?layout=focus for the centred cover) -->
 <html lang="en">
   <head>
@@ -32,12 +32,12 @@
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(620px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
         gap: 18px;
       }
       .card {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 6px;
         padding: 10px;
         border-radius: 8px;
@@ -150,8 +150,7 @@
     </div>
     <div id="grid" class="grid"></div>
     <script type="module">
-      import { extractColors } from "../src/lib/color.js";
-      import { inspectCover, glowVars, fallbackVars } from "../src/lib/glow.js";
+      import { inspectCover, glowVars } from "../src/lib/glow.js";
 
       // public cover CDNs (i.scdn.co; mzstatic for Mire. — not in the fixtures). Named by look, not title.
       const COVERS = [
@@ -197,12 +196,12 @@
         card.className = "card";
         grid.append(card);
         try {
-          const [old, r] = await Promise.all([extractColors(url), inspectCover(url)]);
+          const r = await inspectCover(url);
           const { pal, glow } = r;
           times.push(r.drawMs + r.analyseMs);
           const regions = pal.regions.map((i) => `<i style="background:${i < 0 ? "#000" : css(pal.colors[i].rgb)}"></i>`).join("");
           card.innerHTML = `<header><b>${name}</b><span>${pal.mono ? "mono · " : ""}${pal.colors.length} colours · ${glow.blobs.length} blobs · text ${glow.textContrast.toFixed(1)}:1, peak ${glow.contrast.toFixed(1)}:1 · ${(r.drawMs + r.analyseMs).toFixed(1)} ms</span><span class="regions" title="dominant colour per 3×3 region">${regions}</span></header>`;
-          card.append(mini("old", url, fallbackVars(old || { vivid: [139, 124, 240], ink: [21, 19, 27] })), mini("new", url, glowVars(glow)));
+          card.append(mini("glow", url, glowVars(glow)));
           const sw = document.createElement("div");
           sw.className = "swatches";
           sw.innerHTML = [...pal.colors]

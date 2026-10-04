@@ -127,7 +127,7 @@ fn from_track(uri: &str, t: &Track) -> TrackInfo {
 }
 
 /// 0–65535 → 0–100 %, rounded.
-fn volume_percent(volume: u16) -> u8 {
+pub(crate) fn volume_percent(volume: u16) -> u8 {
     ((u32::from(volume) * 100 + 32767) / 65535) as u8
 }
 
@@ -286,14 +286,15 @@ pub struct NowPlaying {
     session: Mutex<Option<Session>>,
     /// The latest Connect cluster (all devices, the active one's player state), for
     /// `list_devices` / `get_queue` without the Web API. None until the first update of a session.
-    cluster: Mutex<Option<Cluster>>,
+    cluster: Mutex<Option<Arc<Cluster>>>,
     app: OnceLock<AppHandle>,
     tracker: Arc<Tracker>,
     /// An event was seen: before that, `local_state` is null.
     seen: Mutex<bool>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+/// A mutex's guard, poisoned or not: a panic elsewhere must not take the state down with it.
+pub(crate) fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -323,8 +324,13 @@ impl NowPlaying {
     }
 
     /// The latest Connect cluster of the current session.
-    pub fn cluster(&self) -> Option<Cluster> {
+    pub fn cluster(&self) -> Option<Arc<Cluster>> {
         lock(&self.cluster).clone()
+    }
+
+    /// This Mac is the active Connect device, by its own events.
+    pub fn engine_active(&self) -> bool {
+        lock(&self.now).engine_active
     }
 
     /// This Mac's volume, 0–100 %.
@@ -446,7 +452,7 @@ impl NowPlaying {
     /// A Connect cluster update. While this Mac is the active device: its context and up-next.
     pub fn on_cluster(self: &Arc<Self>, update: &ClusterUpdate, device_id: &str) {
         let cluster = &update.cluster;
-        *lock(&self.cluster) = Some(cluster.clone().unwrap_or_default());
+        *lock(&self.cluster) = Some(Arc::new(cluster.clone().unwrap_or_default()));
         if cluster.active_device_id != device_id {
             return;
         }
@@ -528,17 +534,9 @@ impl NowPlaying {
     }
 }
 
-/// The holder `listen` feeds, for the MCP routing (control.rs, mcp_app.rs): it needs This Mac's
-/// raw state even while a track's metadata loads, when `snapshot` says nothing.
-static LIVE: Mutex<Option<std::sync::Weak<NowPlaying>>> = Mutex::new(None);
-
-/// The running holder, while the player is up.
-pub fn live() -> Option<Arc<NowPlaying>> {
-    lock(&LIVE).as_ref()?.upgrade()
-}
-
 impl NowPlaying {
-    /// The raw state as the player's events left it.
+    /// The raw state as the player's events left it: live even while a track's metadata loads,
+    /// when `snapshot` says nothing (the MCP routing, control.rs and mcp_app.rs, needs it).
     pub fn now(&self) -> Now {
         lock(&self.now).clone()
     }
@@ -549,14 +547,13 @@ impl NowPlaying {
     }
 }
 
-/// 0–100 % → 0–65535, the inverse of `volume_percent`.
-pub fn volume_from_percent(percent: u8) -> u16 {
+/// 0–100 % → 0–65535, the inverse of `volume_percent`. Above 100 counts as 100.
+pub(crate) fn volume_from_percent(percent: u8) -> u16 {
     ((u32::from(percent.min(100)) * 65535 + 50) / 100) as u16
 }
 
 /// Feeds the player's events into `np` until the player goes away (its channel closes).
 pub async fn listen(np: Arc<NowPlaying>, mut events: PlayerEventChannel) {
-    *lock(&LIVE) = Some(Arc::downgrade(&np));
     while let Some(event) = events.recv().await {
         np.on_event(&event);
     }
@@ -680,5 +677,8 @@ mod tests {
         for p in [0, 1, 30, 35, 40, 73, 99, 100] {
             assert_eq!(volume_percent(volume_from_percent(p)), p, "{p}");
         }
+        assert_eq!(volume_from_percent(50), 32768);
+        assert_eq!(volume_from_percent(1), 655);
+        assert_eq!(volume_from_percent(255), 65535, "above 100 counts as 100");
     }
 }

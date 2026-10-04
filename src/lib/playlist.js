@@ -1,4 +1,5 @@
 // The playlist panel: what played, what plays now, what's next, as rows. Pure.
+import { pastTracks } from "./timeline.js";
 
 export const PANEL_HISTORY_MAX = 20;
 
@@ -21,14 +22,7 @@ export function panelRows({ list = null, now = null, history = [], queue = [], s
     return { mode: "list", rows: tracks.map((track, i) => ({ key: `l${i}`, role: role(i), track, i })) };
   }
   // like the run: skip plays of the current song, collapse repeats in a row
-  const past = [];
-  (history || []).forEach((h, i) => {
-    const t = h && h.track;
-    if (!t || !t.uri || past.length >= PANEL_HISTORY_MAX || t.uri === nowUri) return;
-    if (past.length && past[past.length - 1].track.uri === t.uri) return;
-    past.push({ key: `h${i}`, role: "played", track: t, i });
-  });
-  past.reverse();
+  const past = pastTracks(history, nowUri, PANEL_HISTORY_MAX).map(({ track, i }) => ({ key: `h${i}`, role: "played", track, i }));
   const next = (queue || []).filter((t) => t && t.uri).map((track, i) => ({ key: `q${i}`, role: "next", track, i }));
   const cur = now ? [{ key: "now", role: "now", track: now, i: -1 }] : [];
   return { mode: "queue", rows: [...past, ...cur, ...next] };
