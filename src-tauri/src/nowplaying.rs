@@ -454,9 +454,15 @@ impl NowPlaying {
         let context = crate::session::loadable_context(&state.context_uri).map(str::to_string);
         let next = next_uris(state.next_tracks.iter().map(|t| t.uri.as_str()));
         let prev = !next_uris(state.prev_tracks.iter().map(|t| t.uri.as_str())).is_empty();
+        // a load applies shuffle/repeat without emitting player events (librespot handle_load):
+        // the cluster's options are the only report of them, e.g. after a restore
+        let o = &state.options;
+        let (shuffle, repeat) = (o.shuffling_context, Repeat::from_flags(o.repeating_context, o.repeating_track));
         let changed = {
             let mut now = lock(&self.now);
-            let changed = now.context_uri != context || now.next.as_ref() != Some(&next);
+            let changed = now.context_uri != context || now.next.as_ref() != Some(&next) || now.shuffle != shuffle || now.repeat != repeat;
+            now.shuffle = shuffle;
+            now.repeat = repeat;
             now.context_uri = context;
             now.next = Some(next.clone());
             now.prev = Some(prev);

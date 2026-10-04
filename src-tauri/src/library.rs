@@ -78,10 +78,18 @@ fn with_link(list: Vec<Value>, item: Value) -> Vec<Value> {
     out
 }
 
-fn save_links(list: Vec<Value>) -> Result<(), String> {
-    crate::store::store_set(LINKS_KEY.into(), Value::Array(list))?;
-    changed();
-    Ok(())
+/// Change the saved list in one locked read-modify-write (two adds at once can't lose one).
+/// `f` returns the new list (None: unchanged) and a result.
+fn update_links<T>(f: impl FnOnce(Vec<Value>) -> (Option<Vec<Value>>, T)) -> Result<T, String> {
+    let (wrote, out) = crate::store::update(LINKS_KEY, |cur| {
+        let (next, out) = f(parse_links(cur.cloned()));
+        let wrote = next.is_some();
+        (next.map(Value::Array), (wrote, out))
+    })?;
+    if wrote {
+        changed();
+    }
+    Ok(out)
 }
 
 /// What a link names, fetched from Spotify (internal API): for the UI's detail head and the add
@@ -144,19 +152,31 @@ pub async fn save(text: &str) -> Result<Value, String> {
         return Ok(json!({ "item": item, "already": true }));
     }
     let item = item_of(&resolve(&link).await?);
-    save_links(with_link(saved_links(), item.clone()))?;
+    // checked again under the lock: the same link may have been added while it resolved
+    let already = update_links(|list| match list.iter().find(|i| i["uri"] == uri.as_str()) {
+        Some(i) => (None, Some(i.clone())),
+        None => (Some(with_link(list, item.clone())), None),
+    })?;
+    if let Some(item) = already {
+        return Ok(json!({ "item": item, "already": true }));
+    }
     log::info!(target: LOG, "added {uri} ({})", item["name"].as_str().unwrap_or(""));
     Ok(json!({ "item": item, "already": false }))
 }
 
 /// Takes `uri` out of the app's library. True when it was there.
 pub fn remove(uri: &str) -> Result<bool, String> {
-    let list = saved_links();
-    let next: Vec<Value> = list.iter().filter(|i| i["uri"] != uri).cloned().collect();
-    if next.len() == list.len() {
+    let removed = update_links(|list| {
+        let next: Vec<Value> = list.iter().filter(|i| i["uri"] != uri).cloned().collect();
+        if next.len() == list.len() {
+            (None, false)
+        } else {
+            (Some(next), true)
+        }
+    })?;
+    if !removed {
         return Ok(false);
     }
-    save_links(next)?;
     log::info!(target: LOG, "removed {uri}");
     Ok(true)
 }

@@ -56,6 +56,21 @@ pub fn get(key: &str) -> Option<Value> {
     with_state(|s| s.get(key).cloned())
 }
 
+/// Read, change and write one key under a single lock, so two concurrent updates can't lose each
+/// other. `f` gets the current value and returns the new one (None: leave it) plus a result.
+pub fn update<T>(key: &str, f: impl FnOnce(Option<&Value>) -> (Option<Value>, T)) -> Result<T, String> {
+    with_state(|s| {
+        let (next, out) = f(s.get(key));
+        if let Some(v) = next {
+            if s.get(key) != Some(&v) {
+                s.insert(key.to_string(), v);
+                save(s)?;
+            }
+        }
+        Ok(out)
+    })
+}
+
 /// Store value under key (null removes it). Written to disk before it returns.
 #[tauri::command]
 pub fn store_set(key: String, value: Value) -> Result<(), String> {
