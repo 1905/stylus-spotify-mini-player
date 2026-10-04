@@ -2265,36 +2265,23 @@ body:has(.stage:not(.is-playing)) .bg {
 
 /* ---------- a play starting: the clicked song shows at once, alive until Spotify confirms it ---------- */
 
-/* the cover itself stays still (user: the dimmed text, running bar and play spinner are enough) */
-@keyframes load-bar {
-  from { left: -32%; }
-  to { left: 100%; }
-}
-
+/* nothing moves while a play loads: the play button's spinner is the loader (user, 2026-10-04);
+   the cover, the seek line and the volume stay still, the sliders only fade to inactive */
 .stage.is-loading :is(.now-title, .now-artist, .now-album) {
   opacity: 0.7;
   transition: opacity 200ms ease;
 }
 
-/* the seek line runs a bar instead of a position */
-.stage:is(.is-loading, .is-starting, .is-skipping) .scrub {
-  overflow: hidden;
+.stage:is(.is-loading, .is-starting, .is-skipping) :is(.scrub-row, .volume) {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 200ms ease;
 }
 
+/* the seek line holds at the start, no running bar */
 .stage:is(.is-loading, .is-starting, .is-skipping) .scrub-fill {
-  opacity: 0;
-}
-
-.stage:is(.is-loading, .is-starting, .is-skipping) .scrub::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  width: 32%;
-  height: 2px;
-  margin-top: -1px;
-  border-radius: 1px;
-  background: linear-gradient(90deg, transparent, var(--fg), transparent);
-  animation: load-bar 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  width: 0 !important;
+  transition: none;
 }
 
 /* the song isn't known yet: the empty cover slot shimmers */
