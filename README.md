@@ -1,105 +1,100 @@
 <p align="center">
-  <img src="media/og.png" alt="Stylus — a small Spotify player for macOS" width="100%" />
+  <img src="media/og.jpg" alt="Stylus — a small Spotify player for macOS" width="100%" />
 </p>
 
-# Stylus
-
-A small, fast Spotify player for macOS. Stylus plays music on your Mac by itself, so you do not need the 2 GB Spotify desktop app.
+<h1 align="center">Stylus</h1>
 
 <p align="center">
-  <img src="media/screenshot.png" alt="Stylus playing a track" width="720" />
+  <b>A small, fast Spotify player for macOS.</b><br />
+  It plays music on your Mac by itself — no 2&nbsp;GB Spotify desktop app needed.
 </p>
 
-<table>
-  <tr>
-    <td width="33%"><img src="media/focus.png" alt="Focus layout with the cover row turned off" /></td>
-    <td width="33%"><img src="media/library.png" alt="The Library, Albums tab" /></td>
-    <td width="33%"><img src="media/tint.png" alt="The window tinted to the album cover" /></td>
-  </tr>
-  <tr>
-    <td align="center">Focus layout: one cover, centred</td>
-    <td align="center">Library with tabs</td>
-    <td align="center">Colours follow the album cover</td>
-  </tr>
-</table>
+<p align="center">
+  <a href="https://github.com/1905/stylus-spotify-mini-player/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/1905/stylus-spotify-mini-player?style=flat-square&color=1ed760" /></a>
+  <img alt="Platform" src="https://img.shields.io/badge/macOS-Apple%20Silicon-111?style=flat-square&logo=apple" />
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-Tauri%202-b7410e?style=flat-square&logo=rust" />
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-31%20tools-6e56cf?style=flat-square" />
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-444?style=flat-square" /></a>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#control-stylus-from-ai-tools-mcp">AI control (MCP)</a> ·
+  <a href="#build-from-source">Build from source</a>
+</p>
+
+<p align="center">
+  <img src="media/hero.jpg" alt="Stylus playing a track, the window tinted to the album cover" width="820" />
+</p>
 
 ## Install
-
-### TL;DR
 
 ```sh
 brew install --cask 1905/tap/stylus
 ```
 
-Or download `Stylus.dmg` from [Releases](https://github.com/1905/stylus-spotify-mini-player/releases/latest) and drag Stylus to Applications.
+Or download **Stylus.dmg** from [the latest release](https://github.com/1905/stylus-spotify-mini-player/releases/latest) and drag Stylus to Applications.
 
-Stylus is not signed with an Apple Developer ID. On first launch, macOS may refuse to open it. Run this once:
+> [!NOTE]
+> Stylus is not signed with an Apple Developer ID, so macOS may refuse to open it the first time. Run this once:
+> ```sh
+> xattr -dr com.apple.quarantine /Applications/Stylus.app
+> ```
 
-```sh
-xattr -dr com.apple.quarantine /Applications/Stylus.app
-```
-
-### From source — TL;DR
-
-Requires macOS (Apple Silicon), [Rust](https://rustup.rs) 1.85 or later, and Node.js 20 or later.
-
-```sh
-git clone https://github.com/1905/stylus-spotify-mini-player.git
-cd stylus-spotify-mini-player
-npm install
-make install   # builds Stylus.app and copies it to /Applications
-```
-
-Other targets:
-
-| Command | What it does |
-|---|---|
-| `make install` | Release build of `Stylus.app` into `/Applications`, then opens it. |
-| `make run` | Fresh release build, run as a bare binary from the terminal. It has no Dock icon, so you can tell it apart from the installed app. |
-| `make stop` | Quits every running copy. |
-| `npx vitest run` | Frontend unit tests. |
-| `cargo test --manifest-path src-tauri/Cargo.toml` | Backend unit tests. |
-
-## Requirements
-
-- macOS 13 or later on Apple Silicon.
-- A **Spotify Premium** account. Playback through Spotify Connect requires Premium.
-
-### Spotify login
-
-Stylus signs in twice on first launch, both in your browser:
-
-1. **Library access** — the Spotify Web API login (OAuth with PKCE, no client secret).
-2. **The player** — the login for the built-in Spotify Connect speaker.
-
-The included client ID belongs to a Spotify developer app in development mode. Spotify only lets accounts on that app's allowlist sign in. To use Stylus with your own account, create an app at [developer.spotify.com](https://developer.spotify.com/dashboard), add the redirect URI `http://127.0.0.1:1420/callback`, and put its client ID in `CLIENT_ID` in `src-tauri/src/auth.rs` before you build.
+**Requirements:** macOS 13 or later on Apple Silicon, and a **Spotify Premium** account (playback through Spotify Connect requires Premium).
 
 ## Features
 
-- **Plays on your Mac.** Stylus contains its own Spotify Connect speaker, shown as "Here" in the app and as "This Mac" in other Spotify apps. Phones and other devices can send music to it.
-- **Controls other devices.** Pick any of your Spotify Connect devices from the device menu.
-- **Resumes where you stopped.** The playlist, song, position, volume, shuffle and repeat are restored, paused, when you open the app again.
-- **Library and search.** Playlists, Liked Songs, albums, artists with their popular tracks, your top tracks and artists, and search across all of them.
-- **Playlist view.** One panel shows what played before, what plays now and what comes next.
-- **Two layouts.** A row of covers that shows what played and what comes next, or a single centred cover (Settings → Show cover row).
-- **Native feel.** Media keys and Now Playing, the current album cover as the Dock icon, a smooth volume ramp, and instant skip and pause.
-- **Audio quality.** Choose 96, 160 or 320 kbps.
-- **AI control.** A built-in MCP server lets Claude Code and other AI tools find and play music for you.
-- **Low on network.** While Stylus is the active speaker, it reads the player state from the speaker itself instead of polling Spotify.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="media/focus.jpg" alt="Focus layout: one centred cover" /><br />
+      <b>Plays on your Mac.</b> A built-in Spotify Connect speaker, shown as "Here" in the app and "This Mac" in your other Spotify apps. Colours follow the album cover; choose a row of covers or a single centred one.
+    </td>
+    <td width="50%" valign="top">
+      <img src="media/library.jpg" alt="The Library, Albums tab" /><br />
+      <b>Your library, fast.</b> Playlists, Liked Songs, albums, artists with their popular tracks, your top tracks, Made For You mixes, and search. Add any playlist by pasting its Spotify link.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="media/playlist-panel.jpg" alt="The playlist panel" /><br />
+      <b>Where you are in the playlist.</b> One panel shows what played, what plays now and what comes next. Stylus reopens on the same song, at the same second, paused.
+    </td>
+    <td width="50%" valign="top">
+      <img src="media/cover-flip.jpg" alt="The back of the cover with album details" /><br />
+      <b>Turn the record over.</b> The cover flips to show the album details: release date, length, label and credits.
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="media/settings-mcp.jpg" alt="Settings with the MCP server" /><br />
+      <b>Settings that matter.</b> Album art as the Dock icon, audio quality up to 320&nbsp;kbps, the cover row, the menu-bar player and the MCP server.
+    </td>
+    <td width="50%" valign="top">
+      <img src="media/mini-player.jpg" alt="The menu-bar mini player" /><br />
+      <b>Menu-bar mini player.</b> Play, skip, volume and like from the menu bar. Media keys and Now Playing work too, and the window can stay closed.
+    </td>
+  </tr>
+</table>
+
+Also: control any of your Spotify Connect devices, smooth volume, instant skip and pause, and a light network footprint — while Stylus is the speaker, it reads playback from the speaker itself instead of polling Spotify.
 
 ## Control Stylus from AI tools (MCP)
 
-Stylus includes a local [Model Context Protocol](https://modelcontextprotocol.io) server. AI tools on your Mac, such as Claude Code, Claude Desktop, Cursor or opencode, can then search your music, start playlists and mixes, and control playback in the open app.
+Stylus includes a local [Model Context Protocol](https://modelcontextprotocol.io) server, so Claude Code, Claude Desktop, Cursor and other AI tools on your Mac can find and play music for you.
 
-1. In Stylus, open **Settings** (the cog) and turn on **MCP server**.
-2. Click **Claude Code** or **JSON config** to copy the connect text, and paste it into your client.
-3. Ask, for example: *"Play my Bonobo Radio"*, *"Find Kerala by Bonobo and play it"*, *"Turn the volume down a bit"*.
-
-Claude Code:
+1. Open **Settings** (the cog) and turn on **MCP server**.
+2. Click **Claude Code** or **JSON config** to copy the connect text, then paste it into your client.
+3. Ask: *"Play my Bonobo Radio"*, *"Find Kerala by Bonobo and play it"*, *"Turn it down a bit"*.
 
 ```sh
 claude mcp add --scope user --transport http stylus http://127.0.0.1:5590/mcp --header "Authorization: Bearer <key>"
 ```
+
+<details>
+<summary>Other clients, tools and security</summary>
 
 Other clients (`mcpServers` in their config file):
 
@@ -113,18 +108,53 @@ The copied text already contains your key. **Copy skill** gives a short instruct
 
 **Security:** the server listens on `127.0.0.1` only and runs only while Stylus is open with the setting on. Every request must carry the key; requests without it get `401`. Requests from web pages (with a browser `Origin`) get `403`. **Reset key** in Settings makes a new key and disconnects old clients. Details: [docs/mcp.md](docs/mcp.md).
 
-## How it works
+</details>
+
+## Build from source
+
+Requires macOS on Apple Silicon, [Rust](https://rustup.rs) 1.85 or later, and Node.js 20 or later.
+
+```sh
+git clone https://github.com/1905/stylus-spotify-mini-player.git
+cd stylus-spotify-mini-player
+npm install
+npx tauri build --bundles app   # → src-tauri/target/release/bundle/macos/Stylus.app
+```
+
+<details>
+<summary>Make targets (the maintainer builds on a second Mac over SSH)</summary>
+
+| Command | What it does |
+|---|---|
+| `make install` | Builds `Stylus.app` on the build Mac (`AIR` in the Makefile) and installs it into `/Applications`. |
+| `make run` | Fresh release build, run as a bare binary. It has no Dock icon, so you can tell it apart from the installed app. |
+| `make dmg` | Builds `Stylus.dmg` for a release. |
+| `make test` | Frontend (vitest) and backend (cargo) tests. |
+| `make stop` | Quits every running copy. |
+
+</details>
+
+### Spotify login
+
+Stylus signs in twice on first launch, both in your browser: once for **library access** (the Spotify Web API, OAuth with PKCE, no client secret) and once for **the player** (the built-in Spotify Connect speaker).
+
+The included client ID belongs to a Spotify developer app in development mode, so Spotify only lets accounts on its allowlist sign in. To use your own, create an app at [developer.spotify.com](https://developer.spotify.com/dashboard), add the redirect URI `http://127.0.0.1:1420/callback`, and put its client ID in `CLIENT_ID` in `src-tauri/src/auth.rs` before you build.
+
+<details>
+<summary>How it works</summary>
 
 - **App shell:** [Tauri 2](https://tauri.app) with a plain JavaScript frontend.
 - **Playback:** [librespot](https://github.com/librespot-org/librespot) 0.8, embedded as a Spotify Connect device, with a custom audio output that applies volume at playback time.
-- **Library data:** Spotify's internal endpoints, the same ones the official apps use, through the player's own session. The public Web API is used as a fallback. When Spotify rate-limits the Web API, Stylus respects `Retry-After` and keeps playing.
-- **State on disk:** `~/Library/Application Support/stylus/` holds the login tokens, the player credentials (`0600`), the session, settings, a list cache and the log file `logs/stylus.log`.
+- **Library data:** Spotify's internal endpoints, the same ones the official apps use, through the player's own session. The public Web API is a fallback; when Spotify rate-limits it, Stylus respects `Retry-After` and keeps playing.
+- **State on disk:** `~/Library/Application Support/stylus/` holds the login tokens, the player credentials (`0600`), the session, settings, a list cache and the log `logs/stylus.log`.
+
+</details>
 
 ## Disclaimer
 
 Stylus is an independent project. It is not affiliated with, endorsed by or connected to Spotify. Spotify is a trademark of Spotify AB.
 
-Stylus uses librespot and undocumented Spotify endpoints. Spotify can change or block them at any time. Spotify's terms may not permit this use. Use Stylus at your own risk.
+Stylus uses librespot and undocumented Spotify endpoints. Spotify can change or block them at any time, and Spotify's terms may not permit this use. Use Stylus at your own risk.
 
 ## License
 
