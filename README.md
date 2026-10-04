@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="media/hero.jpg" alt="Stylus playing a track, the window tinted to the album cover" width="820" />
+  <img src="media/hero.png" alt="Stylus playing a track, the window tinted to the album cover" width="820" />
 </p>
 
 ## Install
@@ -49,31 +49,31 @@ Or download **Stylus.dmg** from [the latest release](https://github.com/1905/sty
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="media/focus.jpg" alt="Focus layout: one centred cover" /><br />
+      <img src="media/focus.png" alt="Focus layout: one centred cover" /><br />
       <b>Plays on your Mac.</b> A built-in Spotify Connect speaker, shown as "Here" in the app and "This Mac" in your other Spotify apps. Colours follow the album cover; choose a row of covers or a single centred one.
     </td>
     <td width="50%" valign="top">
-      <img src="media/library.jpg" alt="The Library, Albums tab" /><br />
+      <img src="media/library.png" alt="The Library, Albums tab" /><br />
       <b>Your library, fast.</b> Playlists, Liked Songs, albums, artists with their popular tracks, your top tracks, Made For You mixes, and search. Add any playlist by pasting its Spotify link.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="media/playlist-panel.jpg" alt="The playlist panel" /><br />
+      <img src="media/playlist-panel.png" alt="The playlist panel" /><br />
       <b>Where you are in the playlist.</b> One panel shows what played, what plays now and what comes next. Stylus reopens on the same song, at the same second, paused.
     </td>
     <td width="50%" valign="top">
-      <img src="media/cover-flip.jpg" alt="The back of the cover with album details" /><br />
+      <img src="media/cover-flip.png" alt="The back of the cover with album details" /><br />
       <b>Turn the record over.</b> The cover flips to show the album details: release date, length, label and credits.
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <img src="media/settings-mcp.jpg" alt="Settings with the MCP server" /><br />
+      <img src="media/settings-mcp.png" alt="Settings with the MCP server" /><br />
       <b>Settings that matter.</b> Album art as the Dock icon, audio quality up to 320&nbsp;kbps, the cover row, the menu-bar player and the MCP server.
     </td>
     <td width="50%" valign="top">
-      <img src="media/mini-player.jpg" alt="The menu-bar mini player" /><br />
+      <img src="media/mini-player.png" alt="The menu-bar mini player" /><br />
       <b>Menu-bar mini player.</b> Play, skip, volume and like from the menu bar. Media keys and Now Playing work too, and the window can stay closed.
     </td>
   </tr>
