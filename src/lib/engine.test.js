@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { thisMacRow, isHere, deviceLabel, HERE, THE_RUN_MISSING_MS, preferredDevice } from "./engine.js";
+import { thisMacRow, isHere, isPremiumRequired, deviceLabel, HERE, THE_RUN_MISSING_MS, preferredDevice } from "./engine.js";
 
 // the in-app player: Spotify lists it as "This Mac"; the engine's device id says it's ours
 const RUN = { id: "r", name: "This Mac", type: "Computer" };
@@ -7,13 +7,22 @@ const READY = { state: "ready", device_id: "r" };
 const MARANTZ = { id: "m", name: "Marantz", type: "AVR" };
 const MACBOOK = { id: "b", name: "MacBook Pro", type: "Computer" };
 
+describe("isPremiumRequired", () => {
+  it("only the Premium failure", () => {
+    expect(isPremiumRequired({ state: "failed", reason: "Spotify Premium is required to play on this Mac" })).toBe(true);
+    expect(isPremiumRequired({ state: "failed", reason: "no audio" })).toBe(false);
+    expect(isPremiumRequired({ state: "ready" })).toBe(false);
+    expect(isPremiumRequired(null)).toBe(false);
+  });
+});
+
 describe("thisMacRow", () => {
   it("has no row while the device list is unknown", () => {
     expect(thisMacRow({ state: "needs_login" }, null)).toBeNull();
   });
 
   it("has no row once the player is listed, whatever the engine says", () => {
-    for (const state of ["needs_login", "starting", "failed", "account_mismatch"]) {
+    for (const state of ["needs_login", "starting", "failed"]) {
       expect(thisMacRow({ state, device_id: "r" }, [MARANTZ, RUN])).toBeNull();
     }
     expect(thisMacRow({ state: "needs_login", device_id: "r" }, [RUN], "login")).toBeNull();
@@ -55,11 +64,6 @@ describe("thisMacRow", () => {
       title: "Premium required",
     });
     expect(thisMacRow({ state: "failed" }, []).title).toMatch(/isn't available/);
-  });
-
-  it("account mismatch offers the player login, the title is the reason", () => {
-    const row = thisMacRow({ state: "account_mismatch", reason: "player: a, app: b" }, []);
-    expect(row).toEqual({ type: "Log in to play here", title: "player: a, app: b" });
   });
 
   it("a running click outranks the engine state", () => {

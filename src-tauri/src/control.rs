@@ -320,7 +320,8 @@ pub async fn queue_add(uri: String) -> Result<Value, String> {
 }
 
 /// Moves playback to `device`. To This Mac: it loads what the active device plays, at its
-/// position; with nothing playing, `NOTHING_PLAYING`. Other devices: `NOT_AVAILABLE_REMOTE`.
+/// position; with nothing playing there is nothing to load (a `note` says so). Other devices:
+/// `NOT_AVAILABLE_REMOTE`.
 pub async fn transfer(device: String, play: bool) -> Result<Value, String> {
     let v = view().await;
     if let Path::Local = route_play(&v, Some(&device))? {
@@ -334,9 +335,17 @@ pub async fn transfer(device: String, play: bool) -> Result<Value, String> {
                 return Ok(outcome(&v, &Path::Local));
             }
         }
-        return Err(NOTHING_PLAYING.into());
+        let mut out = outcome(&v, &Path::Local);
+        out["note"] = json!("Nothing was playing: This Mac plays what you start next");
+        return Ok(out);
     }
     Err(not_available_remote("transfer"))
+}
+
+/// The UI's device pick to This Mac (`transfer`).
+#[tauri::command]
+pub async fn control_transfer(device: String, play: bool) -> Result<Value, String> {
+    transfer(device, play).await
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
-// Which path a player command takes: the in-app player ("Here") directly, or the Web API.
+// Which path a player command takes: the in-app player ("Here") directly, or the remote path
+// (the playback commands in Rust, for another device).
 
 /** True when deviceId is the in-app player and it's ready (connected; maybe not active). */
 export const isEngineDevice = (engine, deviceId) =>
@@ -7,7 +8,7 @@ export const isEngineDevice = (engine, deviceId) =>
 /**
  * Send play/pause/seek/next/prev/volume to the in-app player directly? Only when deviceId (the
  * device the command was made for) is the in-app player, it's ready, and the last poll showed it
- * active: an inactive player ignores those commands, so they go through the Web API instead.
+ * active: an inactive player ignores those commands, so they take the remote path instead.
  */
 export const isLocal = (engine, deviceId, activeId) => isEngineDevice(engine, deviceId) && activeId === deviceId;
 

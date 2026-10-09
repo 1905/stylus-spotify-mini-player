@@ -20,14 +20,14 @@ describe("isLocal", () => {
   it("ready, our device, and the last poll's active device", () => {
     expect(isLocal(READY, "run", "run")).toBe(true);
   });
-  it("inactive (another device active, or none): Web API", () => {
+  it("inactive (another device active, or none): remote", () => {
     expect(isLocal(READY, "run", "marantz")).toBe(false);
     expect(isLocal(READY, "run", null)).toBe(false);
   });
   it("a command captured for another device stays remote", () => {
     expect(isLocal(READY, "marantz", "marantz")).toBe(false);
   });
-  it("engine not ready: Web API", () => {
+  it("engine not ready: remote", () => {
     expect(isLocal({ state: "reconnecting", device_id: "run" }, "run", "run")).toBe(false);
     expect(isLocal(null, "run", "run")).toBe(false);
   });

@@ -7,7 +7,10 @@ export const HERE = "Here";
 export const CONNECTING = new Set(["starting", "reconnecting"]);
 
 /** States that a player login (engine_login) fixes. */
-export const NEEDS_LOGIN = new Set(["needs_login", "account_mismatch"]);
+export const NEEDS_LOGIN = new Set(["needs_login"]);
+
+/** The engine stopped because the account has no Premium (Rust player.rs `PREMIUM_REQUIRED`). */
+export const isPremiumRequired = (st) => Boolean(st && st.state === "failed" && /Premium is required/.test(st.reason || ""));
 
 /** d is the in-app player: its id is the engine's device id (engine_status). */
 export const isHere = (d, engine) => Boolean(d && d.id && engine && engine.device_id && d.id === engine.device_id);
@@ -37,8 +40,6 @@ export function thisMacRow(engine, devices, busy = "", missingMs = 0) {
     return { type: "Not showing up — retry", title: "Spotify hasn't listed the player on this Mac yet" };
   }
   if (st === "needs_login") return { type: "Log in to play here", title: "Opens your browser once to log in the player on this Mac" };
-  if (st === "account_mismatch")
-    return { type: "Log in to play here", title: engine.reason || "The player on this Mac uses another Spotify account" };
   return { type: "Not available right now", title: engine.reason || "The player on this Mac isn't available right now" };
 }
 

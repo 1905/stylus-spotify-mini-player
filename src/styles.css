@@ -2511,18 +2511,6 @@ body:has(.stage:not(.is-playing)) .bg {
   border-radius: 50%;
 }
 
-/* ---------- Spotify rate-limited the app's Web API: one quiet line in Settings ---------- */
-
-.set-quota {
-  padding-top: 10px;
-  margin-top: 10px;
-  border-top: 1px solid var(--hair);
-}
-
-.set-quota[hidden] {
-  display: none;
-}
-
 /* ---------- Settings: the MCP server (switch, status, copy buttons, reset key asked inline) ---------- */
 
 .set-mcp .set-note {

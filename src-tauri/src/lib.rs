@@ -113,6 +113,7 @@ pub fn run() {
             spotify::get_artist_albums,
             spotify::get_followed_artists,
             spotify::add_to_queue,
+            control::control_transfer,
             library::mixes_list,
             library::links_list,
             library::link_resolve,

@@ -7,10 +7,9 @@ import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
-import { CONNECTING, NEEDS_LOGIN, HERE, isHere, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
+import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
-import { rateLimitedSecs, rateLimitedError, quotaNotice, quotaStatus, waitText } from "./lib/quota.js";
 import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
 import { originUri, offsettable } from "./lib/source.js";
 import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
@@ -27,24 +26,11 @@ import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js
 // (still in flight across a logout) never settles, so it can't touch the new one.
 let authSession = 0;
 const STALE = new Promise(() => {});
-const DISK_WAIT_MS = 1500; // longest a rate-limited error waits for cached disk reads to show
-// While Spotify rate-limits the app, Rust refuses a command that needs the Web API at once, without
-// a request (quota.rs): RATE_LIMITED:<secs>: … That error waits for the disk reads already asked
-// for, so a cached copy shows instead of it. Rust tries Spotify's internal API first where it can.
 function invoke(cmd, args) {
   const sess = authSession;
   return window.__TAURI__.core.invoke(cmd, args).then(
     (v) => (sess === authSession ? v : STALE),
-    async (e) => {
-      if (sess !== authSession) return STALE;
-      noteRateLimited(e);
-      // me_id: the disk reads wait for the account, so it must not wait for them
-      // bounded: a read that never settles must not hold the command forever
-      if (rateLimitedSecs(e) && cmd !== "me_id") {
-        await Promise.race([Promise.allSettled([...diskPending]), new Promise((r) => setTimeout(r, DISK_WAIT_MS))]);
-      }
-      return sess === authSession ? Promise.reject(e) : STALE;
-    },
+    (e) => (sess === authSession ? Promise.reject(e) : STALE),
   );
 }
 const $ = (id) => document.getElementById(id);
@@ -90,8 +76,7 @@ const state = {
 const isCode = (e, code) => String(e).startsWith(code);
 /** A line in the app log file (<app dir>/logs/stylus.log). Never throws. */
 const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
-const reason = (e) =>
-  rateLimitedSecs(e) ? `Spotify limits this for ${waitText(rateLimitedSecs(e))}` : String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
+const reason = (e) => String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
 
 /** Run a player command and log one line: what, the path (local or remote, the device), ok or the error. */
 async function logged(what, fn) {
@@ -142,89 +127,28 @@ function toast(msg) {
   toastTimer = setTimeout(() => (el.hidden = true), 3200);
 }
 
-// ---------- Spotify's rate limit on the Web API (see lib/quota.js, Rust quota.rs) ----------
-
-let blockedUntil = 0; // performance.now() when the Web API block ends; 0 = open
-const quotaToasted = new Set(); // the kinds ("remote", "library") whose notice this run already showed
-// disk-cache reads in flight: a blocked call fails only after them, so a cached copy lands before the error
-const diskPending = new Set();
-
-const blockedMs = () => (blockedUntil ? Math.max(0, blockedUntil - performance.now()) : 0);
-
-/** A RATE_LIMITED error from Rust: block every Web API call from here for that long. */
-function noteRateLimited(e) {
-  const secs = rateLimitedSecs(e);
-  if (!secs) return;
-  const was = blockedMs() > 0;
-  blockedUntil = performance.now() + secs * 1000;
-  if (was) return;
-  applog("warn", `Web API rate-limited for ${secs} s: no Web-API-only calls until then; playback here and the internal API keep working`);
-  renderQuota();
-}
-
-/**
- * An action failed because it needs the blocked Web API: the notice, once per run for each kind
- * ("remote": another device; "library": a library read or write whose internal source failed too).
- * True when e is that error, so the caller shows nothing else.
- */
-function limitedToast(kind, e) {
-  const secs = rateLimitedSecs(e);
-  if (!secs) return false;
-  if (!quotaToasted.has(kind)) {
-    quotaToasted.add(kind);
-    toast(quotaNotice(kind, secs));
-  }
-  return true;
-}
-
-/** reason(e) for a library status line; a rate limit also gets its once-a-run notice. */
-const libReason = (e) => (limitedToast("library", e), reason(e));
-
-/** The block ran out: allowed again. Called every loop tick. */
-function syncQuota() {
-  if (blockedUntil && blockedMs() === 0) {
-    blockedUntil = 0;
-    applog("info", "Web API block over: polling allowed again");
-  }
-  renderQuota();
-}
-
-/** The quiet line in Settings while blocked. Nothing else shows the block until an action needs it. */
-function renderQuota() {
-  const ms = blockedMs();
-  const text = ms > 0 ? quotaStatus(ms / 1000) : "";
-  const el = $("quotaStatus");
-  if (el.textContent !== text) el.textContent = text;
-  el.hidden = !text;
-}
-
-/** Rust's block at startup (it survives a relaunch: state.json `apiBlockedUntil`). */
-async function loadQuota() {
-  try {
-    const st = await invoke("api_status");
-    if (st && st.blockedForSecs > 0) noteRateLimited(rateLimitedError(st.blockedForSecs));
-  } catch {
-    /* unknown: the first Web API call tells */
-  }
-}
-
 // ---------- login ----------
 
 const LOGIN_COPY = {
   login: {
     title: "Your music, in order",
-    sub: "Connect Spotify to see what played, what's playing, and what's next.",
-    btn: "Connect Spotify",
-  },
-  reconnect: {
-    title: "Reconnect Spotify for your library",
-    sub: "Spotify needs a few new permissions. It takes a few seconds.",
-    btn: "Reconnect Spotify",
+    sub: "Log in with Spotify to see what played, what's playing, and what's next. Stylus needs Spotify Premium.",
+    btn: "Log in with Spotify",
   },
   ended: {
     title: "Your Spotify session ended",
-    sub: "Connect again to pick up where you left off.",
-    btn: "Connect Spotify",
+    sub: "Log in again to pick up where you left off.",
+    btn: "Log in with Spotify",
+  },
+  not_premium: {
+    title: "Stylus needs Spotify Premium",
+    sub: "This Spotify account doesn't have Premium. Log in with a Premium account to play here.",
+    btn: "Log in with another account",
+  },
+  logged_out: {
+    title: "You're logged out",
+    sub: "Log in with Spotify to pick up where you left off.",
+    btn: "Log in with Spotify",
   },
 };
 
@@ -232,13 +156,11 @@ function showLogin(kind) {
   const loggedOut = !$("stage").hidden; // leaving a session (not the first screen at launch)
   stopPolling();
   authSession++;
-  // reads from the old session may never settle (STALE): a rate-limited command must not wait on them
-  diskPending.clear();
   playlistsLoading = false; // a load from the old session will never finish
   playerChain = Promise.resolve(); // a player command from the old session will never finish either
   thisMacBusy = "";
   engine = null; // the next stage reads it fresh: the player re-checks the account on restart
-  accountP = null; // the next login may be another account: ask /me again
+  accountP = null; // the next login may be another account: ask me_id again
   accountNow = null;
   activeId = null;
   lastSrc = null;
@@ -260,7 +182,6 @@ function showLogin(kind) {
   endSkip();
   heartGen++;
   devicesGen++;
-  libraryDenied = false; // the next login may grant the library scopes
   queueDirty = false;
   resetLibrary();
   state.gen.search++;
@@ -306,14 +227,13 @@ async function onLogin() {
   btn.textContent = "Waiting for Spotify…";
   $("loginError").hidden = true;
   try {
-    await invoke("login");
-    const status = await invoke("auth_status");
-    if (status === "ok") {
-      restartEngine(); // maybe another account now: the player re-checks it
-      return startStage();
-    }
+    await invoke("engine_login"); // resolved = logged in and the player is ready
+    const { status } = await invoke("auth_status");
+    if (status === "ok") return startStage();
     showLogin(status);
   } catch (e) {
+    const st = await invoke("auth_status").catch(() => null);
+    if (st && st.status === "not_premium") return showLogin("not_premium");
     $("loginError").textContent = `Couldn't connect: ${reason(e)}`;
     $("loginError").hidden = false;
     btn.disabled = false;
@@ -386,21 +306,17 @@ async function poll() {
   } catch (e) {
     if (epoch !== pollEpoch) return; // stale: the session it belonged to is gone
     inFlight = false;
-    if (isCode(e, "AUTH_EXPIRED")) return expire();
-    // rate-limited: not a failure; the next tick runs blocked (no requests) and shows the notice
-    if (!isCode(e, "RATE_LIMITED")) {
-      failures++;
-      state.error = reason(e);
-      if (failures === GIVE_UP_FAILURES) applog("warn", `poll: ${failures} failures in a row, last: ${e}`);
-      // a blip retries quietly (the last view stays, or a loader before the first load); only a
-      // run of failures is an error worth showing
-      if (failures === GIVE_UP_FAILURES && state.loaded) toast("Can't reach Spotify. Retrying.");
-    }
+    failures++;
+    state.error = reason(e);
+    if (failures === GIVE_UP_FAILURES) applog("warn", `poll: ${failures} failures in a row, last: ${e}`);
+    // a blip retries quietly (the last view stays, or a loader before the first load); only a
+    // run of failures is an error worth showing
+    if (failures === GIVE_UP_FAILURES && state.loaded) toast("Can't reach Spotify. Retrying.");
     renderNow();
   }
   inFlight = false;
   if (!polling) return;
-  // events: a local re-render each second; another device: 5 s (30 s hidden); blocked: no requests
+  // events: a local re-render each second; another device: 5 s (30 s hidden)
   let delay = pollDelay({ hidden: document.hidden && !miniOpen, mode: loopMode(), failures });
   if (pollAgain) {
     pollAgain = false;
@@ -409,10 +325,10 @@ async function poll() {
   schedule(delay);
 }
 
-// ---------- where the state comes from: player-state events (this Mac) or the Web API ----------
+// ---------- where the state comes from: player-state events (this Mac) or playback_state ----------
 
 let local = null; // the last player-state payload from Rust (this Mac's player): {s, at}
-let distrust = false; // a Web API check showed another device active since that payload
+let distrust = false; // a sanity check showed another device active since that payload
 let lastSanityAt = 0; // events mode: the last playback_state check
 let shownMode = null; // the loop's mode the log last named
 
@@ -436,12 +352,12 @@ async function loadLocal() {
   }
 }
 
-const loopMode = () => pollMode({ local: local && local.s, distrust, blockedMs: blockedMs() });
+const loopMode = () => pollMode({ local: local && local.s, distrust });
 
-/** One log line when the loop switches between events, polling and blocked. */
+/** One log line when the loop switches between events and polling. */
 function noteMode(mode) {
   if (mode === shownMode) return;
-  applog("info", `state source: ${shownMode || "start"} → ${mode} (${modeReason({ mode, blockedMs: blockedMs(), distrust })})`);
+  applog("info", `state source: ${shownMode || "start"} → ${mode} (${modeReason({ mode, distrust })})`);
   shownMode = mode;
 }
 
@@ -460,24 +376,22 @@ const queueOf = (s) => (s && Array.isArray(s.queue) ? s.queue.filter((t) => t &&
 
 /**
  * The state for this tick. Events: the last player-state (no request), and once a minute a
- * playback_state to catch a missed hand-over. Poll: playback_state. Blocked: null (no request).
+ * playback_state to catch a missed hand-over. Poll: playback_state.
  */
 async function readState(epoch, mode, startedAt) {
-  // blocked: only this Mac's own state can still be read (a hand-over to another device shows as idle)
-  if (mode === "blocked") return local && state.device && engine && state.device.id === engine.device_id ? localSnapshot() : null;
   if (mode === "poll") {
     const s = await invoke("playback_state");
-    // the Web API shows this Mac active again: its events are the source from here
+    // Spotify shows this Mac active again: its events are the source from here
     if (distrust && s && s.active && engine && s.device_id && s.device_id === engine.device_id) distrust = false;
     return s;
   }
-  if (sanityDue({ lastAt: lastSanityAt, now: startedAt, blockedMs: blockedMs() })) {
+  if (sanityDue({ lastAt: lastSanityAt, now: startedAt })) {
     lastSanityAt = startedAt;
     let remote = null;
     try {
       remote = await invoke("playback_state");
-    } catch (e) {
-      if (isCode(e, "AUTH_EXPIRED")) throw e;
+    } catch {
+      /* the local view stays */
     }
     if (epoch !== pollEpoch) return null;
     const here = engine && engine.device_id;
@@ -496,12 +410,12 @@ const listWant = { get_queue: false, get_recently_played: false, list_devices: f
 
 /**
  * A list from Spotify when it's due: the result (null on failure), or undefined when skipped
- * (not needed, fetched under 30 s ago, or blocked). A skipped need is fetched once it's due.
+ * (not needed, or fetched under 30 s ago). A skipped need is fetched once it's due.
  */
 function fetchList(cmd, { need = false, force = false } = {}) {
   if (need) listWant[cmd] = true;
   const now = performance.now();
-  if (!listDue({ lastAt: listAt[cmd], now, need: listWant[cmd], force, blockedMs: blockedMs() })) return undefined;
+  if (!listDue({ lastAt: listAt[cmd], now, need: listWant[cmd], force })) return undefined;
   listAt[cmd] = now;
   listWant[cmd] = false;
   return fetchOr(cmd).then((v) => {
@@ -512,12 +426,10 @@ function fetchList(cmd, { need = false, force = false } = {}) {
 
 async function refresh(epoch) {
   const startedAt = performance.now();
-  syncQuota();
   const source = loopMode();
   noteMode(source);
   const s = await readState(epoch, source, startedAt);
   if (epoch !== pollEpoch) return; // a newer session took over while this one waited
-  if (s === null) return blockedTick();
   // the in-app player restarts for a quality change and plays nothing for a moment: keep the song on screen
   if (restartHoldUntil > performance.now() && !(s && s.active)) return;
   listen(); // close the old "now"'s listening time before this poll overwrites it
@@ -638,18 +550,6 @@ async function refresh(epoch) {
   renderChrome();
 }
 
-/**
- * Blocked, and nothing of this Mac's to show: no request. The last view stays; with nothing
- * known, this Mac is the device, so a play from the Library (its disk copy) still starts here.
- */
-function blockedTick() {
-  const here = engine && engine.state === "ready" && engine.device_id;
-  if (!state.device && here && state.mode === "idle") state.device = { id: engine.device_id, name: "This Mac" };
-  state.loaded = true;
-  renderNow();
-  renderChrome();
-}
-
 const LISTEN_STEP_CAP_MS = HIDDEN_POLL_MS + 1000; // a longer step is a stall, not listening
 
 /** Add the time since the last call to listenedMs, if a song was playing. */
@@ -666,12 +566,11 @@ function observe(track, playedMs) {
   state.session.length = Math.min(state.session.length, 50);
 }
 
-/** A list from Spotify, or null on failure (keep what we had). AUTH_EXPIRED always propagates. */
+/** A list from Spotify, or null on failure (keep what we had). */
 async function fetchOr(cmd) {
   try {
     return (await invoke(cmd)) || [];
-  } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) throw e;
+  } catch {
     return null;
   }
 }
@@ -700,8 +599,6 @@ function setDevices(list, startedAt = performance.now()) {
 /** Fetch devices for a transport command: this Mac first (see preferredDevice), or null. */
 async function discover() {
   const list = await fetchOr("list_devices");
-  // rate-limited: no device list, but this Mac's player needs none
-  if (!list && blockedMs() > 0 && engine && engine.state === "ready" && engine.device_id) return { id: engine.device_id, name: "This Mac" };
   if (!list) return null;
   setDevices(list);
   const d = preferredDevice(list, engine);
@@ -1160,7 +1057,7 @@ function renderChrome() {
 
   const heart = $("heartBtn");
   const t = state.now;
-  heart.hidden = !song || !t || !t.id || isLocalFile(t.uri) || libraryDenied;
+  heart.hidden = !song || !t || !t.id || isLocalFile(t.uri);
   heart.disabled = state.saved === null; // unknown until is_saved answers
   heart.classList.toggle("is-on", state.saved === true);
   heart.setAttribute("aria-pressed", String(state.saved === true));
@@ -1304,11 +1201,10 @@ async function withDeviceNow(fn) {
     await fn(state.device && state.device.id);
     return true;
   } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) return expire(), false;
     if (!isCode(e, "NO_ACTIVE_DEVICE")) {
       // This Mac refuses a next/previous that would only stop playback (Rust player.rs): its sentence as is
       if (/^Nothing (after|before) this track/.test(String(e))) toast(String(e));
-      else if (!limitedToast("remote", e)) toast(`Spotify didn't respond: ${reason(e)}`);
+      else toast(`Spotify didn't respond: ${reason(e)}`);
       return false;
     }
   }
@@ -1321,8 +1217,8 @@ async function withDeviceNow(fn) {
       await fn(d.id);
       return true;
     }
-  } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) return expire(), false;
+  } catch {
+    /* the toast below */
   }
   toast(lost ? `Couldn't reach ${lost}` : "Open Spotify on a device first");
   return false;
@@ -1367,7 +1263,7 @@ async function playUris(uris, opts = {}) {
   return startPlay({ uris, trackUri: uris[0] }, { kind: "list", ...opts });
 }
 
-// ---------- routing: the in-app player directly, or the Web API ----------
+// ---------- routing: the in-app player directly, or the remote path ----------
 
 let activeId = null; // the device the last poll showed active, null = none
 
@@ -1394,7 +1290,7 @@ function devName(id) {
 
 /**
  * Start src ({contextUri, trackUri?} or {uris, trackUri}) on deviceId. The in-app player loads it
- * itself, active or not (local_load activates it); any other device goes through the Web API.
+ * itself, active or not (local_load activates it); any other device takes the remote path.
  */
 async function playSource(deviceId, src) {
   if (isEngineDevice(engine, deviceId)) {
@@ -1405,7 +1301,7 @@ async function playSource(deviceId, src) {
     }
   }
   if (src.contextUri) return invoke("play_context", { deviceId, contextUri: src.contextUri, trackUri: src.trackUri });
-  // the Web API play has no start offset here: the list starts at the track
+  // the remote play has no start offset here: the list starts at the track
   const at = src.trackUri ? src.uris.indexOf(src.trackUri) : 0;
   return invoke("play_on_device", { deviceId, uris: at > 0 ? src.uris.slice(at) : src.uris });
 }
@@ -1524,22 +1420,14 @@ let lastSrc = null;
 let restoring = null;
 const RESTORE_WAIT_MS = 20000; // the player connects and loads it; longer = it isn't coming
 
-const ACCOUNT_KEY = "account"; // the last /me id, for the disk cache while the Web API is rate-limited
-
 /** The signed-in account's id (scopes the list cache), or null on failure. */
 function accountId() {
   if (!accountP) {
     const p = invoke("me_id").then(
-      (id) => {
-        if (id) storeSet(ACCOUNT_KEY, id);
-        return (accountNow = id || null);
-      },
-      (e) => {
-        if (isCode(e, "AUTH_EXPIRED")) expire();
-        // rate-limited: the account this Mac last saw, so the disk cache still shows
-        const known = isCode(e, "RATE_LIMITED") ? storeGet(ACCOUNT_KEY) : null;
-        if (accountP === p && !known) accountP = null; // retry on the next ask
-        return (accountNow = known || null);
+      (id) => (accountNow = id || null),
+      () => {
+        if (accountP === p) accountP = null; // retry on the next ask
+        return (accountNow = null);
       },
     );
     accountP = p;
@@ -1834,10 +1722,7 @@ function volumeKey(ev) {
 
 // Bumped on each track change and heart click: an is_saved answer from before either is stale.
 let heartGen = 0;
-let libraryDenied = false; // the token lacks the library scopes: no heart this session
 let savedChain = Promise.resolve(); // save/unsave in click order, so the last click wins
-
-const isScopeError = (e) => /\b403\b|scope/i.test(String(e));
 
 /** Liked Songs reads and writes, in order, for this login session only. */
 function queueSaved(cmd, args) {
@@ -1857,17 +1742,15 @@ const likedWith = (r, t, saved) => {
 async function checkSaved(track) {
   const gen = ++heartGen;
   state.saved = null;
-  if (!track || !track.id || isLocalFile(track.uri) || libraryDenied) return;
+  if (!track || !track.id || isLocalFile(track.uri)) return;
   try {
     // in the same queue as save/unsave: a read must not overtake a write still on its way
     const saved = await queueSaved("is_saved", { trackId: track.id });
     if (gen !== heartGen) return;
     state.saved = Boolean(saved);
-  } catch (e) {
+  } catch {
+    // a failure leaves it unknown (disabled) until the next track
     if (gen !== heartGen) return;
-    if (isCode(e, "AUTH_EXPIRED")) return expire();
-    if (isScopeError(e)) libraryDenied = true;
-    // other failures leave it unknown (disabled) until the next track
   }
   renderChrome();
 }
@@ -1894,12 +1777,10 @@ async function toggleSaved() {
     lib.delete("likedCount");
     if (libOpened) fillLiked();
   } catch (e) {
-    if (isCode(e, "AUTH_EXPIRED")) return expire();
-    if (isScopeError(e)) libraryDenied = true;
     // still this click on this track: ask Spotify what is true (!want may itself be unconfirmed)
     if (gen === heartGen && state.now && state.now.id === t.id) checkSaved(t);
     renderChrome();
-    if (!limitedToast("library", e)) toast(`Spotify didn't respond: ${reason(e)}`);
+    toast(`Spotify didn't respond: ${reason(e)}`);
   }
 }
 
@@ -1967,7 +1848,6 @@ async function loadDeviceList(gen) {
     list = (await invoke("list_devices")) || [];
   } catch (e) {
     if (gen !== devicesGen) return;
-    if (isCode(e, "AUTH_EXPIRED")) return expire();
     devicesNote = state.devices ? "" : `Couldn't load devices — ${reason(e)}`;
     renderDeviceList();
     return;
@@ -2048,7 +1928,10 @@ function setEngine(st) {
   engine = st;
   if (st.device_id) hereId = st.device_id;
   // a player that can't run won't load the saved session back
-  if (restoring && (NEEDS_LOGIN.has(st.state) || st.state === "failed" || st.state === "account_mismatch")) endRestoring(`stopped: engine ${st.state}`);
+  if (restoring && (NEEDS_LOGIN.has(st.state) || st.state === "failed")) endRestoring(`stopped: engine ${st.state}`);
+  // on the stage: Spotify refused the player login, or the account has no Premium → the login screen
+  if (!$("stage").hidden && NEEDS_LOGIN.has(st.state)) return void expire();
+  if (!$("stage").hidden && isPremiumRequired(st)) return void showLogin("not_premium");
   if (settingsOpen) renderSettings(); // quality needs a ready player
   if (st.device_id !== wasId && !$("stage").hidden) renderChrome(); // the chip may be the player: "Here"
   if (!devicesOpen) return;
@@ -2063,11 +1946,6 @@ async function refreshEngine() {
   } catch (e) {
     setEngine({ state: "failed", reason: reason(e) });
   }
-}
-
-/** Logged out or in: the player re-checks its account. Not session-tagged: it belongs to no session. */
-function restartEngine() {
-  window.__TAURI__.core.invoke("engine_restart").catch(() => {});
 }
 
 /**
@@ -2147,7 +2025,6 @@ async function playOnThisMac() {
     toast("This Mac didn't show up in Spotify. Try again in a moment.");
   } catch (e) {
     if (sess !== authSession) return;
-    if (isCode(e, "AUTH_EXPIRED")) return void expire();
     if (isCode(e, "LOGIN_IN_PROGRESS")) return void toast("Finish the player login in your browser");
     toast(`Couldn't log in the player on this Mac: ${reason(e)}`);
   } finally {
@@ -2304,9 +2181,12 @@ async function pickDevice(d) {
   const sess = authSession;
   let failed = null;
   // the error is handled here, not by withDevice: rediscovering would retry a device that's gone
+  // This Mac: the local transfer (it loads what plays elsewhere); another device: transfer_playback
+  const move = isHere(d, engine)
+    ? () => invoke("control_transfer", { device: d.id, play: state.isPlaying })
+    : () => invoke("transfer_playback", { deviceId: d.id, play: state.isPlaying });
   await changeTrack(() =>
-    invoke("transfer_playback", { deviceId: d.id, play: state.isPlaying }).catch((e) => {
-      if (isCode(e, "AUTH_EXPIRED")) throw e;
+    move().catch((e) => {
       failed = e;
     }),
   );
@@ -2324,7 +2204,7 @@ async function pickDevice(d) {
     if (isCode(failed, "NO_ACTIVE_DEVICE") || /\b404\b/.test(String(failed))) {
       toast(`${d.name} isn't available any more`);
       refreshDevices();
-    } else if (!limitedToast("remote", failed)) {
+    } else {
       toast(`Spotify didn't respond: ${reason(failed)}`);
     }
   }
@@ -2557,9 +2437,8 @@ function loadPanelSource(src) {
       if (cur.ctx && offsettable(cur.ctx)) knownRows.set(cur.ctx, cur.tracks.map((x) => x.uri)); // for cover clicks
       renderPanel();
     },
-    (e) => {
+    () => {
       if (!live()) return;
-      if (isCode(e, "AUTH_EXPIRED")) return void expire();
       cur.loading = false; // the queue view instead (a mix, a list Spotify won't give, a network blip)
       renderPanel();
     },
@@ -2916,7 +2795,6 @@ async function restartOnQuality(kbps, sess, back) {
     if (sess !== authSession) return;
     qualityBusy = 0;
     renderSettings();
-    if (isCode(e, "AUTH_EXPIRED")) return void expire();
     applog("warn", `quality ${kbps}: ${e}`);
     toast(`Couldn't change the quality: ${reason(e)}`);
     return;
@@ -2936,8 +2814,7 @@ async function restartOnQuality(kbps, sess, back) {
   const token = startPending("resume", back.trackUri, null, back.play);
   let failed = false;
   await changeTrack(() =>
-    invoke("local_load", { spec: { ...back, shuffle: state.shuffle, repeat: state.repeat } }).catch((e) => {
-      if (isCode(e, "AUTH_EXPIRED")) throw e;
+    invoke("local_load", { spec: { ...back, shuffle: state.shuffle, repeat: state.repeat } }).catch(() => {
       failed = true;
     }),
   );
@@ -2992,13 +2869,6 @@ function closeOverlay() {
   $("stage").inert = false;
   returnFocus?.focus?.();
   returnFocus = null;
-}
-
-/** Overlay commands that hit a dead session send the user to login. */
-function overlayFailed(e) {
-  if (!isCode(e, "AUTH_EXPIRED")) return false;
-  expire(); // showLogin closes the overlay
-  return true;
 }
 
 const artHtml = (url, name, attrs = 'loading="lazy"') =>
@@ -3161,9 +3031,6 @@ function diskGet(key) {
       return null;
     }
   })();
-  // a rate-limited list call waits for this read, so the copy shows instead of its error
-  diskPending.add(p);
-  p.finally(() => diskPending.delete(p));
   return p;
 }
 
@@ -3172,8 +3039,8 @@ function libGet(key, cmd, args) {
   if (!p) {
     p = listInvoke(cmd, args);
     lib.set(key, p);
-    p.catch((e) => {
-      if (!isScopeError(e) && lib.get(key) === p) lib.delete(key);
+    p.catch(() => {
+      if (lib.get(key) === p) lib.delete(key);
     });
   }
   return p;
@@ -3221,12 +3088,12 @@ async function fillGroup(group, load, render, what, key = null, skeleton = null)
     if (shown === null || JSON.stringify(data) !== shown) render(data);
   } catch (e) {
     fresh = true;
-    if (!live() || overlayFailed(e)) return;
-    if (shown !== null && !isScopeError(e)) return; // keep the cached copy
+    if (!live()) return;
+    if (shown !== null) return; // keep the cached copy
     for (const el of group.querySelectorAll(".is-skeleton")) el.remove();
-    group.hidden = isScopeError(e);
+    group.hidden = false;
     // the Liked Songs row has no status line: its subtitle says it
-    setEl(group.querySelector(".status") || group.querySelector(".row-sub"), `Couldn't load ${what} — ${libReason(e)}`);
+    setEl(group.querySelector(".status") || group.querySelector(".row-sub"), `Couldn't load ${what} — ${reason(e)}`);
   } finally {
     if (live()) group.removeAttribute("aria-busy");
   }
@@ -3331,9 +3198,8 @@ function fillLiked() {
       likedCount = n || 0;
       group.hidden = !likedCount;
     },
-    (e) => {
-      if (overlayFailed(e)) return;
-      if (isScopeError(e)) group.hidden = true; // no library scope: no tab
+    () => {
+      /* the tab stays as it is */
     },
   );
   if (libTabShown() === "liked") loadLikedRows();
@@ -3432,9 +3298,7 @@ async function fillTop() {
   if (gen !== topGen) return;
   group.removeAttribute("aria-busy");
   const failed = results.filter((r) => r.status === "rejected").map((r) => r.reason);
-  if (failed.some((e) => isCode(e, "AUTH_EXPIRED"))) return void expire();
-  if (shown !== null && failed.length === 2 && !failed.every(isScopeError)) return; // keep the cached copy
-  if (failed.length === 2 && failed.every(isScopeError)) return void (group.hidden = true);
+  if (shown !== null && failed.length === 2) return; // keep the cached copy
   const [tracks, artists] = results.map((r) => (r.status === "fulfilled" && r.value) || []);
   if (!failed.length && JSON.stringify([tracks, artists]) === shown) return;
   renderTop(tracks, artists, failed);
@@ -3451,9 +3315,9 @@ function renderTop(tracks, artists, failed) {
   $("topArtists").hidden = !topArtistList.length;
   $("topArtistsHead").hidden = !topArtistList.length;
   renderShelf("topArtists");
-  const err = failed.find((e) => !isScopeError(e));
+  const err = failed[0];
   const empty = !topTrackList.length && !topArtistList.length;
-  setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${libReason(err)}` : empty ? "Nothing here yet for this time range." : "");
+  setEl(group.querySelector(".status"), err ? `Couldn't load your top — ${reason(err)}` : empty ? "Nothing here yet for this time range." : "");
 }
 
 function onTopTab(e) {
@@ -3500,10 +3364,7 @@ function noteContexts(uris) {
 function mixInfoFor(id) {
   let p = mixInfo.get(id);
   if (!p) {
-    p = invoke("mix_info", { playlistId: id }).catch((e) => {
-      if (isCode(e, "AUTH_EXPIRED")) expire();
-      return null; // a letter tile named "Spotify mix"
-    });
+    p = invoke("mix_info", { playlistId: id }).catch(() => null); // a letter tile named "Spotify mix"
     mixInfo.set(id, p);
   }
   return p;
@@ -3519,7 +3380,7 @@ async function renderMixes(refresh = false) {
   try {
     list = await invoke("mixes_list", { refresh });
   } catch (e) {
-    if (gen === mixesGen && !overlayFailed(e)) applog("warn", `mixes_list failed: ${e}`);
+    if (gen === mixesGen) applog("warn", `mixes_list failed: ${e}`);
     return; // the tiles on screen stay
   }
   if (gen !== mixesGen) return;
@@ -3616,10 +3477,9 @@ async function loadPlaylists() {
     }
   } catch (e) {
     fresh = true;
-    if (overlayFailed(e)) return;
     if (shown === null) {
       list.innerHTML = "";
-      setText("listStatus", `Couldn't load your playlists — ${libReason(e)}`);
+      setText("listStatus", `Couldn't load your playlists — ${reason(e)}`);
     }
   } finally {
     playlistsLoading = false;
@@ -3736,7 +3596,7 @@ async function onDetailSave() {
     applog("info", `library: ${btn.dataset.saved ? "removed" : "added"} ${uri}`);
     await loadLinks();
   } catch (e) {
-    if (!overlayFailed(e)) toast(reason(e));
+    toast(reason(e));
   } finally {
     btn.removeAttribute("aria-busy");
     btn.disabled = false;
@@ -3782,7 +3642,7 @@ async function onAddSubmit(e) {
       toast(`Added to ${LINK_TAB_NAMES[r.item.tab] || "your library"}`);
     }
   } catch (err) {
-    if (!overlayFailed(err)) setText("libAddMsg", reason(err));
+    setText("libAddMsg", reason(err));
   } finally {
     go.removeAttribute("aria-busy");
     go.disabled = false;
@@ -3801,7 +3661,7 @@ async function openLink(link, gen) {
   } catch (e) {
     if (gen !== state.gen.search) return;
     box.removeAttribute("aria-busy");
-    if (!overlayFailed(e)) searchMessage(reason(e));
+    searchMessage(reason(e));
     return;
   }
   if (gen !== state.gen.search) return;
@@ -3890,12 +3750,11 @@ async function openDetail(src, push = true) {
   } catch (e) {
     fresh = true;
     if (gen !== state.gen.detail) return;
-    if (overlayFailed(e)) return;
     rows.removeAttribute("aria-busy");
     if (shown !== null) return; // keep the cached rows
     rows.innerHTML = "";
     if (src.kind === "mix") setText("detailNote", MIX_NOTE);
-    else setText("detailStatus", `Couldn't load tracks — ${libReason(e)}`);
+    else setText("detailStatus", `Couldn't load tracks — ${reason(e)}`);
     return;
   }
   fresh = true;
@@ -3974,10 +3833,10 @@ let artistTracksTitle = "Popular"; // the artist page's track list: Spotify's po
 
 /**
  * The artist page: photo and name (best effort), albums and singles, then Spotify's popular tracks
- * (get_artist's top_tracks), or, when there are none (the Web API has none), your favorites by them.
+ * (get_artist's top_tracks), or, when there are none, your favorites by them.
  */
 async function loadArtist(src, gen) {
-  const optional = (e) => (isCode(e, "AUTH_EXPIRED") ? Promise.reject(e) : null); // the page works without these
+  const optional = () => null; // the page works without these
   let info, albums;
   try {
     [info, albums] = await Promise.all([
@@ -3986,10 +3845,9 @@ async function loadArtist(src, gen) {
     ]);
   } catch (e) {
     if (gen !== state.gen.detail) return;
-    if (overlayFailed(e)) return;
     $("detailRows").innerHTML = "";
     $("detailRows").removeAttribute("aria-busy");
-    setText("detailStatus", `Couldn't load albums — ${libReason(e)}`);
+    setText("detailStatus", `Couldn't load albums — ${reason(e)}`);
     return;
   }
   if (gen !== state.gen.detail) return;
@@ -4013,10 +3871,10 @@ async function loadArtist(src, gen) {
   try {
     lists = await sources;
   } catch (e) {
-    return void (gen === state.gen.detail && overlayFailed(e));
+    return;
   }
   if (gen !== state.gen.detail) return;
-  // no popular tracks (the Web API no longer gives them): rank from your own listening
+  // no popular tracks: rank from your own listening
   detailTracks = favoritesBy(src.id, lists || []);
   artistTracksTitle = "Your favorites";
   renderArtist();
@@ -4140,7 +3998,7 @@ async function runSearch(q, gen) {
   } catch (e) {
     if (gen !== state.gen.search) return;
     box.removeAttribute("aria-busy");
-    if (!overlayFailed(e)) searchMessage(`Search failed — ${libReason(e)}`);
+    searchMessage(`Search failed — ${reason(e)}`);
     return;
   }
   if (gen !== state.gen.search) return;
@@ -4295,7 +4153,7 @@ function renderPageFoot() {
   setText("pageSub", "");
   const noun = kind === "track" ? "songs" : "albums";
   let status = "";
-  if (list.error) status = n ? `Couldn't load more — ${libReason(list.error)}` : `Couldn't load ${noun} — ${libReason(list.error)}`;
+  if (list.error) status = n ? `Couldn't load more — ${reason(list.error)}` : `Couldn't load ${noun} — ${reason(list.error)}`;
   else if (!n && !list.loading && !list.hasMore) status = `No ${noun} for “${page.query}”.`;
   setText("pageStatus", status);
   // while the first pages load, the skeletons say it; after that the button does
@@ -4337,8 +4195,6 @@ async function loadPages(tab, n) {
   const results = await Promise.allSettled(offsets.map((offset) => invoke("search_page", { query, kind: tab, offset })));
   if (gen !== state.gen.page) return; // the page closed (or another opened) meanwhile
   list.loading = false;
-  const dead = results.find((r) => r.status === "rejected" && isCode(r.reason, "AUTH_EXPIRED"));
-  if (dead) return void overlayFailed(dead.reason);
   const r = foldPages(list.items, offsets, results, tab === "track" ? (t) => t.uri : (a) => a.id);
   const from = list.items.length;
   list.items = list.items.concat(r.added);
@@ -4428,10 +4284,9 @@ function startStage() {
   $("stage").classList.toggle("is-solo", soloRun());
   renderNow();
   renderChrome();
-  // first: a rate limit from the last run (no Web API calls), and this Mac's player state (no
-  // playback_state needed when it plays here); then the loop
+  // first: this Mac's player state (no playback_state needed when it plays here); then the loop
   const sess = authSession;
-  Promise.all([loadQuota(), loadLocal()]).finally(() => sess === authSession && !$("stage").hidden && startPolling());
+  loadLocal().finally(() => sess === authSession && !$("stage").hidden && startPolling());
   refreshEngine();
   accountId(); // the list cache is per account: ask once, early
   loadRestored();
@@ -4577,7 +4432,7 @@ async function boot() {
   listenEvent("media-command", onMediaCommand);
   listenEvent("mini-command", onMiniCommand);
   listenEvent("mini-visible", onMiniVisible);
-  // this Mac's player: what plays, from librespot (no Web API); the loop renders from it
+  // this Mac's player: what plays, from librespot; the loop renders from it
   listenEvent("player-state", onPlayerState);
   // an add or remove in the app's own library (also from MCP): the Library redraws
   // an added or removed link can be a mix: the Mixes tab asks Rust again
@@ -4590,7 +4445,7 @@ async function boot() {
   applyTray();
   let status = "login";
   try {
-    status = await invoke("auth_status");
+    status = (await invoke("auth_status")).status;
   } catch {
     /* treat as logged out */
   }
