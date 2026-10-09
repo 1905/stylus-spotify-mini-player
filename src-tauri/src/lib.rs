@@ -64,7 +64,6 @@ pub fn run() {
             auth::auth_status,
             player::engine_status,
             player::engine_login,
-            player::engine_restart,
             player::logout,
             player::engine_get_quality,
             player::engine_set_quality,

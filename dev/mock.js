@@ -665,15 +665,8 @@
       setEngine("needs_login");
       return null;
     },
-    engine_restart: () => {
-      if (state.engine.state === "ready") {
-        setEngine("starting");
-        setTimeout(() => setEngine("ready"), 800);
-      }
-      return null;
-    },
-    // the bitrate restarts the player: starting → ready a moment later; whatever it played stops
     engine_get_quality: () => state.quality,
+    // the bitrate restarts the player: starting → ready a moment later; whatever it played stops
     engine_set_quality: ({ kbps }) => {
       if (![96, 160, 320].includes(kbps)) throw "BAD_ARGS: kbps must be 96, 160 or 320 (mock)";
       state.quality = kbps;

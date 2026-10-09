@@ -259,10 +259,7 @@ impl CredStore for FileStore {
     }
 
     fn clear(&self) -> Result<(), String> {
-        match std::fs::remove_file(Self::path()) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove the credentials file: {e}")),
-            _ => Ok(()),
-        }
+        crate::paths::remove_if_exists(&Self::path()).map(drop).map_err(|e| format!("could not remove the credentials file: {e}"))
     }
 }
 
@@ -909,53 +906,70 @@ fn emit_restored(engine: &Engine, saved: &session::Saved) {
 /// How long a Liked Songs context load gets to show its first track before the list is tried.
 const DEFAULT_CONTEXT_WAIT: Duration = Duration::from_secs(10);
 
+const DEFAULT_LOG: &str = "stylus::session";
+
 /// No saved session (first launch, after logout): load Liked Songs, paused, on its first
-/// track (`session::default_sources`). The context first; the list of the first 200 liked
-/// uris when the context shows no track in time. Empty Liked Songs: nothing.
+/// track (`session::default_sources`). An empty Liked Songs (by its count, one request): nothing.
+/// The context first; the first 200 liked uris are fetched and loaded as a list only when the
+/// context shows no track in time (or the account is unknown).
 async fn load_default(engine: &Engine, device_id: &str) {
-    const LOG: &str = "stylus::session";
     let tracker = engine.0.session.clone();
     let username = tracker.account().unwrap_or_default();
+    match crate::spotify::liked_count().await {
+        Ok(0) => {
+            log::info!(target: DEFAULT_LOG, "default session skipped: Liked Songs is empty");
+            return;
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!(target: DEFAULT_LOG, "default session: Liked Songs count not read ({e}): trying the context"),
+    }
+    for source in session::default_sources(&username, None) {
+        if load_default_source(engine, device_id, &tracker, source).await {
+            return;
+        }
+    }
     let liked = match crate::spotify::saved_tracks(session::DEFAULT_LIST_MAX, None).await {
-        Ok(v) => Some(v["tracks"].as_array().into_iter().flatten().filter_map(|t| t["uri"].as_str().map(str::to_string)).collect::<Vec<_>>()),
+        Ok(v) => v["tracks"].as_array().into_iter().flatten().filter_map(|t| t["uri"].as_str().map(str::to_string)).collect::<Vec<_>>(),
         Err(e) => {
-            log::warn!(target: LOG, "default session: Liked Songs not read ({e}): the context only");
-            None
+            log::warn!(target: DEFAULT_LOG, "default session: Liked Songs not read ({e}): no list to load");
+            return;
         }
     };
-    let sources = session::default_sources(&username, liked);
-    if sources.is_empty() {
-        log::info!(target: LOG, "default session skipped: Liked Songs is empty");
-        return;
+    let list = session::default_sources("", Some(liked));
+    if list.is_empty() {
+        log::info!(target: DEFAULT_LOG, "default session skipped: Liked Songs is empty");
     }
-    for source in sources {
-        if tracker.has_track() {
-            log::info!(target: LOG, "default session skipped: the player got a track meanwhile");
-            return;
-        }
-        let what = match &source {
-            Source::Context { .. } => "context",
-            Source::Uris { .. } => "list",
-        };
-        let is_context = what == "context";
-        if !may_load(engine, device_id, Restore::Launch) {
-            return;
-        }
-        tracker.loaded(source.clone(), None, 0, false, Repeat::Off);
-        if let Err(e) = send_load(engine, source, None, 0, false, Repeat::Off, tracker.volume()) {
-            log::warn!(target: LOG, "default session: Liked Songs {what} not sent: {e}");
-            return;
-        }
-        if is_context && !track_within(&tracker, DEFAULT_CONTEXT_WAIT).await {
-            log::warn!(target: LOG, "default session: the Liked Songs context showed no track in {} s", DEFAULT_CONTEXT_WAIT.as_secs());
-            continue;
-        }
-        log::info!(target: LOG, "default session: Liked Songs loaded as a {what}, paused");
-        if let Some(saved) = tracker.current() {
-            emit_restored(engine, &saved);
-        }
-        return;
+    for source in list {
+        load_default_source(engine, device_id, &tracker, source).await;
     }
+}
+
+/// Loads one default `source`, paused. false only when it was a context that showed no track
+/// in time (the list is next); true when done (loaded, or nothing more to try).
+async fn load_default_source(engine: &Engine, device_id: &str, tracker: &Tracker, source: Source) -> bool {
+    if tracker.has_track() {
+        log::info!(target: DEFAULT_LOG, "default session skipped: the player got a track meanwhile");
+        return true;
+    }
+    let is_context = matches!(source, Source::Context { .. });
+    let what = if is_context { "context" } else { "list" };
+    if !may_load(engine, device_id, Restore::Launch) {
+        return true;
+    }
+    tracker.loaded(source.clone(), None, 0, false, Repeat::Off);
+    if let Err(e) = send_load(engine, source, None, 0, false, Repeat::Off, tracker.volume()) {
+        log::warn!(target: DEFAULT_LOG, "default session: Liked Songs {what} not sent: {e}");
+        return true;
+    }
+    if is_context && !track_within(tracker, DEFAULT_CONTEXT_WAIT).await {
+        log::warn!(target: DEFAULT_LOG, "default session: the Liked Songs context showed no track in {} s", DEFAULT_CONTEXT_WAIT.as_secs());
+        return false;
+    }
+    log::info!(target: DEFAULT_LOG, "default session: Liked Songs loaded as a {what}, paused");
+    if let Some(saved) = tracker.current() {
+        emit_restored(engine, &saved);
+    }
+    true
 }
 
 /// Waits up to `wait` for the player's first track event.
@@ -991,7 +1005,7 @@ async fn store_reusable(store: Arc<dyn CredStore>, reusable: Credentials, creds:
         return (creds, None);
     }
     let to_save = reusable.clone();
-    let saved = tokio::task::spawn_blocking(move || store.save(&to_save)).await.map_err(|e| e.to_string()).and_then(|r| r);
+    let saved = blocking(move || store.save(&to_save)).await;
     if let Err(e) = &saved {
         log::warn!(target: "stylus::player", "could not store the player login in the credentials file: {e}");
     }
@@ -1009,7 +1023,7 @@ fn login_result(settled: Result<(), String>, save_error: Option<String>) -> Resu
 }
 
 /// `f` on the blocking pool; a panic is an Err.
-async fn blocking(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> Result<(), String> {
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string()).and_then(|r| r)
 }
 
@@ -1063,13 +1077,6 @@ pub async fn logout(engine: Managed<'_, Engine>) -> Result<(), String> {
     engine.logout().await
 }
 
-/// Restart with the stored credentials.
-#[tauri::command]
-pub async fn engine_restart(engine: Managed<'_, Engine>) -> Result<(), String> {
-    engine.restart(None).await;
-    Ok(())
-}
-
 /// The stream quality in kbps: 96, 160 or 320.
 #[tauri::command]
 pub fn engine_get_quality() -> u16 {
@@ -1083,12 +1090,7 @@ pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Resul
     if !crate::settings::BITRATES.contains(&kbps) {
         return Err(format!("BAD_ARGS: quality must be 96, 160 or 320 kbps, got {kbps}"));
     }
-    let saved = tokio::task::spawn_blocking(move || {
-        crate::settings::update(|s| std::mem::replace(&mut s.bitrate, kbps)).map(|(old, _)| old)
-    })
-    .await
-    .map_err(|e| e.to_string())
-    .and_then(|r| r);
+    let saved = blocking(move || crate::settings::update(|s| std::mem::replace(&mut s.bitrate, kbps)).map(|(old, _)| old)).await;
     match saved {
         Ok(old) => log::info!("quality {old} → {kbps} kbps, restarting the engine"),
         Err(e) => {

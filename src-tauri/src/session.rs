@@ -562,10 +562,7 @@ impl Tracker {
             *live = Live::new(Instant::now());
             live.closed = closed;
         }
-        match std::fs::remove_file(&self.path) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove {}: {e}", self.path.display())),
-            _ => Ok(()),
-        }
+        crate::paths::remove_if_exists(&self.path).map(drop).map_err(|e| format!("could not remove {}: {e}", self.path.display()))
     }
 }
 

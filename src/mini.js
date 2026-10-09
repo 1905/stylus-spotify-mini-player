@@ -1,6 +1,6 @@
 // The menu-bar mini player (Rust tray.rs). A view only: the main window sends what it shows
 // (mini-state, src/lib/mini.js miniPayload); every button goes back to it as mini_command, so
-// routing, spinners and quota guards are the main window's own.
+// routing and spinners are the main window's own.
 import { ICONS } from "./lib/icons.js";
 import { miniProgress, volumeIcon } from "./lib/mini.js";
 import { stepVolume } from "./lib/transport.js";

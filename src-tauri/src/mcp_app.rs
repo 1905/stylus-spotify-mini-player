@@ -146,7 +146,7 @@ async fn now_playing() -> Result<Value, String> {
         },
         NowFrom::Idle => Ok(idle(None)),
         NowFrom::Unchecked(e) => Ok(idle(Some(e))),
-        NowFrom::Cluster(_) => crate::internal::playback_snapshot().await,
+        NowFrom::Cluster(c) => Ok(crate::internal::playback_snapshot_from(&c).await),
     }
 }
 

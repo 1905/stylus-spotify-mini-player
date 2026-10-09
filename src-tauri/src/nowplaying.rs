@@ -1,9 +1,9 @@
-//! What plays on "This Mac", straight from librespot: no Web API request. Rust emits
+//! What plays on "This Mac", straight from librespot. Rust emits
 //! `player-state` on every player event that changes what the UI shows (track, play/pause,
 //! seek, position correction, volume, shuffle/repeat, end of track, stop, the device going
-//! active or inactive), with the shape `playback_state` gives the UI (spotify.rs
-//! `simplify_state`) plus `engine_active` and `queue`. Track names, artists and covers come
-//! from librespot's metadata (the player's own session), cached per uri. The up-next list
+//! active or inactive), with the shape `playback_state` gives the UI (spotify.rs) plus
+//! `engine_active` and `queue`. Track names, artists and covers come from librespot's
+//! metadata (the player's own session), cached per uri. The up-next list
 //! comes from Spotify Connect cluster updates (`player_state.next_tracks` of this device).
 
 use std::collections::{HashMap, HashSet};
@@ -285,7 +285,7 @@ pub struct NowPlaying {
     fetching: Mutex<HashSet<String>>,
     session: Mutex<Option<Session>>,
     /// The latest Connect cluster (all devices, the active one's player state), for
-    /// `list_devices` / `get_queue` without the Web API. None until the first update of a session.
+    /// `list_devices` / `get_queue`. None until the first update of a session.
     cluster: Mutex<Option<Arc<Cluster>>>,
     app: OnceLock<AppHandle>,
     tracker: Arc<Tracker>,
@@ -482,7 +482,7 @@ impl NowPlaying {
         self.fetch_missing(next);
     }
 
-    /// Fetches the metadata of the uris not cached yet (librespot, not the Web API), then emits.
+    /// Fetches the metadata of the uris not cached yet (librespot), then emits.
     fn fetch_missing(self: &Arc<Self>, uris: Vec<String>) {
         let Some(session) = lock(&self.session).clone() else { return };
         let missing: Vec<String> = {

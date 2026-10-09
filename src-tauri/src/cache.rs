@@ -34,10 +34,7 @@ pub(crate) fn clear_all() -> Result<(), String> {
 
 /// Removes `dir` and everything in it; a missing `dir` is Ok.
 fn remove_dir(dir: &std::path::Path) -> Result<(), String> {
-    match std::fs::remove_dir_all(dir) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove {}: {e}", dir.display())),
-        _ => Ok(()),
-    }
+    crate::paths::remove_if_exists(dir).map(drop).map_err(|e| format!("could not remove {}: {e}", dir.display()))
 }
 
 impl Cache {

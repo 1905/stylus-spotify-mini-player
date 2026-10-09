@@ -32,9 +32,10 @@ pub(crate) fn app_dir() -> std::path::PathBuf {
         } else {
             dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
         };
-        resolve_app_dir(&base)
+        let dir = resolve_app_dir(&base);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
     });
-    let _ = std::fs::create_dir_all(dir);
     dir.clone()
 }
 
@@ -113,6 +114,19 @@ pub(crate) fn write_private(path: &std::path::Path, data: &str) -> std::io::Resu
     written
 }
 
+/// Removes the file or folder (with everything in it) at `path`: Ok(false) when it was missing.
+pub(crate) fn remove_if_exists(path: &std::path::Path) -> std::io::Result<bool> {
+    let removed = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() => std::fs::remove_dir_all(path),
+        _ => std::fs::remove_file(path),
+    };
+    match removed {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Files of the old Web API login (a refresh token of a client id the app no longer has).
 const LEGACY_FILES: [&str; 3] = ["tokens.json", "tokens.json.invalid", "tokens.json.tmp"];
 /// `state.json` keys of the old Web API quota guard and account check.
@@ -122,10 +136,9 @@ const LEGACY_KEYS: [&str; 2] = ["apiBlockedUntil", "account"];
 /// Runs once at startup; logs one line when it removed something.
 pub(crate) fn remove_legacy_files() {
     let mut removed = remove_legacy_files_in(&app_dir());
-    for key in LEGACY_KEYS {
-        if crate::store::get(key).is_some() && crate::store::store_set(key.into(), serde_json::Value::Null).is_ok() {
-            removed.push(format!("state key {key}"));
-        }
+    let present: Vec<&str> = LEGACY_KEYS.into_iter().filter(|k| crate::store::get(k).is_some()).collect();
+    if !present.is_empty() && crate::store::remove(&present).is_ok() {
+        removed.extend(present.iter().map(|k| format!("state key {k}")));
     }
     if !removed.is_empty() {
         log::info!(target: "stylus::store", "removed the old Web API login data: {}", removed.join(", "));

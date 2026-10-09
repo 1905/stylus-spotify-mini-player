@@ -78,17 +78,16 @@ pub fn update<T>(key: &str, f: impl FnOnce(Option<&Value>) -> (Option<Value>, T)
 /// Store value under key (null removes it). Written to disk before it returns.
 #[tauri::command]
 pub fn store_set(key: String, value: Value) -> Result<(), String> {
+    if value.is_null() {
+        return remove(&[&key]);
+    }
     with_state(|s| {
-        if (value.is_null() && !s.contains_key(&key)) || s.get(&key) == Some(&value) {
+        if s.get(&key) == Some(&value) {
             return Ok(());
         }
         // a changed copy is written first, then kept: a failed save leaves memory as on disk
         let mut changed = s.clone();
-        if value.is_null() {
-            changed.remove(&key);
-        } else {
-            changed.insert(key, value);
-        }
+        changed.insert(key, value);
         save(&changed)?;
         *s = changed;
         Ok(())

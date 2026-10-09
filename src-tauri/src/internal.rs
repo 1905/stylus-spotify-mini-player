@@ -253,6 +253,15 @@ pub async fn serve<T>(op: &str, steps: Vec<Attempt<'_, T>>) -> Result<T, String>
     Err(final_error(&errs))
 }
 
+/// `serve` with one step: `f` with the engine's live session (`with_api`, Primary).
+pub async fn serve_one<T, F, Fut>(op: &str, f: F) -> Result<T, String>
+where
+    F: FnOnce(Api) -> Fut + Send,
+    Fut: std::future::Future<Output = Result<T, String>> + Send,
+{
+    serve(op, vec![with_api(Source::Primary, f)]).await
+}
+
 /// A step that runs `f` with the engine's live session, or fails with ENGINE_NOT_READY.
 pub fn with_api<'a, T, F, Fut>(src: Source, f: F) -> Attempt<'a, T>
 where
@@ -706,7 +715,7 @@ pub fn merge_playlists(lib: Vec<Value>, root: &[crate::pb::RootEntry]) -> Vec<Va
 // ---- Spotify Connect (the player's cluster) --------------------------------------------------
 
 /// The engine's view of Connect: (cluster, this Mac's device id, its volume %), when ready.
-fn connect() -> Result<(std::sync::Arc<librespot_protocol::connect::Cluster>, String, u8), String> {
+pub(crate) fn connect() -> Result<(std::sync::Arc<librespot_protocol::connect::Cluster>, String, u8), String> {
     let engine = ENGINE.get().ok_or_else(|| not_ready("no engine"))?;
     engine.connect_view().ok_or_else(|| not_ready("no Connect cluster yet"))
 }
@@ -728,15 +737,40 @@ pub fn cluster_state() -> Result<Option<Value>, String> {
 /// volume_percent, supports_volume, context_uri}`. Track names come from the internal API (just the
 /// uri when that fails), the device name and volume from the device list.
 pub async fn playback_snapshot() -> Result<Value, String> {
-    let Some(c) = cluster_state()? else { return Ok(json!({ "active": false })) };
+    match cluster_state()? {
+        Some(c) => Ok(playback_snapshot_from(&c).await),
+        None => Ok(json!({ "active": false })),
+    }
+}
+
+/// `playback_snapshot` from a `cluster_state` the caller already has.
+pub async fn playback_snapshot_from(c: &Value) -> Value {
     let track = match c["track_uri"].as_str() {
-        Some(uri) => match Api::current() {
-            Ok(api) => api.tracks(&[uri.to_string()]).await.ok().and_then(|t| t.into_iter().next()).unwrap_or_else(|| json!({ "uri": uri })),
-            Err(_) => json!({ "uri": uri }),
-        },
+        Some(uri) => track_meta(uri).await,
         None => Value::Null,
     };
-    Ok(snapshot_shape(&c, track, &devices().unwrap_or_default()))
+    snapshot_shape(c, track, &devices().unwrap_or_default())
+}
+
+/// The metadata of track `uri` (just the uri when the fetch fails). The last answer is kept:
+/// the UI polls the same track many times, so it is fetched once per track change.
+async fn track_meta(uri: &str) -> Value {
+    static LAST: std::sync::Mutex<Option<(String, Value)>> = std::sync::Mutex::new(None);
+    let hit = crate::nowplaying::lock(&LAST).as_ref().filter(|(u, _)| u == uri).map(|(_, t)| t.clone());
+    if let Some(t) = hit {
+        return t;
+    }
+    let fetched = match Api::current() {
+        Ok(api) => api.tracks(&[uri.to_string()]).await.ok().and_then(|t| t.into_iter().next()),
+        Err(_) => None,
+    };
+    match fetched {
+        Some(t) => {
+            *crate::nowplaying::lock(&LAST) = Some((uri.to_string(), t.clone()));
+            t
+        }
+        None => json!({ "uri": uri }),
+    }
 }
 
 /// `playback_snapshot`'s shape from a `cluster_state`, its track and the device list.
@@ -877,10 +911,7 @@ pub fn command_bodies(cmd: &RemoteCmd) -> Vec<(reqwest::Method, String, Value)> 
         RemoteCmd::Repeat(RepeatMode::Off) => vec![flag("set_repeating_track", false), flag("set_repeating_context", false)],
         RemoteCmd::Repeat(RepeatMode::Context) => vec![flag("set_repeating_context", true), flag("set_repeating_track", false)],
         RemoteCmd::Repeat(RepeatMode::Track) => vec![flag("set_repeating_context", true), flag("set_repeating_track", true)],
-        RemoteCmd::Volume(p) => {
-            let level = (u32::from((*p).min(100)) * 65535 + 50) / 100;
-            vec![(reqwest::Method::PUT, "connect/volume".into(), json!({ "volume": level }))]
-        }
+        RemoteCmd::Volume(p) => vec![(reqwest::Method::PUT, "connect/volume".into(), json!({ "volume": crate::nowplaying::volume_from_percent(*p) }))],
         RemoteCmd::Play { context, uris, track, position_ms } => {
             let (ctx, skip_to) = match context {
                 Some(c) => (json!({ "uri": c, "url": format!("context://{c}") }), track.as_ref().map(|t| json!({ "track_uri": t }))),
@@ -1020,7 +1051,6 @@ mod tests {
         assert_eq!(final_error(&[e(Source::Primary, "GraphQL: PersistedQueryNotFound"), e(Source::Fallback, "HTTP 404: y")]), "GraphQL: PersistedQueryNotFound");
     }
 
-    /// The fixture of the old Web API `simplify_state` tests, as a cluster + device list.
     #[test]
     fn playback_snapshot_shape_full() {
         let c = json!({ "device_id": "d1", "track_uri": "spotify:track:1", "context_uri": "spotify:playlist:p1",

@@ -1,7 +1,7 @@
 //! The menu-bar icon and its mini player. The main webview stays the only brain: it pushes a
 //! compact now-playing payload here (`mini_push`), Rust relays it to the popover (`mini-state`),
 //! the right-click menu and the menu-bar title. Popover and menu buttons go back to the main
-//! webview as `mini-command`, which runs the main window's own handlers (routing, spinners, quota).
+//! webview as `mini-command`, which runs the main window's own handlers (routing, spinners).
 //!
 //! Payload (src/lib/mini.js miniPayload): `{mode, title, artist, cover, status, playing, pending,
 //! skipping, loading, positionMs, durationMs, sentAt, volume, heart}`.

@@ -8,7 +8,7 @@
 
 use crate::control::{self, Cmd};
 use crate::internal::{
-    self, serve, with_api,
+    self, serve, serve_one, with_api,
     Source::{Fallback, Primary},
 };
 use futures_util::FutureExt;
@@ -37,7 +37,7 @@ pub async fn cache_get(account: String, key: String) -> Option<Value> {
 /// knows it without a request.
 #[tauri::command]
 pub async fn me_id() -> Result<String, String> {
-    serve("me_id", vec![with_api(Primary, |api| async move { Ok(api.username()) })]).await
+    serve_one("me_id", |api| async move { Ok(api.username()) }).await
 }
 
 // ---- Spotify Connect: control a real device -------------------------------
@@ -164,8 +164,7 @@ pub async fn get_queue() -> Result<Value, String> {
 /// contexts, not every track).
 #[tauri::command]
 pub async fn get_recently_played() -> Result<Value, String> {
-    let internal = with_api(Primary, |api| async move { Ok(Value::Array(api.recently_played().await?)) });
-    serve("get_recently_played", vec![internal]).await
+    serve_one("get_recently_played", |api| async move { Ok(Value::Array(api.recently_played().await?)) }).await
 }
 
 /// Search tracks and albums. Returns { tracks: [...], albums: [...] } with
@@ -203,11 +202,11 @@ pub async fn search_page(query: String, kind: String, offset: u32) -> Result<Val
         return Ok(json!({ "items": [], "has_more": false }));
     }
     let (q, k) = (query.as_str(), kind.as_str());
-    let internal = with_api(Primary, move |api| async move {
+    serve_one("search_page", move |api| async move {
         let (items, got, total) = api.search_page(q, k, offset).await?;
         Ok(json!({ "items": items, "has_more": search_has_more(got, offset) && u64::from(offset) + (got as u64) < total }))
-    });
-    serve("search_page", vec![internal]).await
+    })
+    .await
 }
 
 /// A page of `got` raw items at `offset` has a next page: it was full and the
@@ -256,7 +255,7 @@ pub async fn get_album_info(album_id: Option<String>, track_id: Option<String>, 
         return Ok(hit);
     }
     let id = album_id.as_str();
-    let info = serve("get_album_info", vec![with_api(Primary, move |api| async move { api.album_info(id).await })]).await?;
+    let info = serve_one("get_album_info", move |api| async move { api.album_info(id).await }).await?;
     cache_store(&account, key, &info);
     Ok(info)
 }
@@ -267,7 +266,7 @@ pub(crate) async fn album_of_track(track_id: &str, account: &Option<String>) -> 
     if let Some(Value::String(hit)) = cached(account, &key).await {
         return Ok(hit);
     }
-    let id = serve("album_of_track", vec![with_api(Primary, move |api| async move { api.album_id_of_track(track_id).await })]).await?;
+    let id = serve_one("album_of_track", move |api| async move { api.album_id_of_track(track_id).await }).await?;
     cache_store(account, key, &json!(id));
     Ok(id)
 }
@@ -281,7 +280,7 @@ const MAX_FOLLOWED: usize = 200;
 /// How many songs are in Liked Songs: one request, for the Library row.
 #[tauri::command]
 pub async fn liked_count() -> Result<u64, String> {
-    serve("liked_count", vec![with_api(Primary, |api| async move { api.liked_count().await })]).await
+    serve_one("liked_count", |api| async move { api.liked_count().await }).await
 }
 
 /// Liked Songs, newest first, capped at 1000: `{tracks, total}`. `total` is
@@ -312,7 +311,7 @@ pub(crate) async fn saved_tracks(max: usize, account: Option<String>) -> Result<
 /// Saved albums, newest first, capped at 200. Cached as `albums`.
 #[tauri::command]
 pub async fn get_saved_albums(account: Option<String>) -> Result<Value, String> {
-    let out = serve("get_saved_albums", vec![with_api(Primary, |api| async move { Ok(Value::Array(api.saved_albums(MAX_SAVED_ALBUMS).await?)) })]).await?;
+    let out = serve_one("get_saved_albums", |api| async move { Ok(Value::Array(api.saved_albums(MAX_SAVED_ALBUMS).await?)) }).await?;
     cache_store(&account, "albums".into(), &out);
     Ok(out)
 }
@@ -321,7 +320,7 @@ pub async fn get_saved_albums(account: Option<String>) -> Result<Value, String> 
 #[tauri::command]
 pub async fn is_saved(track_id: String) -> Result<bool, String> {
     let id = track_id.as_str();
-    serve("is_saved", vec![with_api(Primary, move |api| async move { api.is_saved(id).await })]).await
+    serve_one("is_saved", move |api| async move { api.is_saved(id).await }).await
 }
 
 #[tauri::command]
@@ -338,7 +337,7 @@ pub async fn unsave_track(track_id: String) -> Result<(), String> {
 async fn set_saved(track_id: String, saved: bool) -> Result<(), String> {
     let id = track_id.as_str();
     let op = if saved { "save_track" } else { "unsave_track" };
-    serve(op, vec![with_api(Primary, move |api| async move { api.set_saved(id, saved).await })]).await
+    serve_one(op, move |api| async move { api.set_saved(id, saved).await }).await
 }
 
 /// Top tracks (`[Track]`) or artists (`[{id,name,image}]`), at most 50.
@@ -355,7 +354,7 @@ pub async fn get_top(kind: String, range: String, limit: Option<u8>, account: Op
     // 20 for the Library group; the artist page asks for 50
     let limit = limit.unwrap_or(20).clamp(1, 50);
     let (k, r) = (kind.as_str(), range.as_str());
-    let items = serve("get_top", vec![with_api(Primary, move |api| async move { Ok(Value::Array(api.top(k, r, limit).await?)) })]).await?;
+    let items = serve_one("get_top", move |api| async move { Ok(Value::Array(api.top(k, r, limit).await?)) }).await?;
     cache_store(&account, format!("top:{kind}:{range}:{limit}"), &items);
     Ok(items)
 }

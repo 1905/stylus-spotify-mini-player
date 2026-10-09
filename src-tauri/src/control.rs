@@ -101,7 +101,7 @@ pub fn view() -> View {
     let remote = if here {
         None
     } else {
-        crate::internal::cluster_state().ok().flatten().and_then(|s| s["device_id"].as_str().map(str::to_string))
+        crate::internal::connect().ok().map(|(c, _, _)| c.active_device_id.clone()).filter(|id| !id.is_empty())
     };
     View { active: active_device(own.as_deref(), ready, here, remote), own, ready }
 }
@@ -315,11 +315,7 @@ pub fn listed_volume(list: &[Value], id: &str) -> Result<u8, String> {
 pub async fn set_volume(percent: u8, device: Option<String>) -> Result<Value, String> {
     let v = view_for(device.as_deref());
     let t = target(&v, device).ok_or(NOTHING_PLAYING)?;
-    let path = match (v.is_own(&t), v.ready) {
-        (true, true) => Path::Local,
-        (true, false) => return Err(NOT_READY.into()),
-        (false, _) => Path::Remote(t.clone()),
-    };
+    let path = route_play(&v, Some(&t))?;
     let mut out = outcome(&v, &path);
     match &path {
         Path::Local => {
