@@ -19,8 +19,12 @@
 // playlist (playing the 5th song of the first captured playlist, as its context: the playlist panel lists it),
 // here (the in-app player is ready and plays the playlist: device "Here", quality changes restart it;
 //   session_get returns that play; Rust's player-state events drive the UI, so no playback_state poll).
+// finished (like here, on the playlist's last song 4 s before its end, repeat off: at the end "Rust" keeps the
+//   playlist, loads it back paused on its first song and emits session-restored {trackUri: null, finished: true}),
+// fresh (the in-app player is ready, nothing plays, no saved session: session_get returns null; 2.5s after launch
+//   "Rust" loads Liked Songs (spotify:user:<me>:collection) paused and emits session-restored).
 // player-state: emitted after every command that changes what the in-app player plays, and when its
-//   track ends; local_state returns the same payload (playback_state's shape + engine_active + queue).
+//   track ends (the end of the last one: Rust's finished-source reload, paused on the first track); local_state returns the same payload (playback_state's shape + engine_active + queue).
 // The store (store_all / store_set, Rust's state.json) is in memory: ?store=solo seeds settings with the cover row off.
 // Mixes and added links (Rust library.rs): mixes_list = added (store savedLinks) + 5 Made For You + seen playing (knownMixes);
 //   link_resolve / link_save know the two share-link test playlists (Discover Weekly, Moderat Radio), one other user's
@@ -50,11 +54,11 @@
     "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-down",
-    "slow", "resume", "search-all", "library-all", "playlist", "here", "refused",
+    "slow", "resume", "search-all", "library-all", "playlist", "here", "refused", "finished", "fresh",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
-  const hereLike = scenario === "here"; // the in-app player plays
+  const hereLike = scenario === "here" || scenario === "finished"; // the in-app player plays
   const PREMIUM_REQUIRED = "Spotify Premium is required to play on this Mac"; // Rust player.rs
   if (scenario !== requested) console.warn(`mock: unknown scenario "${requested}", using "playing"`);
 
@@ -102,7 +106,7 @@
     isPlaying: scenario !== "paused",
     progressBase: 44000,
     progressAt: Date.now(),
-    active: !["nothing", "nodevice", "resume"].includes(scenario),
+    active: !["nothing", "nodevice", "resume", "fresh"].includes(scenario),
     devices,
     deviceId: firstActive ? firstActive.id : null,
     shuffle: false,
@@ -124,7 +128,7 @@
     state.now.artists = "Someone With A Fairly Long Name, Another Featured Artist, And A Third";
     state.now.album = "A Deluxe Remastered Anniversary Edition With Bonus Tracks And Demos";
   }
-  if (["nothing", "nodevice", "resume"].includes(scenario)) state.queue = [];
+  if (["nothing", "nodevice", "resume", "fresh"].includes(scenario)) state.queue = [];
   if (scenario === "playlist" || hereLike) {
     // the 5th song of the first captured playlist, played as that playlist (context)
     const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
@@ -134,6 +138,12 @@
       state.queue = clone(rows.slice(at + 1));
       state.contextUri = "spotify:playlist:" + plId;
       state.history = rows.slice(0, at).reverse().map((t, i) => ({ track: clone(t), played_at: new Date(Date.now() - (i + 1) * 200e3).toISOString(), context_uri: state.contextUri })).concat(state.history);
+      // finished: the playlist's last song, 4 s before its end
+      if (scenario === "finished") {
+        state.now = clone(rows[rows.length - 1]);
+        state.queue = [];
+        state.progressBase = Math.max(0, (state.now.duration_ms || 10000) - 4000);
+      }
     }
   }
   // Rust's saved session (session.json): resume = the 3rd song of the first captured playlist, 1:01 in,
@@ -290,6 +300,7 @@
     const [, kind, id] = String(contextUri).split(":");
     const rows = kind === "playlist" ? (fx.playlistTracks || {})[id] : kind === "album" ? (fx.albumTracks || {})[id] : null;
     if (rows && rows.length) return rows.map(clone);
+    if (/:collection$/.test(String(contextUri)) && ((fx.liked || {}).tracks || []).length) return fx.liked.tracks.map(clone);
     const pool = ((fx.liked || {}).tracks || []).length ? fx.liked.tracks : allTracks();
     if (!pool.length) throw "mock: no tracks";
     return rotate(pool, strHash(contextUri) % pool.length).slice(0, 11).map(clone);
@@ -307,6 +318,8 @@
     setProgress(positionMs || 0);
   }
   let ended = 0; // scenario "ended": polls seen
+  // what the in-app player loaded last ({contextUri} or {uris}): Rust's session source
+  let loadedSrc = hereLike && state.contextUri ? { contextUri: state.contextUri } : null;
   const setVol = (d, percent) => (d.volume_percent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0))));
   const needDevice = () => {
     if (!state.devices.length || !state.active) throw "NO_ACTIVE_DEVICE: no active device (mock)";
@@ -511,6 +524,7 @@
       setProgress(progress());
       state.deviceId = RUN_ID;
       loadTracks(tracks, { trackUri, contextUri: contextUri || null, positionMs, play });
+      loadedSrc = contextUri ? { contextUri } : { uris: uris.slice() };
       return null;
     },
     me_id: () => ME,
@@ -822,13 +836,32 @@
   setInterval(() => {
     if (state.engine.state !== "ready" || !runActive() || !state.now || !state.now.duration_ms) return;
     if (state.isPlaying && progress() >= state.now.duration_ms) {
-      advance();
+      if (state.queue.length || state.repeat !== "off" || !loadedSrc) advance();
+      else finishSource();
       emitLocal();
     }
   }, 500);
+  // Rust session.rs: the source played to its end: kept, loaded back paused on its first track
+  function finishSource() {
+    const src = loadedSrc;
+    handlers.local_load({ spec: { ...src, play: false } });
+    const restored = { contextUri: src.contextUri || null, uris: src.uris || null, trackUri: src.uris ? src.uris[0] : null, positionMs: 0, shuffle: state.shuffle, repeat: state.repeat, volume: 32768, finished: true };
+    savedSession = restored;
+    emit("session-restored", restored);
+  }
   if (hereLike) localSeen = true; // the player is up and playing: it has spoken
   window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, mini, calls, cache, store, logs, emit, setEngine, emitLocal };
 
+  // fresh: no saved session; Rust loads Liked Songs (the context) paused once the player is up
+  if (scenario === "fresh") {
+    cache.set(`${ME}/liked`, handlers.get_saved_tracks());
+    setTimeout(() => {
+      const contextUri = `spotify:user:${ME}:collection`;
+      handlers.local_load({ spec: { contextUri, play: false } });
+      savedSession = { contextUri, uris: null, trackUri: state.now ? state.now.uri : null, positionMs: 0, shuffle: false, repeat: "off", volume: 32768, finished: false };
+      emit("session-restored", { ...savedSession, trackUri: null });
+    }, 2500);
+  }
   // resume: Rust loads the saved session back (paused) once the player is up, then tells the UI
   if (scenario === "resume" && savedSession) {
     setTimeout(() => {

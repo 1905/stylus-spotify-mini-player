@@ -11,7 +11,7 @@ import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, notSavedReaso
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
 import { isEngineDevice, isLocal, refusedText, volumeTiming } from "./lib/route.js";
-import { originUri, offsettable } from "./lib/source.js";
+import { originUri, offsettable, restoredSource } from "./lib/source.js";
 import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
@@ -514,7 +514,7 @@ async function refresh(epoch) {
   if (skipWait && (changed || (skipWait.landedAt && startedAt >= skipWait.landedAt + SKIP_SETTLE_MS))) endSkip();
   // a play the user started is confirmed by a poll that began after it landed
   if (pending.onPoll({ isPlaying: Boolean(active && s.is_playing), trackUri: track && track.uri, at: startedAt })) clearPending();
-  if (restoring && (track || mode === "other")) endRestoring(track && track.uri === restoring.trackUri ? "" : `replaced by ${track ? track.uri : "an ad or a podcast"}`);
+  if (restoring && (track || mode === "other")) endRestoring(track && (!restoring.trackUri || track.uri === restoring.trackUri) ? "" : `replaced by ${track ? track.uri : "an ad or a podcast"}`);
 
   if (changed || modeChanged || !state.loaded) {
     // show the new track now: what's on screen is what a seek or a skip acts on.
@@ -1475,15 +1475,18 @@ function setLastSrc(src, members = null) {
 /**
  * Rust's saved session ({contextUri, uris, trackUri, …}): the last source when this run has none yet,
  * and, before any poll showed a song, the song it restores, on screen at once (no "Nothing playing").
+ * A context that played to its end (or Liked Songs on a fresh session) comes without a track: its first
+ * known row shows until the player names the track.
  */
-function noteRestored(s) {
-  if (!s || typeof s.trackUri !== "string" || !s.trackUri) return;
-  if (!lastSrc) setLastSrc({ contextUri: s.contextUri || null, uris: s.uris || null, trackUri: s.trackUri });
+function noteRestored(p) {
+  const s = restoredSource(p);
+  if (!s) return;
+  if (!lastSrc) setLastSrc(s);
   if (state.now || playPending() || (restoring && restoring.trackUri === s.trackUri)) return;
-  const track = seenTracks.get(s.trackUri) || null;
+  const track = (s.trackUri && seenTracks.get(s.trackUri)) || null;
   restoring = { trackUri: s.trackUri, track, until: performance.now() + RESTORE_WAIT_MS };
-  applog("info", `session: restoring ${s.trackUri} from ${s.contextUri || `${(s.uris || []).length} uris`}${track ? "" : " (track not known yet)"}`);
-  if (!track) restoredTrack(s).then((t) => {
+  applog("info", `session: restoring ${s.trackUri || "the first track"} from ${s.contextUri || `${(s.uris || []).length} uris`}${track ? "" : " (track not known yet)"}`);
+  if (!track) restoredTrack(s, Boolean(p.shuffle)).then((t) => {
     if (!t || !restoring || restoring.trackUri !== s.trackUri) return;
     restoring.track = t;
     if (!$("stage").hidden) renderPending();
@@ -1504,9 +1507,10 @@ function endRestoring(why = "") {
   if (!$("stage").hidden) renderPending();
 }
 
-/** The restored song's track from the disk copy of its list (no network), or null. */
-async function restoredTrack(s) {
-  const find = (v) => listTracks(v).find((t) => t && t.uri === s.trackUri) || null;
+/** The restored song's track from the disk copy of its list (no network), or null. No trackUri: the list's first (not when shuffled: Spotify picks). */
+async function restoredTrack(s, shuffle = false) {
+  if (!s.trackUri && shuffle) return null;
+  const find = (v) => listTracks(v).find((t) => t && (!s.trackUri || t.uri === s.trackUri)) || null;
   const [, kind, id] = String(s.contextUri || "").split(":");
   let key = null;
   if (kind === "album" && id) key = `album:${id}`;
@@ -1516,6 +1520,7 @@ async function restoredTrack(s) {
     if (p && p.snapshot_id) key = `playlist:${id}:${p.snapshot_id}`;
   }
   if (key) return find(await diskGet(key));
+  if (!s.trackUri) return null;
   // a uris play: Liked Songs and the top lists hold most of them
   for (const k of ["liked", topTracksKey("short_term")]) {
     const t = find(await diskGet(k));

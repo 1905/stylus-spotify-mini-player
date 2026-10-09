@@ -311,6 +311,9 @@ struct Inner {
     session: Arc<Tracker>,
     /// The saved session is loaded back on the first ready of the process only.
     restore_tried: AtomicBool,
+    /// The connection dropped while this Mac was the active device: the next ready loads
+    /// the session back (paused), so the UI doesn't fall to "no device".
+    reload_after_drop: AtomicBool,
     /// What plays here, for the UI (`player-state` events, nowplaying.rs).
     now: Arc<NowPlaying>,
     /// The volume set while This Mac was inactive, for its next load (`PendingVolume`).
@@ -334,6 +337,7 @@ impl Engine {
             device_id: OnceLock::new(),
             session,
             restore_tried: AtomicBool::new(false),
+            reload_after_drop: AtomicBool::new(false),
             now,
             pending_volume: Mutex::new(PendingVolume::default()),
             save_error: Mutex::new(None),
@@ -507,6 +511,7 @@ impl Engine {
         ];
         // the next login is a new start: it restores that account's session
         self.0.restore_tried.store(false, Ordering::SeqCst);
+        self.0.reload_after_drop.store(false, Ordering::SeqCst);
         let result = first_error(results);
         match &result {
             Ok(()) => log::info!(target: "stylus::player", "logged out"),
@@ -594,7 +599,15 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
         let (t, account) = (tracker.clone(), account.to_string());
         let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
     }
-    tauri::async_runtime::spawn(session::listen(tracker.clone(), player.get_player_event_channel()));
+    // a source that played to its end is loaded back, paused, on its first track
+    let on_finished = {
+        let engine = engine.clone();
+        move || {
+            let device_id = engine.device_id();
+            tauri::async_runtime::spawn(restore(engine.clone(), device_id, Restore::Finished));
+        }
+    };
+    tauri::async_runtime::spawn(session::listen(tracker.clone(), player.get_player_event_channel(), on_finished));
     let now_playing = engine.0.now.clone();
     now_playing.set_volume(tracker.volume());
     tauri::async_runtime::spawn(nowplaying::listen(now_playing.clone(), player.get_player_event_channel()));
@@ -654,7 +667,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 match engine.apply(generation, Event::Connected) {
                     State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
-                        tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string()));
+                        engine.0.reload_after_drop.store(false, Ordering::SeqCst);
+                        tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
+                    }
+                    State::Ready if engine.0.reload_after_drop.swap(false, Ordering::SeqCst) => {
+                        tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Reconnect));
                     }
                     _ => {}
                 }
@@ -687,11 +704,16 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     }
                 }
                 engine.0.spirc.lock().unwrap().take();
+                let was_here = now_playing.engine_active();
                 // the player outlives the Spirc: stop what it buffered, or the old track keeps
                 // playing under a new Spirc that has no request id for it and can't pause it
                 player.stop();
                 if up_since.elapsed() >= STABLE_AFTER {
                     attempt = 0;
+                }
+                // a drop, not a stop (restart, logout: the generation moved on)
+                if was_here && engine.is_current(generation) {
+                    engine.0.reload_after_drop.store(true, Ordering::SeqCst);
                 }
                 engine.apply(generation, Event::Dropped);
             }
@@ -742,16 +764,29 @@ fn follow_cluster(tracker: &Tracker, update: &ClusterUpdate, device_id: &str) {
     tracker.on_cluster(&state.context_uri, &state.track.uri, o.shuffling_context, Repeat::from_flags(o.repeating_context, o.repeating_track));
 }
 
-/// Loads the saved session back, paused, on the first ready of the launch. Skipped when
-/// there is none, when this player already has a track, or when another device is playing.
-async fn restore(engine: Engine, device_id: String) {
+/// Why `restore` runs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Restore {
+    /// The first ready of the launch (or of a new login).
+    Launch,
+    /// The source played to its end (session.rs `finish`): load it back on its first track.
+    Finished,
+    /// The connection dropped while this Mac was the active device.
+    Reconnect,
+}
+
+/// Loads the session back, paused (`Restore` says why). Skipped when there is none, when
+/// another device is playing, and at launch when this player already has a track. At launch
+/// with no saved session it loads Liked Songs (`load_default`). It never starts sound.
+async fn restore(engine: Engine, device_id: String, why: Restore) {
     const LOG: &str = "stylus::session";
     let tracker = engine.0.session.clone();
-    let Some(saved) = tracker.current() else {
-        log::info!(target: LOG, "restore skipped: no saved session for this account");
+    let saved = tracker.current();
+    if saved.is_none() && why != Restore::Launch {
+        log::info!(target: LOG, "reload ({why:?}) skipped: nothing loaded");
         return;
-    };
-    if tracker.has_track() {
+    }
+    if why == Restore::Launch && tracker.has_track() {
         log::info!(target: LOG, "restore skipped: the player already has a track");
         return;
     }
@@ -769,40 +804,112 @@ async fn restore(engine: Engine, device_id: String) {
     if let Some(c) = cluster {
         let state = &c.player_state;
         if !c.active_device_id.is_empty() && c.active_device_id != device_id && state.is_playing && !state.is_paused {
-            log::info!(target: LOG, "restore skipped: another device is playing (Connect state)");
+            log::info!(target: LOG, "restore ({why:?}) skipped: another device is playing (Connect state)");
             return;
         }
     } else {
-        log::info!(target: LOG, "restore skipped: no Connect state, can't tell whether another device is playing");
+        log::info!(target: LOG, "restore ({why:?}) skipped: no Connect state, can't tell whether another device is playing");
         return;
     }
-    if tracker.has_track() {
+    if why == Restore::Launch && tracker.has_track() {
         log::info!(target: LOG, "restore skipped: the player got a track meanwhile");
         return;
     }
-    let source = match saved.source.clone() {
-        Some(Source::Context { context_uri }) => LoadSource::Context(context_uri),
-        Some(Source::Uris { uris }) => LoadSource::Tracks(uris),
-        None => return,
+    let Some(saved) = saved else {
+        load_default(&engine).await;
+        return;
     };
-    let modes = Modes { shuffle: saved.shuffle, repeat: saved.repeat == Repeat::Context, repeat_track: saved.repeat == Repeat::Track };
-    let request = load_request(source, saved.track_uri.clone(), saved.position_ms, false, modes);
-    let volume = saved.volume;
-    // Spirc ignores everything while inactive: activate first, then volume and load, in order
-    let sent = engine.with_spirc(|s| {
+    let Some(source) = saved.source.clone() else { return };
+    match send_load(&engine, source, saved.track_uri.clone(), saved.position_ms, saved.shuffle, saved.repeat, saved.volume) {
+        Ok(()) => {
+            log::info!(target: LOG, "restored ({why:?}) {}{}", session::describe(&saved), if saved.finished { ", finished: from the top" } else { "" });
+            emit_restored(&engine, &saved);
+        }
+        Err(e) => log::warn!(target: LOG, "restore ({why:?}) failed: {e}"),
+    }
+}
+
+/// Sends a paused load to Spirc: activate first (Spirc ignores everything while inactive),
+/// then the volume, then the load. Ok only means queued.
+fn send_load(engine: &Engine, source: Source, track_uri: Option<String>, position_ms: u32, shuffle: bool, repeat: Repeat, volume: u16) -> Result<(), String> {
+    let source = match source {
+        Source::Context { context_uri } => LoadSource::Context(context_uri),
+        Source::Uris { uris } => LoadSource::Tracks(uris),
+    };
+    let modes = Modes { shuffle, repeat: repeat == Repeat::Context, repeat_track: repeat == Repeat::Track };
+    let request = load_request(source, track_uri, position_ms, false, modes);
+    engine.with_spirc(|s| {
         s.activate()?;
         s.set_volume(volume)?;
         s.load(request)
-    });
-    match sent {
-        Ok(()) => {
-            log::info!(target: LOG, "restored {}", session::describe(&saved));
-            if let Some(app) = engine.0.app.get() {
-                let _ = app.emit("session-restored", saved.payload());
-            }
-        }
-        Err(e) => log::warn!(target: LOG, "restore failed: {e}"),
+    })
+}
+
+fn emit_restored(engine: &Engine, saved: &session::Saved) {
+    if let Some(app) = engine.0.app.get() {
+        let _ = app.emit("session-restored", saved.payload());
     }
+}
+
+/// How long a Liked Songs context load gets to show its first track before the list is tried.
+const DEFAULT_CONTEXT_WAIT: Duration = Duration::from_secs(10);
+
+/// No saved session (first launch, after logout): load Liked Songs, paused, on its first
+/// track (`session::default_sources`). The context first; the list of the first 200 liked
+/// uris when the context shows no track in time. Empty Liked Songs: nothing.
+async fn load_default(engine: &Engine) {
+    const LOG: &str = "stylus::session";
+    let tracker = engine.0.session.clone();
+    let username = tracker.account().unwrap_or_default();
+    let liked = match crate::spotify::saved_tracks(session::DEFAULT_LIST_MAX, None).await {
+        Ok(v) => Some(v["tracks"].as_array().into_iter().flatten().filter_map(|t| t["uri"].as_str().map(str::to_string)).collect::<Vec<_>>()),
+        Err(e) => {
+            log::warn!(target: LOG, "default session: Liked Songs not read ({e}): the context only");
+            None
+        }
+    };
+    let sources = session::default_sources(&username, liked);
+    if sources.is_empty() {
+        log::info!(target: LOG, "default session skipped: Liked Songs is empty");
+        return;
+    }
+    for source in sources {
+        if tracker.has_track() {
+            log::info!(target: LOG, "default session skipped: the player got a track meanwhile");
+            return;
+        }
+        let what = match &source {
+            Source::Context { .. } => "context",
+            Source::Uris { .. } => "list",
+        };
+        let is_context = what == "context";
+        tracker.loaded(source.clone(), None, 0, false, Repeat::Off);
+        if let Err(e) = send_load(engine, source, None, 0, false, Repeat::Off, tracker.volume()) {
+            log::warn!(target: LOG, "default session: Liked Songs {what} not sent: {e}");
+            return;
+        }
+        if is_context && !track_within(&tracker, DEFAULT_CONTEXT_WAIT).await {
+            log::warn!(target: LOG, "default session: the Liked Songs context showed no track in {} s", DEFAULT_CONTEXT_WAIT.as_secs());
+            continue;
+        }
+        log::info!(target: LOG, "default session: Liked Songs loaded as a {what}, paused");
+        if let Some(saved) = tracker.current() {
+            emit_restored(engine, &saved);
+        }
+        return;
+    }
+}
+
+/// Waits up to `wait` for the player's first track event.
+async fn track_within(tracker: &Tracker, wait: Duration) -> bool {
+    let until = Instant::now() + wait;
+    while Instant::now() < until {
+        if tracker.has_track() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    tracker.has_track()
 }
 
 /// The reusable credentials a connected session got back from Spotify. After the
@@ -1434,6 +1541,7 @@ mod tests {
         engine.0.session.save_if_due();
         assert!(dir.join("player-credentials.json").exists() && dir.join("cache").exists() && dir.join("session.json").exists());
         engine.0.restore_tried.store(true, Ordering::SeqCst);
+        engine.0.reload_after_drop.store(true, Ordering::SeqCst);
 
         engine.logout().await.unwrap();
 
@@ -1447,6 +1555,7 @@ mod tests {
         assert_eq!(engine.state(), NeedsLogin);
         assert_eq!(engine.auth_status(), "login");
         assert!(!engine.0.restore_tried.load(Ordering::SeqCst), "the next login restores again");
+        assert!(!engine.0.reload_after_drop.load(Ordering::SeqCst), "no reload of the old session after a logout");
         // a second logout finds nothing to remove: still Ok
         engine.logout().await.unwrap();
     }
