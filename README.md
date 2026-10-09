@@ -148,6 +148,10 @@ Stylus has one login: the player login. On first launch, select **Log in with Sp
 
 </details>
 
+## Report a problem
+
+Choose **File → Show Anonymized Logs in Finder**. Stylus writes a log file that contains only warnings, errors and login steps, with song names, account names, device names and other private data removed, and selects it in Finder. Attach that file to a [GitHub issue](https://github.com/1905/stylus-spotify-mini-player/issues).
+
 ## Disclaimer
 
 Stylus is an independent project. It is not affiliated with, endorsed by or connected to Spotify. Spotify is a trademark of Spotify AB.
