@@ -127,11 +127,23 @@ pub fn init() {
     }
 }
 
-/// A line from the UI (play attempts, failed commands).
+/// Target of every auth-flow line (Rust and UI).
+pub(crate) const AUTH: &str = "stylus::auth";
+
+/// A line from the UI (play attempts, failed commands). `area: "auth"` sends it to the auth flow.
 #[tauri::command]
-pub fn app_log(level: String, msg: String) {
+pub fn app_log(level: String, msg: String, area: Option<String>) {
     let level = if level == "error" { log::Level::Error } else if level == "warn" { log::Level::Warn } else { log::Level::Info };
-    log::log!(target: "stylus::ui", level, "{msg}");
+    let target = ui_target(area.as_deref());
+    if target == AUTH {
+        log::log!(target: AUTH, level, "ui: {msg}");
+    } else {
+        log::log!(target: "stylus::ui", level, "{msg}");
+    }
+}
+
+fn ui_target(area: Option<&str>) -> &'static str {
+    if area == Some("auth") { AUTH } else { "stylus::ui" }
 }
 
 /// Local time is not worth a dependency: UTC date and time with millis.
@@ -212,6 +224,13 @@ mod tests {
         assert_eq!(r.admit("new", 1_000), Some(0));
         assert_eq!(r.seen.len(), 1);
         assert_eq!(r.admit("k0", 1_000), Some(0));
+    }
+
+    #[test]
+    fn ui_area_to_target() {
+        assert_eq!(ui_target(Some("auth")), AUTH);
+        assert_eq!(ui_target(None), "stylus::ui");
+        assert_eq!(ui_target(Some("x")), "stylus::ui");
     }
 
     #[test]

@@ -75,7 +75,7 @@ const state = {
 
 const isCode = (e, code) => String(e).startsWith(code);
 /** A line in the app log file (<app dir>/logs/stylus.log). Never throws. */
-const applog = (level, msg) => invoke("app_log", { level, msg }).catch(() => {});
+const applog = (level, msg, area) => invoke("app_log", area ? { level, msg, area } : { level, msg }).catch(() => {});
 const reason = (e) => String(e).replace(/^[A-Z_]+:\s*/, "").slice(0, 80) || "unknown error";
 
 /** Run a player command and log one line: what, the path (local or remote, the device), ok or the error. */
