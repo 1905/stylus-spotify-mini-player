@@ -339,18 +339,20 @@ pub async fn mcp_reset_key() -> Result<Value, String> {
 /// gets a new key on its first enable.
 pub async fn disable_for_logout() -> Result<(), String> {
     let _op = KEY_OP.lock().await;
-    tokio::task::spawn_blocking(|| {
+    // the live key goes first: a failed settings write must not leave the old key working
+    set_live_key("");
+    stop();
+    let saved = tokio::task::spawn_blocking(|| {
         crate::settings::update(|s| {
             s.mcp_key = None;
             s.mcp_enabled = false;
         })
     })
     .await
-    .map_err(|e| e.to_string())??;
-    set_live_key("");
-    stop();
+    .map_err(|e| e.to_string())
+    .and_then(|r| r.map(|_| ()));
     log::info!(target: LOG, "off for logout, key dropped");
-    Ok(())
+    saved
 }
 
 /// The text a client needs: `format` "json" (the mcpServers block most clients take) or

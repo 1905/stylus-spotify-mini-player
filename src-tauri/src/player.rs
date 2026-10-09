@@ -305,6 +305,8 @@ struct Inner {
     /// The connect loop. The async lock also serializes restarts.
     task: tokio::sync::Mutex<Option<JoinHandle<()>>>,
     login_busy: AtomicBool,
+    /// Bumped by logout: a browser login that started before it must not log back in.
+    login_gen: AtomicU64,
     /// The persisted Connect device id, read (or created) on the first run.
     device_id: OnceLock<String>,
     /// The playback session (session.rs).
@@ -334,6 +336,7 @@ impl Engine {
             spirc: Mutex::new(None),
             task: tokio::sync::Mutex::new(None),
             login_busy: AtomicBool::new(false),
+            login_gen: AtomicU64::new(0),
             device_id: OnceLock::new(),
             session,
             restore_tried: AtomicBool::new(false),
@@ -499,6 +502,7 @@ impl Engine {
     /// the home-feed and known-mixes store keys, the saved session, the MCP key. A failed
     /// step is logged and the next steps still run; the first error is the result.
     pub async fn logout(&self) -> Result<(), String> {
+        self.0.login_gen.fetch_add(1, Ordering::SeqCst);
         self.stop().await;
         let store = self.0.store.clone();
         let session = self.0.session.clone();
@@ -982,8 +986,12 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     if engine.0.login_busy.swap(true, Ordering::SeqCst) {
         return Err("LOGIN_IN_PROGRESS".into());
     }
+    let gen = engine.0.login_gen.load(Ordering::SeqCst);
     let result = async {
         let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT).await?;
+        if engine.0.login_gen.load(Ordering::SeqCst) != gen {
+            return Err("LOGIN_CANCELLED: logged out while the browser login was open".to_string());
+        }
         lock(&engine.0.save_error).take();
         engine.restart(Some(Credentials::with_access_token(token.access_token))).await;
         let settled = engine.settled().await;
