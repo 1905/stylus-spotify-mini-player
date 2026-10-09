@@ -287,6 +287,8 @@ pub struct NowPlaying {
     /// The latest Connect cluster (all devices, the active one's player state), for
     /// `list_devices` / `get_queue`. None until the first update of a session.
     cluster: Mutex<Option<Arc<Cluster>>>,
+    /// When the current session connected: how long it has gone without a cluster.
+    session_since: Mutex<Option<Instant>>,
     app: OnceLock<AppHandle>,
     tracker: Arc<Tracker>,
     /// An event was seen: before that, `local_state` is null.
@@ -307,6 +309,7 @@ impl NowPlaying {
             fetching: Mutex::new(HashSet::new()),
             session: Mutex::new(None),
             cluster: Mutex::new(None),
+            session_since: Mutex::new(None),
             app: OnceLock::new(),
             tracker,
             seen: Mutex::new(false),
@@ -321,6 +324,12 @@ impl NowPlaying {
     pub fn set_session(&self, session: Session) {
         *lock(&self.session) = Some(session);
         *lock(&self.cluster) = None;
+        *lock(&self.session_since) = Some(Instant::now());
+    }
+
+    /// The time since the current session connected. None before the first session.
+    pub fn since_session(&self) -> Option<std::time::Duration> {
+        lock(&self.session_since).map(|t| t.elapsed())
     }
 
     /// The latest Connect cluster of the current session.
@@ -452,7 +461,11 @@ impl NowPlaying {
     /// A Connect cluster update. While this Mac is the active device: its context and up-next.
     pub fn on_cluster(self: &Arc<Self>, update: &ClusterUpdate, device_id: &str) {
         let cluster = &update.cluster;
-        *lock(&self.cluster) = Some(Arc::new(cluster.clone().unwrap_or_default()));
+        let first = lock(&self.cluster).replace(Arc::new(cluster.clone().unwrap_or_default())).is_none();
+        if first {
+            let active = if cluster.active_device_id.is_empty() { "none" } else { cluster.active_device_id.as_str() };
+            log::info!(target: LOG, "first Connect cluster: {} devices, active device {active}", cluster.device.len());
+        }
         if cluster.active_device_id != device_id {
             return;
         }
