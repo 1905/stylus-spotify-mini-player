@@ -204,6 +204,16 @@ impl Login5Manager {
         token.ok_or(Login5Error::NoStoredCredentials.into())
     }
 
+    /// rust-spotify patch: drops the cached token if it is still `rejected` (the endpoint answered
+    /// HTTP 401), so the next `auth_token` asks login5 again. Upstream keeps it until it expires.
+    pub fn invalidate(&self, rejected: &str) {
+        self.lock(|inner| {
+            if inner.auth_token.as_ref().is_some_and(|t| t.access_token == rejected) {
+                inner.auth_token = None;
+            }
+        });
+    }
+
     fn handle_challenges(
         login_request: &mut LoginRequest,
         message: LoginResponse,

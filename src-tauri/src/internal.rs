@@ -2,13 +2,17 @@
 //! (login5 Bearer token + client-token). The app has no other data source.
 //! See spikes/internal-api/REPORT.md for what was probed.
 
+use std::future::Future;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use librespot_core::Session;
 use serde_json::{json, Value};
 
 pub const PATHFINDER: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
 const LOG: &str = "stylus::internal";
+/// One request (tokens included) may take this long, like `paths::http()`'s timeout.
+const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
 static ENGINE: OnceLock<crate::player::Engine> = OnceLock::new();
 
@@ -45,8 +49,19 @@ impl Api {
     }
 
     /// One request with the session's tokens. Ok = the body of a 2xx answer; Err names the
-    /// HTTP status and the start of the body. Tokens are never logged.
+    /// HTTP status and the start of the body. Tokens are never logged. Each try has
+    /// `SEND_TIMEOUT` (`transport: timeout`); an HTTP 401 drops the login5 token and tries once more.
     pub async fn send(&self, method: reqwest::Method, url: &str, ctype: Option<&str>, accept: Option<&str>, body: Option<Vec<u8>>) -> Result<Vec<u8>, String> {
+        send_retrying(
+            || self.attempt(method.clone(), url, ctype, accept, body.clone()),
+            |token| self.session.login5().invalidate(token),
+            SEND_TIMEOUT,
+        )
+        .await
+    }
+
+    /// One try: the token it used, the HTTP status and the body.
+    async fn attempt(&self, method: reqwest::Method, url: &str, ctype: Option<&str>, accept: Option<&str>, body: Option<Vec<u8>>) -> Result<(String, u16, Vec<u8>), String> {
         let token = self.session.login5().auth_token().await.map_err(|e| format!("login5 token: {e}"))?;
         let mut rb = self
             .http
@@ -69,12 +84,9 @@ impl Api {
             None => rb.header("content-length", "0"),
         };
         let resp = rb.send().await.map_err(|e| format!("transport: {e}"))?;
-        let status = resp.status();
+        let status = resp.status().as_u16();
         let bytes = resp.bytes().await.map_err(|e| format!("transport: {e}"))?.to_vec();
-        if !status.is_success() {
-            return Err(http_error(status.as_u16(), &bytes));
-        }
-        Ok(bytes)
+        Ok((token.access_token, status, bytes))
     }
 
     /// GET/POST on the session's spclient host (`path` starts with `/`).
@@ -93,6 +105,30 @@ impl Api {
         let v: Value = serde_json::from_slice(&bytes).map_err(|e| format!("pathfinder {op}: bad JSON: {e}"))?;
         graphql_data(v).map_err(|e| format!("pathfinder {op}: {e}"))
     }
+}
+
+/// `fut`, or `transport: timeout` when it takes longer than `limit`.
+async fn with_deadline<T>(limit: Duration, fut: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    tokio::time::timeout(limit, fut).await.unwrap_or_else(|_| Err("transport: timeout".into()))
+}
+
+/// `Api::send`'s rules around one try (`attempt`: token, status, body): each try within `limit`;
+/// on HTTP 401 `invalidate` the token and try once more. Ok = a 2xx body; else `http_error`.
+async fn send_retrying<F, Fut>(attempt: F, invalidate: impl FnOnce(&str), limit: Duration) -> Result<Vec<u8>, String>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<(String, u16, Vec<u8>), String>>,
+{
+    let (token, mut status, mut bytes) = with_deadline(limit, attempt()).await?;
+    if status == 401 {
+        log::info!(target: LOG, "HTTP 401: a new login5 token, one more try");
+        invalidate(&token);
+        (_, status, bytes) = with_deadline(limit, attempt()).await?;
+    }
+    if !(200..300).contains(&status) {
+        return Err(http_error(status, &bytes));
+    }
+    Ok(bytes)
 }
 
 pub fn pathfinder_body(op: &str, hash: &str, variables: Value) -> Value {
@@ -929,6 +965,50 @@ pub async fn remote_transfer(target: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `send_retrying` over canned answers (token, status, body), one per try.
+    async fn tries(answers: Vec<Result<(String, u16, Vec<u8>), String>>) -> (Result<Vec<u8>, String>, usize, Vec<String>) {
+        let answers = std::sync::Mutex::new(answers.into_iter());
+        let count = std::sync::atomic::AtomicUsize::new(0);
+        let mut dropped = Vec::new();
+        let r = send_retrying(
+            || {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let next = answers.lock().unwrap().next().expect("no more answers");
+                async move { next }
+            },
+            |t| dropped.push(t.to_string()),
+            SEND_TIMEOUT,
+        )
+        .await;
+        (r, count.into_inner(), dropped)
+    }
+
+    fn ok(token: &str, status: u16, body: &str) -> Result<(String, u16, Vec<u8>), String> {
+        Ok((token.into(), status, body.as_bytes().to_vec()))
+    }
+
+    #[tokio::test]
+    async fn a_rejected_token_is_dropped_and_tried_once_more() {
+        assert_eq!(tries(vec![ok("t1", 200, "a")]).await, (Ok(b"a".to_vec()), 1, vec![]));
+        assert_eq!(tries(vec![ok("t1", 401, "no"), ok("t2", 200, "b")]).await, (Ok(b"b".to_vec()), 2, vec!["t1".to_string()]));
+        // a second 401 is the answer: no loop
+        assert_eq!(tries(vec![ok("t1", 401, "no"), ok("t2", 401, "still no")]).await, (Err("HTTP 401: still no".into()), 2, vec!["t1".to_string()]));
+        // other errors: no retry
+        assert_eq!(tries(vec![ok("t1", 403, "forbidden")]).await, (Err("HTTP 403: forbidden".into()), 1, vec![]));
+        assert_eq!(tries(vec![Err("login5 token: x".into())]).await, (Err("login5 token: x".into()), 1, vec![]));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_request_times_out() {
+        let started = std::time::Instant::now();
+        let r = with_deadline(Duration::from_millis(100), std::future::pending::<Result<(), String>>()).await;
+        assert_eq!(r, Err("transport: timeout".into()));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        // a stalled try inside send_retrying times out the same way
+        let r = send_retrying(|| std::future::pending::<Result<(String, u16, Vec<u8>), String>>(), |_| {}, Duration::from_millis(100)).await;
+        assert_eq!(r, Err("transport: timeout".into()));
+    }
 
     #[test]
     fn final_error_rules() {
