@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter, State as Managed};
 use tokio::sync::watch;
 
+use crate::applog::AUTH;
 use crate::nowplaying::{self, lock, volume_from_percent, Now, NowPlaying};
 use crate::session::{self, Repeat, Source, Tracker};
 
@@ -202,6 +203,17 @@ fn classify(kind: ErrorKind, message: &str) -> Event {
     }
 }
 
+/// The event's variant name for a log line (a `Fatal` reason is not part of it).
+fn event_name(event: &Event) -> &'static str {
+    match event {
+        Event::Start { .. } => "Start",
+        Event::Connected => "Connected",
+        Event::Dropped => "Dropped",
+        Event::AuthRejected => "AuthRejected",
+        Event::Fatal(_) => "Fatal",
+    }
+}
+
 /// Wait before reconnect attempt `attempt` (0-based): 1s, 2s, 4s… capped at 60s.
 fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(1u64.checked_shl(attempt).unwrap_or(u64::MAX).min(60))
@@ -226,7 +238,7 @@ fn load_or_create_device_id(path: &std::path::Path) -> String {
     }
     let id = new_device_id();
     if let Err(e) = crate::paths::write_private(path, &id) {
-        eprintln!("engine: could not store the player device id: {e}");
+        log::warn!(target: "stylus::player", "engine: could not store the player device id: {e}");
     }
     id
 }
@@ -259,7 +271,16 @@ impl FileStore {
 
 impl CredStore for FileStore {
     fn load(&self) -> Option<Credentials> {
-        serde_json::from_str(&std::fs::read_to_string(Self::path()).ok()?).ok()
+        let text = match std::fs::read_to_string(Self::path()) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => {
+                log::warn!(target: AUTH, "credentials: unreadable: {e}");
+                return None;
+            }
+        };
+        // serde's error names a line and column, not the content
+        serde_json::from_str(&text).map_err(|e| log::warn!(target: AUTH, "credentials: unreadable: {e}")).ok()
     }
 
     fn save(&self, creds: &Credentials) -> Result<(), String> {
@@ -268,7 +289,9 @@ impl CredStore for FileStore {
     }
 
     fn clear(&self) -> Result<(), String> {
-        crate::paths::remove_if_exists(&Self::path()).map(drop).map_err(|e| format!("could not remove the credentials file: {e}"))
+        let existed = crate::paths::remove_if_exists(&Self::path()).map_err(|e| format!("could not remove the credentials file: {e}"))?;
+        log::info!(target: AUTH, "logout: credentials removed (file existed: {existed})");
+        Ok(())
     }
 }
 
@@ -435,16 +458,24 @@ impl Engine {
     /// Applies `event` from the loop of generation `generation`; a stale loop changes
     /// nothing. Emits `engine-status` when the state changes.
     fn apply(&self, generation: u64, event: Event) -> State {
+        let name = event_name(&event);
+        let mut prev = None;
         let changed = self.0.state.send_if_modified(|s| {
             if !self.is_current(generation) {
                 return false;
             }
             let next = next_state(s, event);
             let changed = next != *s;
+            if changed {
+                prev = Some(Status::new(s, None).state);
+            }
             *s = next;
             changed
         });
         let now = self.state();
+        if let Some(prev) = prev {
+            log::info!(target: AUTH, "engine: {prev} → {} ({name})", Status::new(&now, None).state);
+        }
         if changed {
             if let Some(app) = self.0.app.get() {
                 let _ = app.emit("engine-status", self.status(&now));
@@ -492,7 +523,12 @@ impl Engine {
         } else {
             None
         };
+        let source = if creds.is_some() { "new login" } else if live.is_some() { "live login" } else { "stored" };
         let creds = start_creds(creds, live, stored);
+        match creds {
+            Some(_) => log::info!(target: AUTH, "credentials: found ({source})"),
+            None => log::info!(target: AUTH, "credentials: none, login needed"),
+        }
         self.apply(generation, Event::Start { has_credentials: creds.is_some() });
         if let Some(creds) = creds {
             *task = Some(tauri::async_runtime::spawn(run(self.clone(), generation, creds)));
@@ -541,6 +577,7 @@ impl Engine {
     /// the home-feed and known-mixes store keys, the saved session, the MCP key. A failed
     /// step is logged and the next steps still run; the first error is the result.
     pub async fn logout(&self) -> Result<(), String> {
+        log::info!(target: AUTH, "logout: start");
         // bumped before the lock: a login that waits for it sees the logout
         self.0.login_gen.fetch_add(1, Ordering::SeqCst);
         let _op = self.0.auth_op.lock().await;
@@ -560,8 +597,8 @@ impl Engine {
         *lock(&self.0.restore_pending) = None;
         let result = first_error(results);
         match &result {
-            Ok(()) => log::info!(target: "stylus::player", "logged out"),
-            Err(e) => log::warn!(target: "stylus::player", "logged out, with an error: {e}"),
+            Ok(()) => log::info!(target: AUTH, "logged out"),
+            Err(e) => log::warn!(target: AUTH, "logged out, with an error: {e}"),
         }
         result
     }
@@ -586,13 +623,22 @@ impl Engine {
         let mut rx = self.0.state.subscribe();
         let settled = tokio::time::timeout(READY_TIMEOUT, rx.wait_for(|s| !matches!(s, State::Starting | State::Reconnecting)))
             .await
-            .map_err(|_| format!("the player didn't connect in {} s", READY_TIMEOUT.as_secs()))?
+            .map_err(|_| {
+                log::warn!(target: AUTH, "login: no ready engine after {} s", READY_TIMEOUT.as_secs());
+                format!("the player didn't connect in {} s", READY_TIMEOUT.as_secs())
+            })?
             .map_err(|e| e.to_string())?
             .clone();
         match settled {
             State::Ready => Ok(()),
-            State::NeedsLogin => Err("Spotify refused the player login".into()),
-            State::Failed(reason) => Err(reason),
+            State::NeedsLogin => {
+                log::warn!(target: AUTH, "login: refused by Spotify");
+                Err("Spotify refused the player login".into())
+            }
+            State::Failed(reason) => {
+                log::warn!(target: AUTH, "login: engine failed: {reason}");
+                Err(reason)
+            }
             State::Starting | State::Reconnecting => unreachable!(),
         }
     }
@@ -650,6 +696,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     let session_config = match device_id {
         Ok(device_id) => SessionConfig { device_id, ..SessionConfig::default() },
         Err(e) => {
+            log::warn!(target: AUTH, "setup failed: no device id: {e}");
             engine.apply(generation, Event::Fatal(format!("no device id: {e}")));
             return;
         }
@@ -657,6 +704,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     let mixer: Arc<dyn Mixer> = match SoftMixer::open(MixerConfig::default()) {
         Ok(m) => Arc::new(m),
         Err(e) => {
+            log::warn!(target: AUTH, "setup failed: no volume control: {e}");
             engine.apply(generation, Event::Fatal(format!("no volume control: {e}")));
             return;
         }
@@ -730,9 +778,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     let (t, account) = (tracker.clone(), session.username());
                     let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
                 }
+                let waited = Instant::now();
                 let account_type = account_type(|| session.get_user_attribute("type"), ACCOUNT_TYPE_WAIT).await;
                 if !type_logged {
-                    log::info!(target: "stylus::player", "account type: {}", account_type.as_deref().unwrap_or("unknown"));
+                    let ms = waited.elapsed().as_millis();
+                    log::info!(target: AUTH, "account type: {} (after {ms} ms)", account_type.as_deref().unwrap_or("unknown"));
                     type_logged = true;
                 }
                 match premium_from_attr(account_type.as_deref()) {
@@ -742,7 +792,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         spirc_task.await;
                         return;
                     }
-                    Premium::Unknown => log::warn!(target: "stylus::player", "no account type from Spotify: the Premium check is skipped"),
+                    Premium::Unknown => log::warn!(target: AUTH, "no account type from Spotify: the Premium check is skipped"),
                     Premium::Yes => {}
                 }
                 // after the Premium check: a Free account's login is never stored or kept
@@ -777,6 +827,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 health.tick().await;
                 tokio::pin!(spirc_task);
+                let mut why = "the Spirc task stopped";
                 // the Spirc task ends on shutdown or session loss; a dead player thread is fatal
                 loop {
                     tokio::select! {
@@ -816,6 +867,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         }
                         _ = health.tick() => {
                             if player.is_invalid() {
+                                log::warn!(target: AUTH, "audio player gone: Fatal");
                                 engine.apply(generation, Event::Fatal("the audio player stopped".into()));
                                 engine.stop_spirc();
                                 return;
@@ -823,6 +875,8 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                             // a dead session doesn't always end the Spirc task (a paused player sends
                             // nothing, the dealer's token refresh can fail while offline): reconnect anyway
                             if session.is_invalid() {
+                                log::warn!(target: AUTH, "session invalid: reconnecting");
+                                why = "session invalid";
                                 engine.stop_spirc();
                                 let _ = tokio::time::timeout(Duration::from_secs(3), &mut spirc_task).await;
                                 break;
@@ -830,11 +884,13 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         }
                     }
                 }
+                log::info!(target: AUTH, "Spirc ended: {why}");
                 engine.0.spirc.lock().unwrap().take();
                 // the player outlives the Spirc: stop what it buffered, or the old track keeps
                 // playing under a new Spirc that has no request id for it and can't pause it
                 player.stop();
-                if up_since.elapsed() >= STABLE_AFTER {
+                if up_since.elapsed() >= STABLE_AFTER && attempt > 0 {
+                    log::info!(target: AUTH, "reconnect backoff reset after {} s up", up_since.elapsed().as_secs());
                     attempt = 0;
                 }
                 // a drop, not a stop (restart, logout: the generation moved on)
@@ -843,19 +899,25 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 engine.apply(generation, Event::Dropped);
             }
-            Err(e) => match classify(e.kind, &e.to_string()) {
-                Event::Dropped => {
-                    engine.apply(generation, Event::Dropped);
+            Err(e) => {
+                // logged before `classify` drops the message (AuthRejected keeps none)
+                let event = classify(e.kind, &e.to_string());
+                match &event {
+                    Event::Dropped => log::info!(target: AUTH, "connect failed, Dropped: {e}"),
+                    other => log::warn!(target: AUTH, "connect failed, {}: {e}", event_name(other)),
                 }
-                event => {
+                if event == Event::Dropped {
+                    engine.apply(generation, Event::Dropped);
+                } else {
                     engine.apply(generation, event);
                     return;
                 }
-            },
+            }
         }
         if !engine.is_current(generation) {
             return;
         }
+        log::info!(target: AUTH, "reconnect {attempt} in {} s", backoff(attempt).as_secs());
         tokio::time::sleep(backoff(attempt)).await;
         attempt += 1;
         if !engine.is_current(generation) {
@@ -1212,13 +1274,19 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
 /// Saves `reusable` unless it is empty or the same as `creds`. The credentials to keep using,
 /// and the save error.
 async fn store_reusable(store: Arc<dyn CredStore>, reusable: Credentials, creds: Credentials) -> (Credentials, Option<String>) {
-    if reusable.auth_data.is_empty() || reusable == creds {
+    if reusable.auth_data.is_empty() {
+        log::warn!(target: AUTH, "credentials: not saved, empty auth data");
+        return (creds, None);
+    }
+    if reusable == creds {
+        log::info!(target: AUTH, "credentials: unchanged, not written");
         return (creds, None);
     }
     let to_save = reusable.clone();
     let saved = blocking(move || store.save(&to_save)).await;
-    if let Err(e) = &saved {
-        log::warn!(target: "stylus::player", "could not store the player login in the credentials file: {e}");
+    match &saved {
+        Ok(()) => log::info!(target: AUTH, "credentials: saved"),
+        Err(e) => log::warn!(target: AUTH, "could not store the player login in the credentials file: {e}"),
     }
     (reusable, saved.err())
 }
@@ -1243,7 +1311,7 @@ fn first_error(results: Vec<(&str, Result<(), String>)>) -> Result<(), String> {
     let mut first = None;
     for (step, r) in results {
         if let Err(e) = r {
-            log::warn!(target: "stylus::player", "logout: {step}: {e}");
+            log::warn!(target: AUTH, "logout: {step}: {e}");
             first.get_or_insert(format!("{step}: {e}"));
         }
     }
@@ -1263,8 +1331,10 @@ pub fn engine_status(engine: Managed<'_, Engine>) -> Status {
 #[tauri::command]
 pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     if engine.0.login_busy.swap(true, Ordering::SeqCst) {
+        log::info!(target: AUTH, "login: refused, LOGIN_IN_PROGRESS");
         return Err("LOGIN_IN_PROGRESS".into());
     }
+    log::info!(target: AUTH, "login: start");
     let gen = engine.0.login_gen.load(Ordering::SeqCst);
     let result = async {
         // the browser wait is outside the lock: an open browser login never blocks a logout
@@ -1283,6 +1353,11 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     }
     .await;
     engine.0.login_busy.store(false, Ordering::SeqCst);
+    match &result {
+        Ok(()) => log::info!(target: AUTH, "login: ok"),
+        Err(e) if e.starts_with("LOGIN_CANCELLED") => log::info!(target: AUTH, "login: cancelled by logout"),
+        Err(e) => log::warn!(target: AUTH, "login: failed: {e}"),
+    }
     result
 }
 
