@@ -51,7 +51,7 @@ pub fn store_all() -> Value {
     with_state(|s| Value::Object(s.clone()))
 }
 
-/// The value stored under key, for Rust's own keys (`apiBlockedUntil`).
+/// The value stored under key, for Rust's own reads.
 pub fn get(key: &str) -> Option<Value> {
     with_state(|s| s.get(key).cloned())
 }

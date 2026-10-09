@@ -64,7 +64,7 @@ fn dir_action(new_exists: bool, old_exists: &[bool]) -> DirAction {
 }
 
 /// The data folder under `base`. Moves `needle` (or, failing that, `rust-spotify`) to `stylus`
-/// once (one atomic rename: tokens, player login, device id, cache, settings and logs move
+/// once (one atomic rename: player login, device id, cache, settings and logs move
 /// together). A failed move keeps the old folder in use, so nothing is lost.
 fn resolve_app_dir(base: &std::path::Path) -> std::path::PathBuf {
     let new = base.join(APP_DIR_NAME);
@@ -100,8 +100,32 @@ pub(crate) fn write_private(path: &std::path::Path, data: &str) -> std::io::Resu
     std::fs::rename(&tmp, path)
 }
 
-/// One HTTP client for every Spotify call. Finite deadlines: a stalled request
-/// must fail, or it would hold the TOKENS lock and freeze every command behind it.
+/// Files of the old Web API login (a refresh token of a client id the app no longer has).
+const LEGACY_FILES: [&str; 3] = ["tokens.json", "tokens.json.invalid", "tokens.json.tmp"];
+/// `state.json` keys of the old Web API quota guard and account check.
+const LEGACY_KEYS: [&str; 2] = ["apiBlockedUntil", "account"];
+
+/// Removes the old Web API login files from the app folder and its keys from `state.json`.
+/// Runs once at startup; logs one line when it removed something.
+pub(crate) fn remove_legacy_files() {
+    let mut removed = remove_legacy_files_in(&app_dir());
+    for key in LEGACY_KEYS {
+        if crate::store::get(key).is_some() && crate::store::store_set(key.into(), serde_json::Value::Null).is_ok() {
+            removed.push(format!("state key {key}"));
+        }
+    }
+    if !removed.is_empty() {
+        log::info!(target: "stylus::store", "removed the old Web API login data: {}", removed.join(", "));
+    }
+}
+
+/// Removes `LEGACY_FILES` in `dir`: the names it removed.
+fn remove_legacy_files_in(dir: &std::path::Path) -> Vec<String> {
+    LEGACY_FILES.iter().filter(|f| std::fs::remove_file(dir.join(f)).is_ok()).map(|f| f.to_string()).collect()
+}
+
+/// One HTTP client for every Spotify call. Finite deadlines: a stalled request must fail,
+/// or it would freeze every command behind it.
 pub fn http() -> reqwest::Client {
     static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
     CLIENT
@@ -131,6 +155,23 @@ pub(crate) fn urlencode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn remove_legacy_files_removes_only_the_old_login() {
+        let dir = migrate_base("legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in ["tokens.json", "tokens.json.invalid", "player-credentials.json", "state.json"] {
+            std::fs::write(dir.join(f), f).unwrap();
+        }
+        let removed = super::remove_legacy_files_in(&dir);
+        assert_eq!(removed, ["tokens.json", "tokens.json.invalid"]);
+        assert!(!dir.join("tokens.json").exists());
+        assert!(!dir.join("tokens.json.invalid").exists());
+        assert!(dir.join("player-credentials.json").exists());
+        assert!(dir.join("state.json").exists());
+        // a second run finds nothing
+        assert!(super::remove_legacy_files_in(&dir).is_empty());
+    }
+
+    #[test]
     fn urlencode_basic() {
         assert_eq!(super::urlencode("a b&c"), "a%20b%26c");
     }
@@ -155,7 +196,7 @@ mod tests {
     fn fill(dir: &std::path::Path) {
         std::fs::create_dir_all(dir.join("cache")).unwrap();
         std::fs::create_dir_all(dir.join("logs")).unwrap();
-        for f in ["tokens.json", "player-credentials.json", "session.json", "settings.json", "state.json"] {
+        for f in ["player-credentials.json", "session.json", "settings.json", "state.json"] {
             std::fs::write(dir.join(f), f).unwrap();
         }
         std::fs::write(dir.join("player-device-id"), "dev-1").unwrap();
@@ -164,7 +205,7 @@ mod tests {
     }
 
     fn assert_filled(dir: &std::path::Path) {
-        for f in ["tokens.json", "player-credentials.json", "session.json", "settings.json", "state.json"] {
+        for f in ["player-credentials.json", "session.json", "settings.json", "state.json"] {
             assert_eq!(std::fs::read_to_string(dir.join(f)).unwrap(), f);
         }
         assert_eq!(std::fs::read_to_string(dir.join("player-device-id")).unwrap(), "dev-1");

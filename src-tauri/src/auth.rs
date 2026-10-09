@@ -1,118 +1,25 @@
-//! Spotify Authorization Code + PKCE flow, token storage, and the local
+//! Spotify Authorization Code + PKCE flow for the player login, and the local
 //! loopback callback server that catches the redirect.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use crate::paths::{app_dir, http, now, urlencode, write_private};
-
-pub const CLIENT_ID: &str = "9b2bc32ee90c4ef6aa0a25ccc1b076c7";
-/// The app login's redirect is `http://127.0.0.1:1420/callback`.
-const CALLBACK_PORT: u16 = 1420;
-const CALLBACK_PATH: &str = "/callback";
-/// Scopes requested at login: every standard Spotify scope, so a new feature
-/// never needs another login (user, 2026-10-02). Partner-only scopes are left
-/// out: Spotify rejects the whole login if an app asks for one.
-/// A stored grant missing any of them → "reconnect".
-const REQUIRED_SCOPES: &[&str] = &[
-    "user-read-private",
-    "user-read-email",
-    "playlist-read-private",
-    "playlist-read-collaborative",
-    "playlist-modify-private",
-    "playlist-modify-public",
-    "user-read-playback-state",
-    "user-modify-playback-state",
-    "user-read-currently-playing",
-    "user-read-recently-played",
-    "user-read-playback-position",
-    "user-library-read",
-    "user-library-modify",
-    "user-top-read",
-    "user-follow-read",
-    "user-follow-modify",
-    "ugc-image-upload",
-    "app-remote-control",
-    "streaming",
-];
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct Tokens {
-    pub access_token: String,
-    pub refresh_token: String,
-    /// Unix seconds when access_token expires.
-    pub expires_at: u64,
-    /// Space-separated scopes granted by Spotify. Empty in pre-scope files.
-    #[serde(default)]
-    pub scope: String,
-}
+use crate::paths::{http, urlencode};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct TokenResponse {
     pub(crate) access_token: String,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    expires_in: u64,
-    #[serde(default)]
-    scope: Option<String>,
 }
 
-/// True when `granted` (space-separated) contains every required scope.
-pub fn has_required_scopes(granted: &str) -> bool {
-    let have: Vec<&str> = granted.split_whitespace().collect();
-    REQUIRED_SCOPES.iter().all(|s| have.contains(s))
-}
-
-fn status_for(tokens: Option<&Tokens>) -> &'static str {
-    match tokens {
-        Some(t) if !t.refresh_token.is_empty() => {
-            if has_required_scopes(&t.scope) {
-                "ok"
-            } else {
-                "reconnect"
-            }
-        }
-        _ => "login",
-    }
-}
-
-/// "login" (no usable tokens), "reconnect" (scopes missing) or "ok".
+/// The login screen's question: `{"status": "ok" | "login" | "not_premium"}`, from the player
+/// engine's state (`Engine::auth_status`).
 #[tauri::command]
-pub fn auth_status() -> &'static str {
-    status_for(load_tokens().as_ref())
-}
-
-/// A refresh failure the user can only fix by logging in again.
-fn is_terminal_refresh_failure(status: u16, body: &str) -> bool {
-    status == 401 || (status == 400 && body.contains("invalid_grant"))
-}
-
-
-// ---- token persistence -----------------------------------------------------
-
-fn token_path() -> std::path::PathBuf {
-    app_dir().join("tokens.json")
-}
-
-pub fn load_tokens() -> Option<Tokens> {
-    let data = std::fs::read_to_string(token_path()).ok()?;
-    serde_json::from_str(&data).ok()
-}
-
-fn save_tokens(t: &Tokens) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(t).map_err(|e| e.to_string())?;
-    write_private(&token_path(), &json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
-}
-
-
-/// Moves tokens.json aside to tokens.json.invalid (overwriting) so the next
-/// auth_status() reports "login". The file is kept for inspection.
-fn invalidate_tokens() {
-    let path = token_path();
-    let _ = std::fs::rename(&path, path.with_extension("json.invalid"));
+pub fn auth_status() -> serde_json::Value {
+    let status = crate::internal::engine().map_or("login", |e| e.auth_status());
+    serde_json::json!({ "status": status })
 }
 
 // ---- PKCE helpers ----------------------------------------------------------
@@ -135,24 +42,6 @@ fn gen_state() -> String {
 
 // ---- the flow --------------------------------------------------------------
 
-/// Runs the full interactive login: opens the browser, waits for the callback,
-/// exchanges the code for tokens, and persists them.
-#[tauri::command]
-pub async fn login() -> Result<(), String> {
-    let tr = oauth_login(CLIENT_ID, CALLBACK_PORT, CALLBACK_PATH, REQUIRED_SCOPES, LOGIN_TIMEOUT).await?;
-    let tokens = Tokens {
-        expires_at: expires_at(&tr),
-        access_token: tr.access_token,
-        refresh_token: tr.refresh_token.unwrap_or_default(),
-        scope: tr.scope.unwrap_or_default(),
-    };
-    // under the lock: a refresh still in flight must not overwrite or invalidate these
-    let mut cached = TOKENS.lock().await;
-    save_tokens(&tokens)?;
-    *cached = Some(tokens);
-    Ok(())
-}
-
 /// The browser URL that starts a PKCE login.
 fn authorize_url(client_id: &str, scopes: &[&str], redirect_uri: &str, state: &str, verifier: &str) -> String {
     format!(
@@ -167,7 +56,7 @@ fn authorize_url(client_id: &str, scopes: &[&str], redirect_uri: &str, state: &s
 
 /// One interactive Authorization Code + PKCE login for `client_id`: opens the browser,
 /// waits up to `timeout` for the redirect to `http://127.0.0.1:{port}{redirect_path}`, and
-/// exchanges the code. The app login and the player login (player.rs) both use it.
+/// exchanges the code. The player login (player.rs) uses it.
 /// A port in use → Err naming the port.
 pub(crate) async fn oauth_login(
     client_id: &str,
@@ -207,7 +96,6 @@ pub(crate) async fn oauth_login(
     .map_err(|(_, body)| format!("token exchange failed: {body}"))
 }
 
-const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Accepts connections until one hits `callback_path`, parses its `code`/`state`,
@@ -301,60 +189,6 @@ async fn token_request(params: &[(&str, &str)]) -> Result<TokenResponse, (u16, S
         return Err((status, resp.text().await.unwrap_or_default()));
     }
     resp.json().await.map_err(|e| (status, e.to_string()))
-}
-
-fn expires_at(tr: &TokenResponse) -> u64 {
-    now() + tr.expires_in.saturating_sub(60)
-}
-
-
-/// The tokens in memory, loaded from disk on first use. The mutex also
-/// serializes refreshes: Spotify rotates the refresh token, so two concurrent
-/// refreshes with the same old token can get `invalid_grant` and log the user out.
-static TOKENS: tokio::sync::Mutex<Option<Tokens>> = tokio::sync::Mutex::const_new(None);
-
-/// Returns a valid access token, refreshing if expired. Errors if not logged in.
-pub async fn valid_access_token() -> Result<String, String> {
-    let mut cached = TOKENS.lock().await;
-    if cached.is_none() {
-        *cached = load_tokens();
-    }
-    let tokens = cached.as_mut().ok_or("AUTH_EXPIRED: not logged in")?;
-    if now() < tokens.expires_at && !tokens.access_token.is_empty() {
-        return Ok(tokens.access_token.clone());
-    }
-    if tokens.refresh_token.is_empty() {
-        return Err("AUTH_EXPIRED: no refresh token, log in again".into());
-    }
-    let refresh_token = tokens.refresh_token.clone();
-    let tr = match token_request(&[
-        ("grant_type", "refresh_token"),
-        ("refresh_token", &refresh_token),
-        ("client_id", CLIENT_ID),
-    ])
-    .await
-    {
-        Ok(tr) => tr,
-        Err((status, body)) if is_terminal_refresh_failure(status, &body) => {
-            invalidate_tokens();
-            *cached = None;
-            return Err(format!("AUTH_EXPIRED: token refresh rejected: {body}"));
-        }
-        Err((status, body)) => return Err(format!("token refresh failed ({status}): {body}")),
-    };
-    tokens.expires_at = expires_at(&tr);
-    tokens.access_token = tr.access_token;
-    // Keep the stored scope when the refresh response omits it.
-    if let Some(scope) = tr.scope {
-        tokens.scope = scope;
-    }
-    // Spotify may rotate the refresh token.
-    if let Some(rt) = tr.refresh_token {
-        tokens.refresh_token = rt;
-    }
-    // best effort: the fresh token is in memory, so this session keeps working if the disk write fails
-    let _ = save_tokens(tokens);
-    Ok(tokens.access_token.clone())
 }
 
 // ---- small utilities -------------------------------------------------------
@@ -460,74 +294,4 @@ mod tests {
         assert!(u.contains(&format!("code_challenge={}", challenge("v"))));
     }
     use super::*;
-
-    /// A grant holding exactly the scopes the app asks for.
-    fn all() -> String {
-        REQUIRED_SCOPES.join(" ")
-    }
-
-    #[test]
-    fn scopes_cover_every_standard_scope() {
-        assert_eq!(REQUIRED_SCOPES.len(), 19);
-        for s in ["playlist-modify-private", "user-follow-modify", "user-read-currently-playing", "ugc-image-upload"] {
-            assert!(REQUIRED_SCOPES.contains(&s), "missing {s}");
-        }
-    }
-
-    #[test]
-    fn scopes_missing_library_is_reconnect() {
-        let s = all().replace(" user-library-read", "");
-        assert!(!has_required_scopes(&s));
-    }
-
-    #[test]
-    fn scopes_all_present() {
-        assert!(has_required_scopes(&all()));
-    }
-
-    #[test]
-    fn scopes_missing_recently_played() {
-        let s = all().replace(" user-read-recently-played", "");
-        assert!(!has_required_scopes(&s));
-    }
-
-    #[test]
-    fn scopes_empty() {
-        assert!(!has_required_scopes(""));
-    }
-
-    #[test]
-    fn scopes_extra_unknown() {
-        assert!(has_required_scopes(&format!("{} something-new", all())));
-    }
-
-    #[test]
-    fn status_for_cases() {
-        let ok = Tokens { refresh_token: "r".into(), scope: all(), ..Default::default() };
-        let no_rt = Tokens { scope: all(), ..Default::default() };
-        let old = Tokens { refresh_token: "r".into(), ..Default::default() };
-        assert_eq!(status_for(None), "login");
-        assert_eq!(status_for(Some(&no_rt)), "login");
-        assert_eq!(status_for(Some(&old)), "reconnect");
-        assert_eq!(status_for(Some(&ok)), "ok");
-    }
-
-    #[test]
-    fn old_token_file_loads_without_scope() {
-        let t: Tokens = serde_json::from_str(
-            r#"{"access_token":"a","refresh_token":"r","expires_at":1}"#,
-        )
-        .unwrap();
-        assert_eq!(t.scope, "");
-    }
-
-    #[test]
-    fn terminal_refresh_failures() {
-        assert!(is_terminal_refresh_failure(400, r#"{"error":"invalid_grant"}"#));
-        assert!(is_terminal_refresh_failure(401, ""));
-        assert!(!is_terminal_refresh_failure(400, r#"{"error":"invalid_request"}"#));
-        assert!(!is_terminal_refresh_failure(500, "invalid_grant"));
-        assert!(!is_terminal_refresh_failure(429, ""));
-    }
-
 }

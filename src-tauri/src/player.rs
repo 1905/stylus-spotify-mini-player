@@ -78,6 +78,37 @@ const OAUTH_SCOPES: &[&str] = &[
 
 // ---- state machine ---------------------------------------------------------
 
+/// The `Fatal` reason for an account without Premium. `auth_status` matches it.
+pub const PREMIUM_REQUIRED: &str = "Spotify Premium is required to play on this Mac";
+
+/// Whether the account has Premium, by the session attribute `type`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Premium {
+    Yes,
+    No,
+    Unknown,
+}
+
+/// `Some("premium")` → Yes, any other value → No, no attribute → Unknown.
+pub fn premium_from_attr(attr: Option<&str>) -> Premium {
+    match attr {
+        Some("premium") => Premium::Yes,
+        Some(_) => Premium::No,
+        None => Premium::Unknown,
+    }
+}
+
+/// `auth_status`'s answer: "not_premium" after the Premium `Fatal`; "login" without stored
+/// credentials or after Spotify refused them; else "ok".
+pub fn auth_status_for(has_credentials: bool, state: &State) -> &'static str {
+    match state {
+        State::Failed(reason) if reason == PREMIUM_REQUIRED => "not_premium",
+        State::NeedsLogin => "login",
+        _ if !has_credentials => "login",
+        _ => "ok",
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum State {
     NeedsLogin,
@@ -149,7 +180,7 @@ fn classify(kind: ErrorKind, message: &str) -> Event {
     {
         Event::AuthRejected
     } else if message.contains("Premium account required") {
-        Event::Fatal("Spotify Premium required".into())
+        Event::Fatal(PREMIUM_REQUIRED.into())
     } else if kind == ErrorKind::PermissionDenied {
         // other login refusals (banned, travel restriction…): retrying won't help
         Event::Fatal(message.into())
@@ -200,7 +231,7 @@ pub trait CredStore: Send + Sync {
     fn save(&self, creds: &Credentials) -> Result<(), String>;
 }
 
-/// `player-credentials.json` next to the app's `tokens.json`, readable by this user only
+/// `player-credentials.json` in the app folder, readable by this user only
 /// (0600). Not the Keychain: unsigned builds count as a new app after every rebuild, so
 /// macOS asked for Keychain access again each time (user chose the file, 2026-10-02).
 pub struct FileStore;
@@ -296,6 +327,11 @@ impl Engine {
 
     fn state(&self) -> State {
         self.0.state.borrow().clone()
+    }
+
+    /// "ok", "login" or "not_premium" (`auth_status_for`).
+    pub fn auth_status(&self) -> &'static str {
+        auth_status_for(self.0.store.load().is_some(), &self.state())
     }
 
     fn status(&self, state: &State) -> Status {
@@ -506,6 +542,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     tauri::async_runtime::spawn(nowplaying::listen(now_playing.clone(), player.get_player_event_channel()));
 
     let mut attempt = 0;
+    let mut type_logged = false;
     loop {
         let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
@@ -537,6 +574,21 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 {
                     let (t, account) = (tracker.clone(), session.username());
                     let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
+                }
+                let account_type = session.get_user_attribute("type");
+                if !type_logged {
+                    log::info!(target: "stylus::player", "account type: {}", account_type.as_deref().unwrap_or("unknown"));
+                    type_logged = true;
+                }
+                match premium_from_attr(account_type.as_deref()) {
+                    Premium::No => {
+                        engine.apply(generation, Event::Fatal(PREMIUM_REQUIRED.into()));
+                        engine.stop_spirc();
+                        spirc_task.await;
+                        return;
+                    }
+                    Premium::Unknown => log::warn!(target: "stylus::player", "no account type from Spotify: the Premium check is skipped"),
+                    Premium::Yes => {}
                 }
                 match engine.apply(generation, Event::Connected) {
                     State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
@@ -738,8 +790,7 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     result
 }
 
-/// Restart with the stored credentials. The UI calls it after the app's own login
-/// or logout, so the account check runs again.
+/// Restart with the stored credentials.
 #[tauri::command]
 pub async fn engine_restart(engine: Managed<'_, Engine>) -> Result<(), String> {
     engine.restart(None).await;
@@ -1109,6 +1160,25 @@ mod tests {
     }
 
     #[test]
+    fn premium_from_the_session_attribute() {
+        assert_eq!(premium_from_attr(Some("premium")), Premium::Yes);
+        assert_eq!(premium_from_attr(Some("free")), Premium::No);
+        assert_eq!(premium_from_attr(Some("open")), Premium::No);
+        assert_eq!(premium_from_attr(None), Premium::Unknown);
+    }
+
+    #[test]
+    fn auth_status_from_the_engine() {
+        assert_eq!(auth_status_for(true, &Starting), "ok");
+        assert_eq!(auth_status_for(true, &Ready), "ok");
+        assert_eq!(auth_status_for(true, &Failed("no audio".into())), "ok");
+        assert_eq!(auth_status_for(false, &Starting), "login");
+        assert_eq!(auth_status_for(true, &NeedsLogin), "login");
+        assert_eq!(auth_status_for(true, &Failed(PREMIUM_REQUIRED.into())), "not_premium");
+        assert_eq!(auth_status_for(false, &Failed(PREMIUM_REQUIRED.into())), "not_premium");
+    }
+
+    #[test]
     fn connected_is_ready() {
         assert_eq!(next_state(&Starting, Event::Connected), Ready);
         assert_eq!(next_state(&Reconnecting, Event::Connected), Ready);
@@ -1152,7 +1222,7 @@ mod tests {
         assert_eq!(classify(ErrorKind::Unauthenticated, "login5 refused"), Event::AuthRejected);
         assert_eq!(
             classify(ErrorKind::PermissionDenied, &msg("Premium account required")),
-            Event::Fatal("Spotify Premium required".into())
+            Event::Fatal(PREMIUM_REQUIRED.into())
         );
         assert!(matches!(classify(ErrorKind::PermissionDenied, &msg("Application banned")), Event::Fatal(_)));
     }

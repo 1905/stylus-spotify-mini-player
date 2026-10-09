@@ -30,6 +30,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     applog::init();
+    paths::remove_legacy_files();
     let engine = player::Engine::new(Arc::new(player::FileStore));
     internal::attach(engine.clone());
     let app = tauri::Builder::default()
@@ -57,7 +58,6 @@ pub fn run() {
             store::store_all,
             store::store_set,
             auth::auth_status,
-            auth::login,
             player::engine_status,
             player::engine_login,
             player::engine_restart,
