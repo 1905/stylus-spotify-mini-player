@@ -128,7 +128,8 @@ pub(crate) fn remove_if_exists(path: &std::path::Path) -> std::io::Result<bool> 
 }
 
 /// Files of the old Web API login (a refresh token of a client id the app no longer has).
-const LEGACY_FILES: [&str; 3] = ["tokens.json", "tokens.json.invalid", "tokens.json.tmp"];
+/// `tokens.tmp`: the old `write_private` temp file (`with_extension("tmp")`).
+const LEGACY_FILES: [&str; 4] = ["tokens.json", "tokens.json.invalid", "tokens.json.tmp", "tokens.tmp"];
 /// `state.json` keys of the old Web API quota guard and account check.
 const LEGACY_KEYS: [&str; 2] = ["apiBlockedUntil", "account"];
 
@@ -184,11 +185,12 @@ mod tests {
     fn remove_legacy_files_removes_only_the_old_login() {
         let dir = migrate_base("legacy");
         std::fs::create_dir_all(&dir).unwrap();
-        for f in ["tokens.json", "tokens.json.invalid", "player-credentials.json", "state.json"] {
+        for f in ["tokens.json", "tokens.json.invalid", "tokens.tmp", "player-credentials.json", "state.json"] {
             std::fs::write(dir.join(f), f).unwrap();
         }
         let removed = super::remove_legacy_files_in(&dir);
-        assert_eq!(removed, ["tokens.json", "tokens.json.invalid"]);
+        assert_eq!(removed, ["tokens.json", "tokens.json.invalid", "tokens.tmp"]);
+        assert!(!dir.join("tokens.tmp").exists());
         assert!(!dir.join("tokens.json").exists());
         assert!(!dir.join("tokens.json.invalid").exists());
         assert!(dir.join("player-credentials.json").exists());

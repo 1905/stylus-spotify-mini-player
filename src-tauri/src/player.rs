@@ -21,7 +21,7 @@ use librespot_core::{authentication::Credentials, config::DeviceType, error::Err
 use librespot_playback::{
     config::PlayerConfig,
     mixer::{softmixer::SoftMixer, Mixer, MixerConfig, NoOpVolume},
-    player::Player,
+    player::{Player, PlayerEvent},
 };
 use librespot_protocol::authentication::AuthenticationType;
 use librespot_protocol::connect::ClusterUpdate;
@@ -304,6 +304,9 @@ struct Inner {
     login_busy: AtomicBool,
     /// Bumped by logout: a browser login that started before it must not log back in.
     login_gen: AtomicU64,
+    /// Held by logout for its whole body and by a login from its `login_gen` check until it
+    /// settles: a login can't restart the engine during a logout. Taken before `task`.
+    auth_op: tokio::sync::Mutex<()>,
     /// The persisted Connect device id, read (or created) on the first run.
     device_id: OnceLock<String>,
     /// The playback session (session.rs).
@@ -337,6 +340,7 @@ impl Engine {
             task: tokio::sync::Mutex::new(None),
             login_busy: AtomicBool::new(false),
             login_gen: AtomicU64::new(0),
+            auth_op: tokio::sync::Mutex::new(()),
             device_id: OnceLock::new(),
             session,
             restore_tried: AtomicBool::new(false),
@@ -503,7 +507,9 @@ impl Engine {
     /// the home-feed and known-mixes store keys, the saved session, the MCP key. A failed
     /// step is logged and the next steps still run; the first error is the result.
     pub async fn logout(&self) -> Result<(), String> {
+        // bumped before the lock: a login that waits for it sees the logout
         self.0.login_gen.fetch_add(1, Ordering::SeqCst);
+        let _op = self.0.auth_op.lock().await;
         self.stop().await;
         let store = self.0.store.clone();
         let session = self.0.session.clone();
@@ -683,11 +689,20 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     _ => {}
                 }
                 let mut cluster = cluster_updates(&session);
+                // "This Mac was active", kept past Spirc's own disconnect at a drop (`active_after`);
+                // the Spirc task has not run yet, so this channel sees all its events
+                let mut events = player.get_player_event_channel();
+                let mut was_here = now_playing.engine_active();
+                // an interval, not a sleep per pass: frequent events must not keep pushing the checks back
+                let mut health = tokio::time::interval(Duration::from_secs(5));
+                health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                health.tick().await;
                 tokio::pin!(spirc_task);
                 // the Spirc task ends on shutdown or session loss; a dead player thread is fatal
                 loop {
                     tokio::select! {
                         _ = &mut spirc_task => break,
+                        Some(event) = events.recv() => was_here = active_after(was_here, &event, session.is_invalid()),
                         Some(update) = cluster.next() => {
                             if let Ok(update) = update {
                                 follow_cluster(&tracker, &update, session.device_id());
@@ -698,7 +713,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                                 }
                             }
                         }
-                        _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        _ = health.tick() => {
                             if player.is_invalid() {
                                 engine.apply(generation, Event::Fatal("the audio player stopped".into()));
                                 engine.stop_spirc();
@@ -715,7 +730,6 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     }
                 }
                 engine.0.spirc.lock().unwrap().take();
-                let was_here = now_playing.engine_active();
                 // the player outlives the Spirc: stop what it buffered, or the old track keeps
                 // playing under a new Spirc that has no request id for it and can't pause it
                 player.stop();
@@ -749,6 +763,17 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
         // a Session can't be reused once it has connected or failed
         session = Session::new(session_config.clone(), None);
         player.set_session(session.clone());
+    }
+}
+
+/// Whether This Mac is still the active device after `event`. Spirc's cleanup after a lost
+/// session (dead session) also sends SessionDisconnected: that one is a drop, the device was
+/// active, so it doesn't count.
+fn active_after(active: bool, event: &PlayerEvent, session_dead: bool) -> bool {
+    match event {
+        PlayerEvent::SessionConnected { .. } => true,
+        PlayerEvent::SessionDisconnected { .. } => active && session_dead,
+        _ => active,
     }
 }
 
@@ -889,7 +914,7 @@ fn send_load(engine: &Engine, source: Source, track_uri: Option<String>, positio
         Source::Uris { uris } => LoadSource::Tracks(uris),
     };
     let modes = Modes { shuffle, repeat: repeat == Repeat::Context, repeat_track: repeat == Repeat::Track };
-    let request = load_request(source, track_uri, position_ms, false, modes);
+    let request = load_request(source, restore_start(track_uri, shuffle), position_ms, false, modes);
     engine.with_spirc(|s| {
         s.activate()?;
         s.set_volume(volume)?;
@@ -1056,7 +1081,9 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     }
     let gen = engine.0.login_gen.load(Ordering::SeqCst);
     let result = async {
+        // the browser wait is outside the lock: an open browser login never blocks a logout
         let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT).await?;
+        let _op = engine.0.auth_op.lock().await;
         if engine.0.login_gen.load(Ordering::SeqCst) != gen {
             return Err("LOGIN_CANCELLED: logged out while the browser login was open".to_string());
         }
@@ -1142,11 +1169,21 @@ fn modes(shuffle: Option<bool>, repeat: Option<String>) -> Modes {
     Modes { shuffle: shuffle.unwrap_or(false), repeat: repeat == "context", repeat_track: repeat == "track" }
 }
 
-fn load_request(source: LoadSource, track_uri: Option<String>, position_ms: u32, play: bool, m: Modes) -> LoadRequest {
+/// The start track of a restore load. No saved track (a finished source) with shuffle on:
+/// track 1 by index, as Spirc starts a shuffled load with no start track on a random one.
+fn restore_start(track_uri: Option<String>, shuffle: bool) -> Option<PlayingTrack> {
+    match track_uri {
+        Some(uri) => Some(PlayingTrack::Uri(uri)),
+        None if shuffle => Some(PlayingTrack::Index(0)),
+        None => None,
+    }
+}
+
+fn load_request(source: LoadSource, playing_track: Option<PlayingTrack>, position_ms: u32, play: bool, m: Modes) -> LoadRequest {
     let options = LoadRequestOptions {
         start_playing: play,
         seek_to: position_ms,
-        playing_track: track_uri.map(PlayingTrack::Uri),
+        playing_track,
         context_options: Some(LoadContextOptions::Options(Options { shuffle: m.shuffle, repeat: m.repeat, repeat_track: m.repeat_track })),
         ..LoadRequestOptions::default()
     };
@@ -1329,7 +1366,7 @@ impl Engine {
             LoadSource::Tracks(u) => Source::Uris { uris: u.clone() },
         };
         log::info!(target: "stylus::cmd", "load {source:?} at {track_uri:?} {position_ms} ms play={play} {m:?}");
-        let request = load_request(source, track_uri.clone(), position_ms, play, m);
+        let request = load_request(source, track_uri.clone().map(PlayingTrack::Uri), position_ms, play, m);
         crate::audio_out::flush();
         self.with_spirc(|s| {
             s.activate()?;
@@ -1763,7 +1800,7 @@ mod tests {
 
     #[test]
     fn load_request_carries_options() {
-        let req = load_request(LoadSource::Tracks(uris(2)), Some("spotify:track:1".into()), 4200, false, Modes::default());
+        let req = load_request(LoadSource::Tracks(uris(2)), Some(PlayingTrack::Uri("spotify:track:1".into())), 4200, false, Modes::default());
         let dbg = format!("{req:?}");
         assert!(dbg.contains("start_playing: false"), "{dbg}");
         assert!(dbg.contains("seek_to: 4200"), "{dbg}");
@@ -1772,6 +1809,27 @@ mod tests {
         let dbg = format!("{req:?}");
         assert!(dbg.contains("spotify:album:a") && dbg.contains("start_playing: true"), "{dbg}");
         assert!(dbg.contains("playing_track: None"), "{dbg}");
+    }
+
+    #[test]
+    fn a_finished_shuffled_restore_starts_on_track_1() {
+        let req = load_request(LoadSource::Context("spotify:album:a".into()), restore_start(None, true), 0, false, modes(Some(true), None));
+        let dbg = format!("{req:?}");
+        assert!(dbg.contains("Index(0)") && dbg.contains("shuffle: true"), "{dbg}");
+        assert!(matches!(restore_start(None, false), None), "no shuffle: Spirc starts on track 1 by itself");
+        assert!(matches!(restore_start(Some("spotify:track:9".into()), true), Some(PlayingTrack::Uri(u)) if u == "spotify:track:9"));
+    }
+
+    #[test]
+    fn a_drop_keeps_this_mac_active() {
+        let connected = PlayerEvent::SessionConnected { connection_id: "c".into(), user_name: "u".into() };
+        let disconnected = PlayerEvent::SessionDisconnected { connection_id: "c".into(), user_name: "u".into() };
+        assert!(active_after(false, &connected, false));
+        // Spirc's cleanup after a lost session: still "was active", the next ready reloads
+        assert!(active_after(true, &disconnected, true));
+        // another device took over (live session): no longer active
+        assert!(!active_after(true, &disconnected, false));
+        assert!(!active_after(false, &disconnected, true));
     }
 
     #[test]
