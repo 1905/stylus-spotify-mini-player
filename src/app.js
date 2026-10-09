@@ -507,7 +507,7 @@ async function refresh(epoch) {
   if (changed) trackGen++;
   if (changed) {
     const where = active ? devName(s.device_id) : "no device";
-    applog("info", `now: ${(state.now && state.now.uri) || "nothing"} → ${track ? `${track.uri} "${track.name}"` : mode} from ${state.contextUri || "no context"} on ${where}, ${active && s.is_playing ? "playing" : "paused"}`);
+    applog("info", `now: ${(state.now && state.now.uri) || "nothing"} → ${track ? `${track.uri} ${JSON.stringify(track.name)}` : mode} from ${state.contextUri || "no context"} on ${where}, ${active && s.is_playing ? "playing" : "paused"}`);
   }
   const deviceNow = active ? s.device_id || null : null;
   if (deviceNow !== seenDevice) {
@@ -1317,10 +1317,10 @@ async function routed(deviceId, local, remote, what = "command") {
   return logged(`${what} remote on ${devName(deviceId)}`, remote);
 }
 
-/** A device id as the log names it: its label and id. */
+/** A device id as the log names it: its label (JSON-quoted: the anonymized log masks it whole) and id. */
 function devName(id) {
   const d = (state.devices || []).find((x) => x.id === id) || (state.device && state.device.id === id ? state.device : null);
-  return d ? `"${labelOf(d)}" (${id})` : String(id || "no device");
+  return d ? `${JSON.stringify(labelOf(d))} (${id})` : String(id || "no device");
 }
 
 /**
@@ -2567,7 +2567,7 @@ function onPanelClick(e) {
   const el = e.target.closest(".row[data-n]");
   const r = el && panelView.rows[Number(el.dataset.n)];
   if (!r || r.role === "now" || isLocalFile(r.track.uri)) return;
-  applog("info", `panel: play ${r.role} row ${r.track.uri} "${r.track.name}" (${panelView.mode} view${state.shuffle ? ", shuffle" : ""})`);
+  applog("info", `panel: play ${r.role} row ${r.track.uri} ${JSON.stringify(r.track.name)} (${panelView.mode} view${state.shuffle ? ", shuffle" : ""})`);
   if (panelView.mode === "list") return void playPanelRow(r, el);
   // the queue view: a played or a queued song, as its cover in the run would play it
   playCover({ role: r.role === "played" ? "past" : "next", offset: r.role === "next" ? r.i + 1 : -1, track: r.track }, el);
