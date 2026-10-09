@@ -107,10 +107,12 @@ pub fn premium_from_attr(attr: Option<&str>) -> Premium {
     }
 }
 
-/// `auth_status`'s answer: "not_premium" after the Premium `Fatal`; "login" without stored
-/// credentials or after Spotify refused them; else "ok".
+/// `auth_status`'s answer: "ok" while the engine is ready or reconnecting (also when the
+/// login's save failed and no file exists); "not_premium" after the Premium `Fatal`;
+/// "login" without stored credentials or after Spotify refused them; else "ok".
 pub fn auth_status_for(has_credentials: bool, state: &State) -> &'static str {
     match state {
+        State::Ready | State::Reconnecting => "ok",
         State::Failed(reason) if reason == PREMIUM_REQUIRED => "not_premium",
         State::NeedsLogin => "login",
         _ if !has_credentials => "login",
@@ -330,6 +332,9 @@ struct Inner {
     pending_volume: Mutex<PendingVolume>,
     /// Why a save of the player login failed since the last `engine_login` began. It reports it.
     save_error: Mutex<Option<String>>,
+    /// The credentials the current loop logs in with (`remember_live`). A restart without
+    /// new credentials uses them before the store: they work even when their save failed.
+    live_creds: Mutex<Option<Credentials>>,
 }
 
 impl Engine {
@@ -354,6 +359,7 @@ impl Engine {
             now,
             pending_volume: Mutex::new(PendingVolume::default()),
             save_error: Mutex::new(None),
+            live_creds: Mutex::new(None),
         }))
     }
 
@@ -472,22 +478,29 @@ impl Engine {
         }
     }
 
-    /// Stops the running loop (if any) and starts a new one with `creds`, or with the
-    /// stored credentials when None. No credentials → `needs_login`.
+    /// Stops the running loop (if any) and starts a new one with `creds`, else the live
+    /// credentials, else the stored ones (`start_creds`). No credentials → `needs_login`.
     pub async fn restart(&self, creds: Option<Credentials>) {
         let mut task = self.0.task.lock().await;
         let generation = self.end_loop(&mut task).await;
-        let creds = match creds {
-            Some(c) => Some(c),
-            None => {
-                let store = self.0.store.clone();
-                tokio::task::spawn_blocking(move || store.load()).await.ok().flatten()
-            }
+        let live = lock(&self.0.live_creds).clone();
+        let stored = if creds.is_none() && live.is_none() {
+            let store = self.0.store.clone();
+            tokio::task::spawn_blocking(move || store.load()).await.ok().flatten()
+        } else {
+            None
         };
+        let creds = start_creds(creds, live, stored);
         self.apply(generation, Event::Start { has_credentials: creds.is_some() });
         if let Some(creds) = creds {
             *task = Some(tauri::async_runtime::spawn(run(self.clone(), generation, creds)));
         }
+    }
+
+    /// `restart(None)` under `auth_op`: it can't run inside a logout and load the old account.
+    pub async fn restart_stored(&self) {
+        let _op = self.0.auth_op.lock().await;
+        self.restart(None).await;
     }
 
     /// Retires the running loop (if any) and waits up to 3 s for it to end. Returns the new generation.
@@ -506,6 +519,8 @@ impl Engine {
     async fn stop(&self) {
         let mut task = self.0.task.lock().await;
         let generation = self.end_loop(&mut task).await;
+        // after the bump: a late `remember_live` of the old loop sees it is stale
+        lock(&self.0.live_creds).take();
         self.apply(generation, Event::Start { has_credentials: false });
     }
 
@@ -568,6 +583,22 @@ impl Engine {
             State::Starting | State::Reconnecting => unreachable!(),
         }
     }
+}
+
+/// The credentials a restart starts with: `given`, else `live`, else `stored`.
+fn start_creds(given: Option<Credentials>, live: Option<Credentials>, stored: Option<Credentials>) -> Option<Credentials> {
+    given.or(live).or(stored)
+}
+
+/// Keeps `creds` as the live credentials while `generation` is current. Checked under the
+/// state lock, where `retire` bumps the generation: a retired loop never writes.
+fn remember_live(engine: &Engine, generation: u64, creds: &Credentials) {
+    engine.0.state.send_if_modified(|_| {
+        if engine.is_current(generation) {
+            *lock(&engine.0.live_creds) = Some(creds.clone());
+        }
+        false
+    });
 }
 
 /// `initial_volume`: the session's volume, so launches and reconnects keep it.
@@ -664,6 +695,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 now_playing.set_session(session.clone());
                 let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
                 creds = kept;
+                remember_live(&engine, generation, &creds);
                 if save_error.is_some() {
                     *lock(&engine.0.save_error) = save_error;
                 }
@@ -1194,7 +1226,7 @@ pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Resul
             return Err(e);
         }
     }
-    engine.restart(None).await;
+    engine.restart_stored().await;
     Ok(())
 }
 
@@ -1554,6 +1586,9 @@ mod tests {
         assert_eq!(auth_status_for(true, &Ready), "ok");
         assert_eq!(auth_status_for(true, &Failed("no audio".into())), "ok");
         assert_eq!(auth_status_for(false, &Starting), "login");
+        // logged in, but the save failed: no file, yet the engine runs
+        assert_eq!(auth_status_for(false, &Ready), "ok");
+        assert_eq!(auth_status_for(false, &Reconnecting), "ok");
         assert_eq!(auth_status_for(true, &NeedsLogin), "login");
         assert_eq!(auth_status_for(true, &Failed(PREMIUM_REQUIRED.into())), "not_premium");
         assert_eq!(auth_status_for(false, &Failed(PREMIUM_REQUIRED.into())), "not_premium");
@@ -1673,6 +1708,32 @@ mod tests {
     }
 
     #[test]
+    fn start_creds_prefers_given_then_live_then_stored() {
+        let (g, l, s) = (stored(&[1]), stored(&[2]), stored(&[3]));
+        assert_eq!(start_creds(Some(g.clone()), Some(l.clone()), Some(s.clone())), Some(g));
+        assert_eq!(start_creds(None, Some(l.clone()), Some(s.clone())), Some(l));
+        assert_eq!(start_creds(None, None, Some(s.clone())), Some(s));
+        assert_eq!(start_creds(None, None, None), None);
+    }
+
+    #[tokio::test]
+    async fn a_stored_restart_waits_for_the_auth_lock() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        let before = engine.0.generation.load(Ordering::SeqCst);
+        let op = engine.0.auth_op.lock().await;
+        let restart = tokio::spawn({
+            let engine = engine.clone();
+            async move { engine.restart_stored().await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(engine.0.generation.load(Ordering::SeqCst), before, "no restart while auth_op is held");
+        drop(op);
+        restart.await.unwrap();
+        assert_eq!(engine.0.generation.load(Ordering::SeqCst), before + 1);
+        assert_eq!(engine.state(), NeedsLogin);
+    }
+
+    #[test]
     fn login_reports_a_failed_save() {
         assert_eq!(login_result(Ok(()), None), Ok(()));
         assert_eq!(login_result(Ok(()), Some("disk full".into())), Err("logged in, but the login could not be saved: disk full".into()));
@@ -1713,6 +1774,7 @@ mod tests {
         engine.0.restore_tried.store(true, Ordering::SeqCst);
         engine.0.reload_after_drop.store(true, Ordering::SeqCst);
         engine.0.restore_pending.store(true, Ordering::SeqCst);
+        *lock(&engine.0.live_creds) = Some(creds.clone());
 
         engine.logout().await.unwrap();
 
@@ -1728,6 +1790,7 @@ mod tests {
         assert!(!engine.0.restore_tried.load(Ordering::SeqCst), "the next login restores again");
         assert!(!engine.0.reload_after_drop.load(Ordering::SeqCst), "no reload of the old session after a logout");
         assert!(!engine.0.restore_pending.load(Ordering::SeqCst), "no late restore of the old account");
+        assert!(lock(&engine.0.live_creds).is_none(), "no restart with the old account's login");
         // a second logout finds nothing to remove: still Ok
         engine.logout().await.unwrap();
     }
