@@ -111,9 +111,141 @@ fn keep(level: &str, target: &str) -> bool {
     }
 }
 
-/// Masks private values in one message (stub until the mask rules land).
-pub fn mask(msg: &str, _private: &[String]) -> (String, usize) {
-    (msg.to_string(), 0)
+fn re(pattern: &str) -> Regex {
+    Regex::new(pattern).unwrap()
+}
+
+static URI: LazyLock<Regex> = LazyLock::new(|| re(r#"spotify:([A-Za-z_-]+):[^\s"'<>()\[\],]+"#));
+static URL: LazyLock<Regex> =
+    LazyLock::new(|| re(r#"\b([A-Za-z][A-Za-z0-9+.-]*)://([^/\s?#"'<>]+)([/?#][^\s"'<>)\]]*)?"#));
+static DOUBLE_QUOTED: LazyLock<Regex> = LazyLock::new(|| re(r#""(?:[^"\\]|\\.)+""#));
+static ANGLED: LazyLock<Regex> = LazyLock::new(|| re(r"<[^<>]+>"));
+static EMAIL: LazyLock<Regex> =
+    LazyLock::new(|| re(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"));
+static HOME: LazyLock<Regex> = LazyLock::new(|| re(r#"/Users/[^/\s"'<>]+"#));
+static UUID: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"));
+/// A run of hex digits and colons; `is_ipv6` decides.
+static IPV6: LazyLock<Regex> = LazyLock::new(|| re(r"[0-9A-Fa-f:]{3,}"));
+static IPV4: LazyLock<Regex> = LazyLock::new(|| re(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"));
+static TOKEN: LazyLock<Regex> = LazyLock::new(|| re(r"[A-Za-z0-9+/=_-]{16,}"));
+static HEX: LazyLock<Regex> = LazyLock::new(|| re(r"[0-9A-Fa-f]{8,}"));
+static DIGIT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"\d{8,}"));
+
+/// Replaces each match that `with` gives a text for, and counts the replacements.
+fn sub(s: &str, re: &Regex, n: &mut usize, with: impl Fn(&regex::Captures) -> Option<String>) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last = 0;
+    for c in re.captures_iter(s) {
+        let m = c.get(0).unwrap();
+        if let Some(r) = with(&c) {
+            out.push_str(&s[last..m.start()]);
+            out.push_str(&r);
+            last = m.end();
+            *n += 1;
+        }
+    }
+    out.push_str(&s[last..]);
+    out
+}
+
+fn has_digit(s: &str) -> bool {
+    s.bytes().any(|b| b.is_ascii_digit())
+}
+
+/// `'…'` after the start, a space, `(`, `=` or `:` and before the end, a space or `.,;:!?)`.
+/// `Couldn't reach` has no such pair and stays.
+fn single_quotes(s: &str, n: &mut usize) -> String {
+    let b = s.as_bytes(); // quotes are ASCII: their byte offsets are char boundaries
+    let (mut out, mut last, mut i) = (String::with_capacity(s.len()), 0, 0);
+    while i < b.len() {
+        if b[i] == b'\'' && (i == 0 || b" (=:".contains(&b[i - 1])) {
+            let close = (i + 2..b.len()).find(|&j| b[j] == b'\'' && (j + 1 == b.len() || b" .,;:!?)".contains(&b[j + 1])));
+            if let Some(j) = close {
+                out.push_str(&s[last..i]);
+                out.push_str("'•'");
+                *n += 1;
+                last = j + 1;
+                i = j + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&s[last..]);
+    out
+}
+
+/// An IPv6 address: 2 to 7 colons, at most one `::`, groups of 1-4 hex digits, not inside a word.
+/// A time of day (`14:03:16`) is not one.
+fn is_ipv6(s: &str, start: usize, end: usize) -> bool {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    if word(s[..start].chars().next_back()) || word(s[end..].chars().next()) {
+        return false;
+    }
+    let t = &s[start..end];
+    let colons = t.matches(':').count();
+    let double = t.matches("::").count();
+    if !(2..=7).contains(&colons) || t.contains(":::") || double > 1 {
+        return false;
+    }
+    if (t.starts_with(':') && !t.starts_with("::")) || (t.ends_with(':') && !t.ends_with("::")) {
+        return false;
+    }
+    let groups: Vec<&str> = t.split(':').filter(|g| !g.is_empty()).collect();
+    if groups.len() < 2 || groups.iter().any(|g| g.len() > 4) {
+        return false;
+    }
+    double == 1 || colons >= 3 || t.bytes().any(|b| b.is_ascii_alphabetic())
+}
+
+/// One case-insensitive pattern for the known private values of 4+ characters, longest first.
+fn known_values(private: &[String]) -> Option<Regex> {
+    let mut vals: Vec<&str> = private.iter().map(|v| v.trim()).filter(|v| v.chars().count() >= 4).collect();
+    if vals.is_empty() {
+        return None;
+    }
+    vals.sort_by_key(|v| std::cmp::Reverse(v.len()));
+    vals.dedup();
+    let alts: Vec<String> = vals.iter().map(|v| regex::escape(v)).collect();
+    Some(re(&format!("(?i){}", alts.join("|"))))
+}
+
+/// Masks private values in one message (or one line with no stamp): the pattern rules in the
+/// locked sequence, then the known values. Gives the text and the count of replacements.
+pub fn mask(msg: &str, private: &[String]) -> (String, usize) {
+    mask_with(msg, known_values(private).as_ref())
+}
+
+fn mask_with(msg: &str, known: Option<&Regex>) -> (String, usize) {
+    let mut n = 0;
+    let s = sub(msg, &URI, &mut n, |c| Some(format!("spotify:{}:•", &c[1])));
+    let s = sub(&s, &URL, &mut n, |c| match c.get(3) {
+        Some(p) if p.as_str() != "/" => Some(format!("{}://{}/•", &c[1], &c[2])),
+        _ => None,
+    });
+    let s = sub(&s, &DOUBLE_QUOTED, &mut n, |_| Some("\"•\"".into()));
+    let s = single_quotes(&s, &mut n);
+    let s = sub(&s, &ANGLED, &mut n, |_| Some("<•>".into()));
+    let s = sub(&s, &EMAIL, &mut n, |_| Some("•@•".into()));
+    let s = sub(&s, &HOME, &mut n, |_| Some("/Users/•".into()));
+    let s = sub(&s, &UUID, &mut n, |_| Some("•".into()));
+    let s = {
+        let t = s.as_str();
+        sub(t, &IPV6, &mut n, |c| {
+            let m = c.get(0).unwrap();
+            is_ipv6(t, m.start(), m.end()).then(|| "•".into())
+        })
+    };
+    let s = sub(&s, &IPV4, &mut n, |_| Some("•".into()));
+    let s = sub(&s, &TOKEN, &mut n, |c| has_digit(&c[0]).then(|| "•".into()));
+    let s = sub(&s, &HEX, &mut n, |c| has_digit(&c[0]).then(|| "•".into()));
+    let s = sub(&s, &DIGIT_RUN, &mut n, |_| Some("•".into()));
+    let s = match known {
+        Some(k) => sub(&s, k, &mut n, |_| Some("•".into())),
+        None => s,
+    };
+    (s, n)
 }
 
 /// An episode of one masked line shape: its first entry and the repeats after it.
@@ -129,13 +261,14 @@ pub fn anonymize(raw: &str, private: &[String], cap_bytes: usize) -> Anonymized 
     let entries = parse(raw);
     let total = entries.len();
     let (mut kept, mut masked) = (0, 0);
+    let known = known_values(private);
     let mut episodes: Vec<Episode> = Vec::new();
     // key → (episode index, stamp of the key's last line)
     let mut open: HashMap<String, (usize, Stamp)> = HashMap::new();
     for e in entries.iter().filter(|e| keep(e.level, e.target)) {
         kept += 1;
         let mut mask_count = |s: &str| {
-            let (m, n) = mask(s, private);
+            let (m, n) = mask_with(s, known.as_ref());
             masked += n;
             m
         };
@@ -378,5 +511,159 @@ app 0.1.0 · macOS 14.6 · made 2026-10-09 14:20:05Z\n\
 kept 0 of 0 lines (WARN, ERROR, auth INFO) · 0 values masked · repeats collapsed\n\
 no log lines yet\n"
         );
+    }
+
+    fn m(msg: &str) -> (String, usize) {
+        mask(msg, &[])
+    }
+
+    #[test]
+    fn mask_rule_01_spotify_uri() {
+        assert_eq!(m("play spotify:track:4MzII8fszi8KkFl1ryv07L now"), ("play spotify:track:• now".into(), 1));
+        assert_eq!(m("ctx spotify:user:someone:collection").0, "ctx spotify:user:•");
+    }
+
+    #[test]
+    fn mask_rule_02_url() {
+        assert_eq!(
+            m("GET https://audio-ak.spotifycdn.com/audio/49ab?__token__=x failed"),
+            ("GET https://audio-ak.spotifycdn.com/• failed".into(), 1)
+        );
+        assert_eq!(m("hm://collection/collection/someone/json"), ("hm://collection/•".into(), 1));
+        assert_eq!(m("host https://example.com up"), ("host https://example.com up".into(), 0));
+    }
+
+    #[test]
+    fn mask_rule_03_double_quotes() {
+        assert_eq!(m(r#"now: "Interloper" by "X \"Y\" Z""#), (r#"now: "•" by "•""#.into(), 2));
+    }
+
+    #[test]
+    fn mask_rule_04_single_quotes() {
+        assert_eq!(m("Authenticated as 'kass' !"), ("Authenticated as '•' !".into(), 1));
+        assert_eq!(m("x=('a b'), y:'c'."), ("x=('•'), y:'•'.".into(), 2));
+        assert_eq!(m("Couldn't reach the server"), ("Couldn't reach the server".into(), 0));
+        assert_eq!(m("Couldn't reach 'host'"), ("Couldn't reach '•'".into(), 1));
+    }
+
+    #[test]
+    fn mask_rule_05_angle_brackets() {
+        assert_eq!(m("Loading <Days Gone> with Spotify URI <x>"), ("Loading <•> with Spotify URI <•>".into(), 2));
+    }
+
+    #[test]
+    fn mask_rule_06_email() {
+        assert_eq!(m("for a@b.com done"), ("for •@• done".into(), 1));
+    }
+
+    #[test]
+    fn mask_rule_07_home_path() {
+        assert_eq!(m("read /Users/kass/Music failed"), ("read /Users/•/Music failed".into(), 1));
+    }
+
+    #[test]
+    fn mask_rule_08_uuid() {
+        assert_eq!(m("device 927e12e8-efcb-4c8e-838d-19de2e7a1231 gone"), ("device • gone".into(), 1));
+    }
+
+    #[test]
+    fn mask_rule_09_ipv6() {
+        assert_eq!(m("ap fe80::1c2b:3a4d:5e6f:7081 down"), ("ap • down".into(), 1));
+        assert_eq!(m("ap [2001:db8:0:0:0:0:2:1]:443"), ("ap [•]:443".into(), 1));
+        assert_eq!(m("at 14:03:16 ok"), ("at 14:03:16 ok".into(), 0));
+        assert_eq!(m("in librespot_core::dealer::manager"), ("in librespot_core::dealer::manager".into(), 0));
+    }
+
+    #[test]
+    fn mask_rule_10_ipv4() {
+        assert_eq!(m("ap 192.168.8.214:4070 down"), ("ap •:4070 down".into(), 1));
+    }
+
+    #[test]
+    fn mask_rule_11_token_run() {
+        assert_eq!(m("id M2RlZDRiZGItYWFjZS00NWU4 x"), ("id • x".into(), 1));
+        assert_eq!(m("no digit librespot_connect_state stays"), ("no digit librespot_connect_state stays".into(), 0));
+    }
+
+    #[test]
+    fn mask_rule_12_hex_run() {
+        assert_eq!(m("file 65b708ab x"), ("file • x".into(), 1));
+        assert_eq!(m("word deadbeefcafe stays"), ("word deadbeefcafe stays".into(), 0));
+    }
+
+    #[test]
+    fn mask_rule_13_digit_run() {
+        assert_eq!(m("ts 12345678 n 1234567"), ("ts • n 1234567".into(), 1));
+    }
+
+    #[test]
+    fn mask_rule_14_known_values() {
+        let private = ["Alex Canary iPhone".to_string(), "Bob".to_string(), "  ".to_string()];
+        assert_eq!(
+            mask("device Alex Canary iPhone and alex canary iphone, Bob", &private),
+            ("device • and •, Bob".into(), 2)
+        );
+    }
+
+    #[test]
+    fn mask_keeps_ordinary_values() {
+        for s in ["Couldn't reach", "headphones WH-1000XM6 ok", "play_request_id: 1", "version 0.8.0", "reconnect 3 in 8 s"] {
+            assert_eq!(m(s), (s.to_string(), 0), "{s}");
+        }
+    }
+
+    #[test]
+    fn mask_never_touches_stamp_or_target() {
+        let raw = "2026-10-09 14:03:16.243Z WARN  librespot_core::dealer: peer dealer gone\n";
+        let private = ["dealer".to_string(), "2026".to_string(), "librespot".to_string()];
+        let a = anonymize(raw, &private, CAP_BYTES);
+        assert_eq!(a.text, "2026-10-09 14:03:16.243Z WARN  librespot_core::dealer: peer • gone\n");
+        assert_eq!(a.masked, 1);
+    }
+
+    #[test]
+    fn canary_values_do_not_survive() {
+        let fixture = r#"2026-10-09 14:00:00.000Z INFO  librespot_core::session: Authenticated as 'canaryuser42' !
+2026-10-09 14:00:01.000Z WARN  librespot_playback::player: Loading <Velvet Canary Song> with Spotify URI <spotify:track:4MzII8fszi8KkFl1ryv07L>
+2026-10-09 14:00:02.000Z ERROR stylus::spotify: now: "Velvet Canary Song" by "Zed Canary" from "My Secret Mix"
+2026-10-09 14:00:03.000Z WARN  librespot_core::mercury: hm://collection/collection/canaryuser42/json failed
+2026-10-09 14:00:04.000Z WARN  librespot_audio::fetch: GET https://audio-ak.spotifycdn.com/audio/65b708073fc0480ea92a077233ca87bd?__token__=exp=1791285544~hmac=56aa7079cd404764aca6069730b588e0d51015b4 failed
+2026-10-09 14:00:05.000Z WARN  librespot_connect::spirc: unknown SpotifyUri("spotify:track:4MzII8fszi8KkFl1ryv07L")
+2026-10-09 14:00:06.000Z WARN  librespot_core::dealer: connection_id: "M2RlZDRiZGItYWFjZS00NWU4LTg3NDctOTQxNDQwOTg5ZDlj"
+2026-10-09 14:00:07.000Z INFO  stylus::auth: token: client_id: "65b708073fc0480ea92a077233ca87bd" for alex@example.com
+2026-10-09 14:00:08.000Z WARN  stylus::player: device Alex Canary iPhone (927e12e8-efcb-4c8e-838d-19de2e7a1231) left
+2026-10-09 14:00:09.000Z ERROR stylus::paths: cannot read /Users/alex/Library/x: denied
+2026-10-09 14:00:10.000Z WARN  librespot_core::apresolve: ap 192.168.1.23:4070 and fe80::1c2b:3a4d:5e6f:7081 down
+2026-10-09 14:00:11.000Z WARN  stylus::x: bare 4MzII8fszi8KkFl1ryv07L M2RlZDRiZGItYWFjZS00NWU4LTg3NDctOTQxNDQwOTg5ZDlj 56aa7079cd404764aca6069730b588e0d51015b4 exp=1791285544 65b708073fc0480ea92a077233ca87bd
+2026-10-09 14:00:12.000Z ERROR stylus::x: names CANARYUSER42 velvet canary song ZED CANARY alex canary iphone
+   continued: Alex Canary iPhone owned by canaryuser42 at 192.168.1.23
+2026-10-09 14:00:13.000Z INFO  stylus::auth: ui: device Alex Canary iPhone picked for Velvet Canary Song
+"#;
+        let private: Vec<String> =
+            ["canaryuser42", "Alex Canary iPhone", "Velvet Canary Song", "Zed Canary"].iter().map(|s| s.to_string()).collect();
+        let a = anonymize(fixture, &private, CAP_BYTES);
+        assert_eq!(a.kept, 14);
+        let out = a.text.to_lowercase();
+        for v in [
+            "canaryuser42",
+            "Velvet Canary Song",
+            "Zed Canary",
+            "My Secret Mix",
+            "Alex Canary iPhone",
+            "alex@example.com",
+            "192.168.1.23",
+            "fe80::1c2b:3a4d:5e6f:7081",
+            "4MzII8fszi8KkFl1ryv07L",
+            "927e12e8-efcb-4c8e-838d-19de2e7a1231",
+            "M2RlZDRiZGItYWFjZS00NWU4LTg3NDctOTQxNDQwOTg5ZDlj",
+            "56aa7079cd404764aca6069730b588e0d51015b4",
+            "exp=1791285544",
+            "/Users/alex",
+            "65b708073fc0480ea92a077233ca87bd",
+        ] {
+            assert!(!out.contains(&v.to_lowercase()), "a canary value survived (index {})", v.len());
+        }
+        // the lines stay readable: stamps, levels and targets are all there
+        assert!(a.text.contains("2026-10-09 14:00:10.000Z WARN  librespot_core::apresolve: ap •:4070 and • down"));
     }
 }
