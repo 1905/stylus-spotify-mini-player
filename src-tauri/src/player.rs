@@ -762,6 +762,8 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
             cluster_updates(&session).map(|u| (u, false)),
             put_clusters(&session).map(|u| (u, true)),
         );
+        // per session: a new session's clusters start a new order
+        let mut clock = ClusterClock::default();
         let mut connect_ups = connection_ids(&session);
         let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
@@ -850,6 +852,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         Some(event) = events.recv() => was_here = active_after(was_here, &event, session.is_invalid()),
                         Some((update, from_put)) = cluster.next() => {
                             if let Ok(update) = update {
+                                if !clock.admit(&update.cluster) {
+                                    let from = if from_put { "PUT" } else { "dealer" };
+                                    log::info!(target: "stylus::session", "a {from} cluster older than the last one applied: dropped");
+                                    continue;
+                                }
                                 // not for a PUT cluster: a PUT response echoes This Mac's own state
                                 // back, and `follow_cluster` would take Spirc's context for one
                                 // another client loaded (e.g. our own track-list load's context);
@@ -992,6 +999,37 @@ fn put_clusters(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
             }
         }
     }))
+}
+
+/// Applies Connect clusters in the order Spotify made them, across the dealer and PUT streams.
+/// A PUT response can arrive after a dealer update that is newer than it (the phone starts
+/// playing, then the late response of our PUT still shows the idle state): applied, it would
+/// undo the update and the restore gate would see Quiet and stop the phone.
+///
+/// The order key is `changed_timestamp_ms` (when the cluster state last changed, server
+/// clock), else `server_timestamp_ms` (when the server made this cluster). Mixing the two
+/// is sound: a cluster made at S holds every change up to S, so one whose key is older than
+/// the last applied key holds an older state (or the same state again: dropping it costs
+/// nothing). Equal keys apply: the same state. A cluster with neither stamp (0) applies and
+/// leaves the clock where it is: with no order to go by, the old behaviour stays.
+#[derive(Default)]
+struct ClusterClock {
+    last_ms: i64,
+}
+
+impl ClusterClock {
+    /// Whether to apply `c`; moves the clock to its key when it does.
+    fn admit(&mut self, c: &librespot_protocol::connect::Cluster) -> bool {
+        let key = if c.changed_timestamp_ms > 0 { c.changed_timestamp_ms } else { c.server_timestamp_ms };
+        if key <= 0 {
+            return true;
+        }
+        if key < self.last_ms {
+            return false;
+        }
+        self.last_ms = key;
+        true
+    }
 }
 
 /// A connect-state PUT response body as a cluster update. None when it doesn't parse, or
@@ -2017,6 +2055,25 @@ mod tests {
         assert_eq!(restore_gate(Some(&cluster("phone", true, false)), "mac", s(1)), Gate::OtherDevicePlaying);
         assert_eq!(restore_gate(Some(&cluster("phone", true, true)), "mac", s(1)), Gate::Load, "the phone is paused");
         assert_eq!(restore_gate(Some(&cluster("phone", false, false)), "mac", s(1)), Gate::Load, "the phone is stopped");
+    }
+
+    #[test]
+    fn stale_put_cluster_is_dropped() {
+        use librespot_protocol::connect::Cluster;
+        let at = |changed: i64, server: i64| Cluster { changed_timestamp_ms: changed, server_timestamp_ms: server, ..Default::default() };
+        let mut clock = ClusterClock::default();
+        assert!(clock.admit(&at(100, 110)), "the first cluster");
+        assert!(clock.admit(&at(200, 210)), "a newer dealer cluster (the phone plays)");
+        assert!(!clock.admit(&at(100, 150)), "a late PUT response with the older idle state");
+        assert!(clock.admit(&at(200, 300)), "a PUT with the same state, sent later");
+        assert!(clock.admit(&at(250, 260)), "a newer PUT");
+        assert!(!clock.admit(&at(200, 210)), "the old dealer cluster again");
+        // no changed stamp: the server stamp stands in
+        assert!(!clock.admit(&at(0, 240)), "made before the last change");
+        assert!(clock.admit(&at(0, 400)), "made after it");
+        // no stamp at all: applied, the clock stays
+        assert!(clock.admit(&at(0, 0)));
+        assert!(!clock.admit(&at(300, 0)), "the clock still holds 400");
     }
 
     fn put_body(active: &str, playing: bool) -> Vec<u8> {
