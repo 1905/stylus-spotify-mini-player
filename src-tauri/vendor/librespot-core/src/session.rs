@@ -367,8 +367,8 @@ impl Session {
                 info!("Please support Spotify and your artists and sign up for a premium account.");
 
                 // rust-spotify patch: upstream calls exit(1) here, which would kill the whole app
-                // that embeds librespot. The app checks the account type itself before starting
-                // the engine (player.rs), so only log here.
+                // that embeds librespot. The app checks the account type itself after Spirc::new
+                // (player.rs `run`), so only log here.
             }
         }
     }

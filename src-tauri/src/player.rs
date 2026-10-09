@@ -44,6 +44,8 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// One connect attempt (access point, login, Connect registration) may take this long.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the Premium check waits for the account type (ProductInfo can come after Spirc::new).
+const ACCOUNT_TYPE_WAIT: Duration = Duration::from_secs(2);
 /// A session that stayed up this long resets the reconnect backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// No Connect cluster this long after Connect came up (the dealer's connection id): the UI sees "nothing active" and This Mac
@@ -107,10 +109,12 @@ pub fn premium_from_attr(attr: Option<&str>) -> Premium {
     }
 }
 
-/// `auth_status`'s answer: "not_premium" after the Premium `Fatal`; "login" without stored
-/// credentials or after Spotify refused them; else "ok".
+/// `auth_status`'s answer: "ok" while the engine is ready or reconnecting (also when the
+/// login's save failed and no file exists); "not_premium" after the Premium `Fatal`;
+/// "login" without stored credentials or after Spotify refused them; else "ok".
 pub fn auth_status_for(has_credentials: bool, state: &State) -> &'static str {
     match state {
+        State::Ready | State::Reconnecting => "ok",
         State::Failed(reason) if reason == PREMIUM_REQUIRED => "not_premium",
         State::NeedsLogin => "login",
         _ if !has_credentials => "login",
@@ -321,15 +325,18 @@ struct Inner {
     /// The connection dropped while this Mac was the active device: the next ready loads
     /// the session back (paused), so the UI doesn't fall to "no device".
     reload_after_drop: AtomicBool,
-    /// The launch restore gave up only because no Connect state came in time: the first
-    /// cluster update runs it.
-    restore_pending: AtomicBool,
+    /// A restore gave up only because no Connect state came in time: the first cluster
+    /// update (or the quiet timer) runs it again, with the same `Restore` kind.
+    restore_pending: Mutex<Option<Restore>>,
     /// What plays here, for the UI (`player-state` events, nowplaying.rs).
     now: Arc<NowPlaying>,
     /// The volume set while This Mac was inactive, for its next load (`PendingVolume`).
     pending_volume: Mutex<PendingVolume>,
     /// Why a save of the player login failed since the last `engine_login` began. It reports it.
     save_error: Mutex<Option<String>>,
+    /// The credentials the current loop logs in with (`remember_live`). A restart without
+    /// new credentials uses them before the store: they work even when their save failed.
+    live_creds: Mutex<Option<Credentials>>,
 }
 
 impl Engine {
@@ -350,10 +357,11 @@ impl Engine {
             session,
             restore_tried: AtomicBool::new(false),
             reload_after_drop: AtomicBool::new(false),
-            restore_pending: AtomicBool::new(false),
+            restore_pending: Mutex::new(None),
             now,
             pending_volume: Mutex::new(PendingVolume::default()),
             save_error: Mutex::new(None),
+            live_creds: Mutex::new(None),
         }))
     }
 
@@ -472,22 +480,40 @@ impl Engine {
         }
     }
 
-    /// Stops the running loop (if any) and starts a new one with `creds`, or with the
-    /// stored credentials when None. No credentials → `needs_login`.
+    /// Stops the running loop (if any) and starts a new one with `creds`, else the live
+    /// credentials, else the stored ones (`start_creds`). No credentials → `needs_login`.
     pub async fn restart(&self, creds: Option<Credentials>) {
         let mut task = self.0.task.lock().await;
         let generation = self.end_loop(&mut task).await;
-        let creds = match creds {
-            Some(c) => Some(c),
-            None => {
-                let store = self.0.store.clone();
-                tokio::task::spawn_blocking(move || store.load()).await.ok().flatten()
-            }
+        let live = lock(&self.0.live_creds).clone();
+        let stored = if creds.is_none() && live.is_none() {
+            let store = self.0.store.clone();
+            tokio::task::spawn_blocking(move || store.load()).await.ok().flatten()
+        } else {
+            None
         };
+        let creds = start_creds(creds, live, stored);
         self.apply(generation, Event::Start { has_credentials: creds.is_some() });
         if let Some(creds) = creds {
             *task = Some(tauri::async_runtime::spawn(run(self.clone(), generation, creds)));
         }
+    }
+
+    /// The live login's account, else the stored login's (no engine run needed). Non-empty only.
+    pub async fn stored_account(&self) -> Option<String> {
+        let live = lock(&self.0.live_creds).as_ref().and_then(|c| c.username.clone());
+        if let Some(a) = live.filter(|a| !a.is_empty()) {
+            return Some(a);
+        }
+        let store = self.0.store.clone();
+        let stored = tokio::task::spawn_blocking(move || store.load()).await.ok().flatten()?;
+        stored.username.filter(|a| !a.is_empty())
+    }
+
+    /// `restart(None)` under `auth_op`: it can't run inside a logout and load the old account.
+    pub async fn restart_stored(&self) {
+        let _op = self.0.auth_op.lock().await;
+        self.restart(None).await;
     }
 
     /// Retires the running loop (if any) and waits up to 3 s for it to end. Returns the new generation.
@@ -506,6 +532,8 @@ impl Engine {
     async fn stop(&self) {
         let mut task = self.0.task.lock().await;
         let generation = self.end_loop(&mut task).await;
+        // after the bump: a late `remember_live` of the old loop sees it is stale
+        lock(&self.0.live_creds).take();
         self.apply(generation, Event::Start { has_credentials: false });
     }
 
@@ -529,7 +557,7 @@ impl Engine {
         // the next login is a new start: it restores that account's session
         self.0.restore_tried.store(false, Ordering::SeqCst);
         self.0.reload_after_drop.store(false, Ordering::SeqCst);
-        self.0.restore_pending.store(false, Ordering::SeqCst);
+        *lock(&self.0.restore_pending) = None;
         let result = first_error(results);
         match &result {
             Ok(()) => log::info!(target: "stylus::player", "logged out"),
@@ -567,6 +595,37 @@ impl Engine {
             State::Failed(reason) => Err(reason),
             State::Starting | State::Reconnecting => unreachable!(),
         }
+    }
+}
+
+/// The credentials a restart starts with: `given`, else `live`, else `stored`.
+fn start_creds(given: Option<Credentials>, live: Option<Credentials>, stored: Option<Credentials>) -> Option<Credentials> {
+    given.or(live).or(stored)
+}
+
+/// Keeps `creds` as the live credentials while `generation` is current. Checked under the
+/// state lock, where `retire` bumps the generation: a retired loop never writes.
+fn remember_live(engine: &Engine, generation: u64, creds: &Credentials) {
+    engine.0.state.send_if_modified(|_| {
+        if engine.is_current(generation) {
+            *lock(&engine.0.live_creds) = Some(creds.clone());
+        }
+        false
+    });
+}
+
+/// The account type from `get`, polled every 50 ms until it is there or `wait` is over.
+/// librespot gives no signal when ProductInfo arrives: its attributes are a plain read.
+async fn account_type(get: impl Fn() -> Option<String>, wait: Duration) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        if let Some(t) = get() {
+            return Some(t);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep_until(deadline.min(tokio::time::Instant::now() + Duration::from_millis(50))).await;
     }
 }
 
@@ -633,8 +692,13 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     let mut attempt = 0;
     let mut type_logged = false;
     loop {
-        // registered before Spirc starts the dealer, so no update of this session is missed
-        let mut cluster = cluster_updates(&session);
+        // registered before Spirc starts the dealer and does its first PUT, so no update of
+        // this session is missed. Dealer and PUT clusters both feed `on_cluster` and the
+        // restore gate; only dealer clusters feed `follow_cluster` (see the select arm)
+        let mut cluster = futures_util::stream::select(
+            cluster_updates(&session).map(|u| (u, false)),
+            put_clusters(&session).map(|u| (u, true)),
+        );
         let mut connect_ups = connection_ids(&session);
         let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
@@ -662,16 +726,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 let up_since = Instant::now();
                 now_playing.set_session(session.clone());
-                let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
-                creds = kept;
-                if save_error.is_some() {
-                    *lock(&engine.0.save_error) = save_error;
-                }
                 {
                     let (t, account) = (tracker.clone(), session.username());
                     let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
                 }
-                let account_type = session.get_user_attribute("type");
+                let account_type = account_type(|| session.get_user_attribute("type"), ACCOUNT_TYPE_WAIT).await;
                 if !type_logged {
                     log::info!(target: "stylus::player", "account type: {}", account_type.as_deref().unwrap_or("unknown"));
                     type_logged = true;
@@ -686,10 +745,17 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     Premium::Unknown => log::warn!(target: "stylus::player", "no account type from Spotify: the Premium check is skipped"),
                     Premium::Yes => {}
                 }
+                // after the Premium check: a Free account's login is never stored or kept
+                let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
+                creds = kept;
+                remember_live(&engine, generation, &creds);
+                if save_error.is_some() {
+                    *lock(&engine.0.save_error) = save_error;
+                }
                 match engine.apply(generation, Event::Connected) {
                     State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
                         engine.0.reload_after_drop.store(false, Ordering::SeqCst);
-                        engine.0.restore_pending.store(false, Ordering::SeqCst);
+                        *lock(&engine.0.restore_pending) = None;
                         tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
                     }
                     State::Ready if engine.0.reload_after_drop.swap(false, Ordering::SeqCst) => {
@@ -697,7 +763,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     }
                     _ => {}
                 }
-                // a launch restore still waiting for a cluster runs anyway once this fires;
+                // a restore still waiting for a cluster runs anyway once this fires;
                 // armed when the dealer has its connection id (`connect_ups`), not before
                 let quiet = tokio::time::sleep(QUIET_RESTORE_AFTER);
                 tokio::pin!(quiet);
@@ -716,13 +782,19 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     tokio::select! {
                         _ = &mut spirc_task => break,
                         Some(event) = events.recv() => was_here = active_after(was_here, &event, session.is_invalid()),
-                        Some(update) = cluster.next() => {
+                        Some((update, from_put)) = cluster.next() => {
                             if let Ok(update) = update {
-                                follow_cluster(&tracker, &update, session.device_id());
+                                // not for a PUT cluster: a PUT response echoes This Mac's own state
+                                // back, and `follow_cluster` would take Spirc's context for one
+                                // another client loaded (e.g. our own track-list load's context);
+                                // another client's load comes as a dealer update
+                                if !from_put {
+                                    follow_cluster(&tracker, &update, session.device_id());
+                                }
                                 now_playing.on_cluster(&update, session.device_id());
-                                // the launch restore that found no Connect state runs once, now
-                                if engine.0.restore_pending.swap(false, Ordering::SeqCst) {
-                                    tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
+                                // the restore that found no Connect state runs once, now
+                                if let Some(why) = lock(&engine.0.restore_pending).take() {
+                                    tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), why));
                                 }
                             }
                         }
@@ -737,8 +809,8 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                             quiet_done = true;
                             if now_playing.cluster().is_none() {
                                 log::info!(target: "stylus::session", "no Connect cluster {} s after Connect came up: no other device is active", QUIET_RESTORE_AFTER.as_secs());
-                                if engine.0.restore_pending.swap(false, Ordering::SeqCst) {
-                                    tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
+                                if let Some(why) = lock(&engine.0.restore_pending).take() {
+                                    tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), why));
                                 }
                             }
                         }
@@ -808,8 +880,8 @@ fn active_after(active: bool, event: &PlayerEvent, session_dead: bool) -> bool {
 
 /// Connect cluster updates (the account's devices and the active one's player state).
 /// Spirc listens too; the dealer hands each update to every listener. The cluster Spotify
-/// sends back for Spirc's first connect-state PUT is that PUT's HTTP response, not a dealer
-/// message: only Spirc sees it. With no other device active, the first update here can come
+/// sends back for each connect-state PUT is that PUT's HTTP response, not a dealer message:
+/// `put_clusters` gives those. With no other device active, the first dealer update can come
 /// late or never (`cluster_or_quiet`, `restore_gate`).
 fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
     match session.dealer().listen_for("hm://connect-state/v1/cluster", Message::from_raw::<ClusterUpdate>) {
@@ -819,6 +891,41 @@ fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
             Box::pin(futures_util::stream::pending())
         }
     }
+}
+
+/// The cluster of each connect-state PUT Spirc makes (its HTTP response; vendored
+/// librespot-core patch 4, `SpClient::connect_state_responses`). Spirc's first PUT comes right
+/// after the dealer's connection id, so this is usually the session's first cluster. Subscribed
+/// before Spirc starts: a new Session has a new SpClient, and the receiver never gives a body
+/// sent before it subscribed. A body that is not a cluster is skipped (logged once per session).
+fn put_clusters(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
+    let bodies = session.spclient().connect_state_responses();
+    Box::pin(futures_util::stream::unfold((bodies, false), |(mut bodies, mut logged)| async move {
+        loop {
+            // an error: the SpClient (the session) is gone
+            bodies.changed().await.ok()?;
+            let Some(body) = bodies.borrow_and_update().clone() else { continue };
+            match cluster_from_put(&body) {
+                Some(update) => return Some((Ok(update), (bodies, logged))),
+                None if !logged => {
+                    logged = true;
+                    log::info!(target: "stylus::session", "a connect-state PUT response ({} bytes) is not a cluster: skipped", body.len());
+                }
+                None => {}
+            }
+        }
+    }))
+}
+
+/// A connect-state PUT response body as a cluster update. None when it doesn't parse, or
+/// when it is empty: an empty body parses as an empty Cluster, which would hide the real one.
+fn cluster_from_put(body: &[u8]) -> Option<ClusterUpdate> {
+    use protobuf::Message as _;
+    if body.is_empty() {
+        return None;
+    }
+    let cluster = librespot_protocol::connect::Cluster::parse_from_bytes(body).ok()?;
+    Some(ClusterUpdate { cluster: Some(cluster).into(), ..Default::default() })
 }
 
 /// The dealer's connection id messages: Spirc does its first connect-state PUT on the first
@@ -873,18 +980,20 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
         return;
     }
     // another device playing must not be interrupted: Spotify's own device state (the Connect
-    // cluster) tells, and its first update usually arrives within seconds of connecting
+    // cluster) tells, and its first update usually arrives within seconds of connecting.
+    // No wait once the gate can tell (a retry from `restore_pending` comes with a cluster or quiet).
+    let gate = || restore_gate(engine.0.now.cluster().as_deref(), &device_id, engine.0.now.since_session());
     for _ in 0..12 {
-        if engine.0.now.cluster().is_some() {
+        if gate() != Gate::NoState {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    if why == Restore::Launch && restore_gate(engine.0.now.cluster().as_deref(), &device_id, engine.0.now.since_session()) == Gate::NoState {
-        engine.0.restore_pending.store(true, Ordering::SeqCst);
+    if gate() == Gate::NoState {
+        *lock(&engine.0.restore_pending) = Some(why);
         // a cluster that came in after the last look has already passed the loop's check
-        if engine.0.now.cluster().is_none() || !engine.0.restore_pending.swap(false, Ordering::SeqCst) {
-            log::info!(target: LOG, "restore (Launch) waits for the first Connect state");
+        if engine.0.now.cluster().is_none() || lock(&engine.0.restore_pending).take().is_none() {
+            log::info!(target: LOG, "restore ({why:?}) waits for the first Connect state");
             return;
         }
     }
@@ -895,14 +1004,16 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
         log::info!(target: LOG, "restore skipped: the player got a track meanwhile");
         return;
     }
+    // the user can load or play something while this waited: that wins over the old snapshot
+    if superseded(saved.as_ref(), tracker.current().as_ref(), engine.0.now.now().playing) {
+        log::info!(target: LOG, "restore ({why:?}): skipped, superseded by a newer load");
+        return;
+    }
     let Some(saved) = saved else {
         load_default(&engine, &device_id).await;
         return;
     };
     let Some(source) = saved.source.clone() else { return };
-    if !may_load(&engine, &device_id, why) {
-        return;
-    }
     match send_load(&engine, source, saved.track_uri.clone(), saved.position_ms, saved.shuffle, saved.repeat, saved.volume) {
         Ok(()) => {
             log::info!(target: LOG, "restored ({why:?}) {}{}", session::describe(&saved), if saved.finished { ", finished: from the top" } else { "" });
@@ -910,6 +1021,13 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
         }
         Err(e) => log::warn!(target: LOG, "restore ({why:?}) failed: {e}"),
     }
+}
+
+/// A restore's snapshot (`before`, read before its wait) is out of date: the session `now` has
+/// another source or track, or the player plays.
+fn superseded(before: Option<&session::Saved>, now: Option<&session::Saved>, playing: bool) -> bool {
+    let key = |s: Option<&session::Saved>| s.map(|s| (s.source.clone(), s.track_uri.clone()));
+    playing || key(before) != key(now)
 }
 
 /// What the Connect cluster says about a restore load now.
@@ -924,11 +1042,6 @@ enum Gate {
     Quiet,
 }
 
-/// `since_session`: the time since Connect came up (`NowPlaying::since_session`); None before.
-/// No cluster for `QUIET_RESTORE_AFTER` counts as "no other device is active": Spotify pushes a
-/// cluster update to the devices of the account when one of them plays or changes state, so
-/// another active device would have sent one by then. Before that, no cluster means "wait":
-/// a load could take a phone's music away.
 /// The cluster for the UI: the latest one; else, `QUIET_VIEW_AFTER` after Connect came up with none,
 /// an empty one (no device active, This Mac alone in the list); else None (ENGINE_NOT_READY).
 fn cluster_or_quiet(cluster: Option<Arc<librespot_protocol::connect::Cluster>>, since_session: Option<Duration>) -> Option<Arc<librespot_protocol::connect::Cluster>> {
@@ -939,6 +1052,11 @@ fn cluster_or_quiet(cluster: Option<Arc<librespot_protocol::connect::Cluster>>, 
     }
 }
 
+/// `since_session`: the time since Connect came up (`NowPlaying::since_session`); None before.
+/// No cluster for `QUIET_RESTORE_AFTER` counts as "no other device is active": Spotify pushes a
+/// cluster update to the devices of the account when one of them plays or changes state, so
+/// another active device would have sent one by then. Before that, no cluster means "wait":
+/// a load could take a phone's music away.
 fn restore_gate(cluster: Option<&librespot_protocol::connect::Cluster>, device_id: &str, since_session: Option<Duration>) -> Gate {
     let Some(c) = cluster else {
         return if since_session.is_some_and(|d| d >= QUIET_RESTORE_AFTER) { Gate::Quiet } else { Gate::NoState };
@@ -952,7 +1070,7 @@ fn restore_gate(cluster: Option<&librespot_protocol::connect::Cluster>, device_i
 }
 
 /// Checks the current cluster right before a restore load (the user can start music on
-/// another device while a restore waits). No state at a launch: the next cluster update retries.
+/// another device while a restore waits). No state: the next cluster update retries, same kind.
 fn may_load(engine: &Engine, device_id: &str, why: Restore) -> bool {
     const LOG: &str = "stylus::session";
     match restore_gate(engine.0.now.cluster().as_deref(), device_id, engine.0.now.since_session()) {
@@ -967,9 +1085,7 @@ fn may_load(engine: &Engine, device_id: &str, why: Restore) -> bool {
         }
         Gate::NoState => {
             log::info!(target: LOG, "restore ({why:?}) skipped: no Connect state, can't tell whether another device is playing");
-            if why == Restore::Launch {
-                engine.0.restore_pending.store(true, Ordering::SeqCst);
-            }
+            *lock(&engine.0.restore_pending) = Some(why);
             false
         }
     }
@@ -1050,11 +1166,12 @@ async fn load_default_source(engine: &Engine, device_id: &str, tracker: &Tracker
     if !may_load(engine, device_id, Restore::Launch) {
         return true;
     }
-    tracker.loaded(source.clone(), None, 0, false, Repeat::Off);
-    if let Err(e) = send_load(engine, source, None, 0, false, Repeat::Off, tracker.volume()) {
+    if let Err(e) = send_load(engine, source.clone(), None, 0, false, Repeat::Off, tracker.volume()) {
         log::warn!(target: DEFAULT_LOG, "default session: Liked Songs {what} not sent: {e}");
         return true;
     }
+    // only what was sent (`Engine::load` records after Ok too)
+    tracker.loaded(source, None, 0, false, Repeat::Off);
     if is_context && !track_within(tracker, DEFAULT_CONTEXT_WAIT).await {
         log::warn!(target: DEFAULT_LOG, "default session: the Liked Songs context showed no track in {} s", DEFAULT_CONTEXT_WAIT.as_secs());
         return false;
@@ -1151,10 +1268,13 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     let gen = engine.0.login_gen.load(Ordering::SeqCst);
     let result = async {
         // the browser wait is outside the lock: an open browser login never blocks a logout
-        let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT).await?;
+        // a logout bumps login_gen: the browser wait stops at once and frees the port
+        let e = engine.inner().clone();
+        let cancelled = move || e.0.login_gen.load(Ordering::SeqCst) != gen;
+        let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT, cancelled).await?;
         let _op = engine.0.auth_op.lock().await;
         if engine.0.login_gen.load(Ordering::SeqCst) != gen {
-            return Err("LOGIN_CANCELLED: logged out while the browser login was open".to_string());
+            return Err(crate::auth::LOGIN_CANCELLED.to_string());
         }
         lock(&engine.0.save_error).take();
         engine.restart(Some(Credentials::with_access_token(token.access_token))).await;
@@ -1194,7 +1314,7 @@ pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Resul
             return Err(e);
         }
     }
-    engine.restart(None).await;
+    engine.restart_stored().await;
     Ok(())
 }
 
@@ -1554,6 +1674,9 @@ mod tests {
         assert_eq!(auth_status_for(true, &Ready), "ok");
         assert_eq!(auth_status_for(true, &Failed("no audio".into())), "ok");
         assert_eq!(auth_status_for(false, &Starting), "login");
+        // logged in, but the save failed: no file, yet the engine runs
+        assert_eq!(auth_status_for(false, &Ready), "ok");
+        assert_eq!(auth_status_for(false, &Reconnecting), "ok");
         assert_eq!(auth_status_for(true, &NeedsLogin), "login");
         assert_eq!(auth_status_for(true, &Failed(PREMIUM_REQUIRED.into())), "not_premium");
         assert_eq!(auth_status_for(false, &Failed(PREMIUM_REQUIRED.into())), "not_premium");
@@ -1672,6 +1795,50 @@ mod tests {
         assert_eq!(store_reusable(Arc::new(FailStore), stored(&[1]), stored(&[1])).await, (stored(&[1]), None));
     }
 
+    // real time, short waits: tokio's `test-util` (time::pause) is not enabled in Cargo.toml
+    #[tokio::test]
+    async fn account_type_waits_for_product_info() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let get = || (calls.fetch_add(1, Ordering::SeqCst) >= 3).then(|| "free".to_string());
+        assert_eq!(account_type(get, ACCOUNT_TYPE_WAIT).await.as_deref(), Some("free"));
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn account_type_gives_up_after_the_wait() {
+        let wait = Duration::from_millis(300);
+        let start = Instant::now();
+        assert_eq!(account_type(|| None, wait).await, None);
+        let waited = start.elapsed();
+        assert!(waited >= wait && waited < wait + Duration::from_millis(500), "{waited:?}");
+    }
+
+    #[test]
+    fn start_creds_prefers_given_then_live_then_stored() {
+        let (g, l, s) = (stored(&[1]), stored(&[2]), stored(&[3]));
+        assert_eq!(start_creds(Some(g.clone()), Some(l.clone()), Some(s.clone())), Some(g));
+        assert_eq!(start_creds(None, Some(l.clone()), Some(s.clone())), Some(l));
+        assert_eq!(start_creds(None, None, Some(s.clone())), Some(s));
+        assert_eq!(start_creds(None, None, None), None);
+    }
+
+    #[tokio::test]
+    async fn a_stored_restart_waits_for_the_auth_lock() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        let before = engine.0.generation.load(Ordering::SeqCst);
+        let op = engine.0.auth_op.lock().await;
+        let restart = tokio::spawn({
+            let engine = engine.clone();
+            async move { engine.restart_stored().await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(engine.0.generation.load(Ordering::SeqCst), before, "no restart while auth_op is held");
+        drop(op);
+        restart.await.unwrap();
+        assert_eq!(engine.0.generation.load(Ordering::SeqCst), before + 1);
+        assert_eq!(engine.state(), NeedsLogin);
+    }
+
     #[test]
     fn login_reports_a_failed_save() {
         assert_eq!(login_result(Ok(()), None), Ok(()));
@@ -1706,13 +1873,16 @@ mod tests {
         })
         .unwrap();
         let engine = Engine::new(Arc::new(FileStore));
+        assert_eq!(engine.stored_account().await.as_deref(), Some("alice"), "from the file, before the player connects");
         engine.0.session.use_account("alice");
         engine.0.session.loaded(Source::Uris { uris: vec!["spotify:track:a".into()] }, None, 0, false, Repeat::Off);
         engine.0.session.save_if_due();
         assert!(dir.join("player-credentials.json").exists() && dir.join("cache").exists() && dir.join("session.json").exists());
         engine.0.restore_tried.store(true, Ordering::SeqCst);
         engine.0.reload_after_drop.store(true, Ordering::SeqCst);
-        engine.0.restore_pending.store(true, Ordering::SeqCst);
+        *lock(&engine.0.restore_pending) = Some(Restore::Launch);
+        *lock(&engine.0.live_creds) = Some(creds.clone());
+        assert_eq!(engine.stored_account().await.as_deref(), Some("alice"));
 
         engine.logout().await.unwrap();
 
@@ -1727,7 +1897,9 @@ mod tests {
         assert_eq!(engine.auth_status(), "login");
         assert!(!engine.0.restore_tried.load(Ordering::SeqCst), "the next login restores again");
         assert!(!engine.0.reload_after_drop.load(Ordering::SeqCst), "no reload of the old session after a logout");
-        assert!(!engine.0.restore_pending.load(Ordering::SeqCst), "no late restore of the old account");
+        assert!(lock(&engine.0.restore_pending).is_none(), "no late restore of the old account");
+        assert!(lock(&engine.0.live_creds).is_none(), "no restart with the old account's login");
+        assert_eq!(engine.stored_account().await, None, "me_id has no account after a logout");
         // a second logout finds nothing to remove: still Ok
         engine.logout().await.unwrap();
     }
@@ -1755,6 +1927,90 @@ mod tests {
         assert_eq!(restore_gate(Some(&cluster("phone", true, false)), "mac", s(1)), Gate::OtherDevicePlaying);
         assert_eq!(restore_gate(Some(&cluster("phone", true, true)), "mac", s(1)), Gate::Load, "the phone is paused");
         assert_eq!(restore_gate(Some(&cluster("phone", false, false)), "mac", s(1)), Gate::Load, "the phone is stopped");
+    }
+
+    fn put_body(active: &str, playing: bool) -> Vec<u8> {
+        use librespot_protocol::connect::{Cluster, DeviceInfo};
+        use protobuf::Message as _;
+        let mut c = Cluster::new();
+        c.active_device_id = active.into();
+        c.device.insert(active.into(), DeviceInfo { device_id: active.into(), name: "Phone".into(), ..Default::default() });
+        c.player_state.mut_or_insert_default().is_playing = playing;
+        c.write_to_bytes().unwrap()
+    }
+
+    #[test]
+    fn cluster_from_put_parses_a_cluster() {
+        let update = cluster_from_put(&put_body("phone", true)).expect("a cluster");
+        assert_eq!(update.cluster.active_device_id, "phone");
+        assert_eq!(update.cluster.device["phone"].name, "Phone");
+        assert!(update.cluster.player_state.is_playing);
+    }
+
+    #[test]
+    fn put_clusters_skips_a_bad_body() {
+        // field 15 with wire type 7: no such wire type
+        assert!(cluster_from_put(&[0xff, 0x00]).is_none());
+        // an empty body parses as an empty Cluster: it says nothing, so it is skipped
+        assert!(cluster_from_put(&[]).is_none());
+    }
+
+    #[test]
+    fn put_cluster_blocks_restore() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        let update = cluster_from_put(&put_body("phone", true)).unwrap();
+        engine.0.now.on_cluster(&update, "mac");
+        assert_eq!(restore_gate(engine.0.now.cluster().as_deref(), "mac", None), Gate::OtherDevicePlaying);
+        assert!(!may_load(&engine, "mac", Restore::Launch), "the phone keeps its music");
+    }
+
+    #[test]
+    fn restore_skips_a_load_made_meanwhile() {
+        let saved = |context: &str, track: &str, position_ms: u32| session::Saved {
+            account: "alice".into(),
+            source: Some(Source::Context { context_uri: context.into() }),
+            track_uri: Some(track.into()),
+            position_ms,
+            shuffle: false,
+            repeat: Repeat::Off,
+            volume: session::DEFAULT_VOLUME,
+            saved_at: 0,
+            finished: false,
+        };
+        let before = saved("spotify:album:a", "spotify:track:1", 1000);
+        let other = saved("spotify:album:b", "spotify:track:1", 1000);
+        let next = saved("spotify:album:a", "spotify:track:2", 0);
+        let moved = saved("spotify:album:a", "spotify:track:1", 9000);
+        assert!(superseded(Some(&before), Some(&other), false), "a new source");
+        assert!(superseded(Some(&before), Some(&next), false), "a new track");
+        assert!(superseded(Some(&before), Some(&before), true), "same source, playing");
+        assert!(!superseded(Some(&before), Some(&moved), false), "same source paused: only the position moved");
+        assert!(superseded(None, Some(&before), false), "something loaded where there was nothing");
+        assert!(!superseded(None, None, false));
+    }
+
+    #[test]
+    fn no_state_keeps_the_reconnect() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        assert!(!may_load(&engine, "mac", Restore::Reconnect), "no cluster, Connect not up: can't tell");
+        assert_eq!(*lock(&engine.0.restore_pending), Some(Restore::Reconnect));
+        assert!(!may_load(&engine, "mac", Restore::Finished));
+        assert_eq!(*lock(&engine.0.restore_pending), Some(Restore::Finished));
+    }
+
+    #[tokio::test]
+    async fn default_source_not_recorded_when_send_fails() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        let tracker = engine.0.session.clone();
+        tracker.use_account("default-source-test-account");
+        // a cluster with no active device: the gate lets the load go
+        engine.0.now.on_cluster(&ClusterUpdate::new(), "mac");
+        assert!(may_load(&engine, "mac", Restore::Launch));
+        assert_eq!(engine.state(), Starting, "no Spirc: send_load fails");
+        let liked = Source::Context { context_uri: "spotify:user:x:collection".into() };
+        assert!(load_default_source(&engine, "mac", &tracker, liked).await);
+        assert!(tracker.current().is_none(), "a load that was not sent is not the session");
+        assert!(!tracker.is_due(), "nothing to save");
     }
 
     #[test]

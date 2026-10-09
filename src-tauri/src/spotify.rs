@@ -34,10 +34,22 @@ pub async fn cache_get(account: String, key: String) -> Option<Value> {
 }
 
 /// The signed-in user's Spotify id: the account the cache is scoped to. The player's session
-/// knows it without a request.
+/// knows it without a request; before the player connects, the stored login's account.
 #[tauri::command]
 pub async fn me_id() -> Result<String, String> {
-    serve_one("me_id", |api| async move { Ok(api.username()) }).await
+    let live = serve_one("me_id", |api| async move { Ok(api.username()) }).await;
+    let stored = match (&live, internal::engine()) {
+        (Ok(id), _) if !id.is_empty() => None,
+        (_, Some(engine)) => engine.stored_account().await,
+        _ => None,
+    };
+    let err = live.as_ref().err().cloned().unwrap_or_else(|| "no account".into());
+    pick_account(live.ok(), stored).ok_or(err)
+}
+
+/// The live session's account, else the stored login's. An empty id counts as none.
+fn pick_account(live: Option<String>, stored: Option<String>) -> Option<String> {
+    live.filter(|a| !a.is_empty()).or(stored.filter(|a| !a.is_empty()))
 }
 
 // ---- Spotify Connect: control a real device -------------------------------
@@ -59,7 +71,8 @@ pub async fn playback_state() -> Result<Value, String> {
     internal::playback_snapshot().await
 }
 
-/// Move playback to `device_id`; `play` starts it there, false keeps the current state.
+/// Move playback to `device_id`. To This Mac: `play` starts it there, false keeps the current
+/// state. Another device always keeps its play/pause state (`play` is not used).
 #[tauri::command]
 pub async fn transfer_playback(device_id: String, play: bool) -> Result<(), String> {
     control::transfer(device_id, play).await.map(drop)
@@ -477,6 +490,16 @@ async fn hit(account: &Option<String>, key: &Option<String>) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn me_id_falls_back_to_the_stored_login() {
+        let s = |v: &str| Some(v.to_string());
+        assert_eq!(pick_account(s("bob"), s("alice")), s("bob"), "the live session wins");
+        assert_eq!(pick_account(None, s("alice")), s("alice"));
+        assert_eq!(pick_account(None, None), None);
+        assert_eq!(pick_account(s(""), s("")), None);
+        assert_eq!(pick_account(s(""), s("alice")), s("alice"));
+    }
 
     #[test]
     fn search_has_more_rules() {

@@ -45,7 +45,7 @@ pub fn run() {
             // the speaker "This Mac" starts with the app (or waits in needs_login)
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
-            tauri::async_runtime::spawn(async move { engine.restart(None).await });
+            tauri::async_runtime::spawn(async move { engine.restart_stored().await });
             // "Log Out" in the app menu (and the handler for the tray menu's one)
             if let Err(e) = tray::init_app_menu(app.handle()) {
                 log::warn!("app menu: {e}");
@@ -117,7 +117,6 @@ pub fn run() {
             spotify::get_artist_albums,
             spotify::get_followed_artists,
             spotify::add_to_queue,
-            control::control_transfer,
             library::mixes_list,
             library::links_list,
             library::link_resolve,

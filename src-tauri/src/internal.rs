@@ -941,11 +941,13 @@ pub fn command_bodies(cmd: &RemoteCmd) -> Vec<(reqwest::Method, String, Value)> 
     }
 }
 
-/// A failed remote request as the caller sees it: a 4xx "refused" answer (400, 403, 404, 405, 501)
-/// is `NOT_AVAILABLE_REMOTE`; other failures (transport, 5xx, 429) keep their text.
+/// A failed remote request as the caller sees it: a 404 is a gone device (`NO_ACTIVE_DEVICE`, the UI
+/// rediscovers); a 4xx "refused" answer (400, 403, 405, 501) is `NOT_AVAILABLE_REMOTE`; other
+/// failures (transport, 5xx, 429) keep their text.
 pub fn remote_error(action: &str, err: String) -> String {
     match err.strip_prefix("HTTP ").and_then(|r| r.get(..3)) {
-        Some("400" | "403" | "404" | "405" | "501") => crate::control::not_available_remote(action),
+        Some("404") => format!("NO_ACTIVE_DEVICE: {action}: device not found"),
+        Some("400" | "403" | "405" | "501") => crate::control::not_available_remote(action),
         _ => err,
     }
 }
@@ -1326,7 +1328,7 @@ mod tests {
 
     #[test]
     fn remote_refusals_are_not_available_remote() {
-        for s in [400, 403, 404, 405, 501] {
+        for s in [400, 403, 405, 501] {
             assert_eq!(remote_error("pause", http_error(s, b"no")), "NOT_AVAILABLE_REMOTE: pause on other devices", "{s}");
         }
         // other failures keep their own text
@@ -1334,6 +1336,12 @@ mod tests {
         assert_eq!(remote_error("pause", http_error(429, b"")), "HTTP 429: ");
         assert_eq!(remote_error("pause", "transport: timed out".into()), "transport: timed out");
         assert_eq!(remote_error("pause", "ENGINE_NOT_READY: x".into()), "ENGINE_NOT_READY: x");
+    }
+
+    #[test]
+    fn remote_404_is_a_gone_device() {
+        let e = remote_error("pause", http_error(404, b""));
+        assert!(e.starts_with("NO_ACTIVE_DEVICE"), "{e}");
     }
 
     #[test]
