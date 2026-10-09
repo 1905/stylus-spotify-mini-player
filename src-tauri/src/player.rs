@@ -546,6 +546,21 @@ impl Engine {
         stored.username.filter(|a| !a.is_empty())
     }
 
+    /// The private values the anonymized log masks (logshare.rs): the account name (the
+    /// session's, the live login's, the stored login's), the Connect device names of the last
+    /// cluster except This Mac, and the names in the metadata cache. Raw: logshare tidies them.
+    /// Blocking (reads the credentials file): call it off the async runtime.
+    pub fn private_values(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.0.now.session().map(|s| s.username()).into_iter().collect();
+        out.extend(lock(&self.0.live_creds).as_ref().and_then(|c| c.username.clone()));
+        out.extend(self.0.store.load().and_then(|c| c.username));
+        if let Some(cluster) = self.0.now.cluster() {
+            out.extend(cluster.device.values().map(|d| d.name.clone()).filter(|n| n != DEVICE_NAME));
+        }
+        out.extend(self.0.now.private_names());
+        out
+    }
+
     /// `restart(None)` under `auth_op`: it can't run inside a logout and load the old account.
     pub async fn restart_stored(&self) {
         let _op = self.0.auth_op.lock().await;

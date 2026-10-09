@@ -575,6 +575,19 @@ impl NowPlaying {
     pub fn last_session(&self) -> Option<crate::session::Saved> {
         self.tracker.current()
     }
+
+    /// The track, artist and album names in the metadata cache: private values for the
+    /// anonymized log (logshare.rs). Not deduped or trimmed: logshare does that.
+    pub fn private_names(&self) -> Vec<String> {
+        let meta = lock(&self.meta);
+        let mut out = Vec::with_capacity(meta.len() * 3);
+        for t in meta.values() {
+            out.push(t.name.clone());
+            out.extend(t.artists.iter().map(|(_, n)| n.clone()));
+            out.push(t.album.clone());
+        }
+        out
+    }
 }
 
 /// 0–100 % → 0–65535, the inverse of `volume_percent`. Above 100 counts as 100.
@@ -619,6 +632,32 @@ mod tests {
 
     fn track_id() -> SpotifyUri {
         SpotifyUri::from_uri(URI).unwrap()
+    }
+
+    #[test]
+    fn private_names_lists_names_artists_and_albums_of_the_cache() {
+        let np = NowPlaying::new(Arc::new(Tracker::new(std::env::temp_dir().join("stylus-private-names.json"))));
+        assert!(np.private_names().is_empty());
+        np.remember(info());
+        let other = TrackInfo {
+            uri: "spotify:track:b".into(),
+            id: "b".into(),
+            name: "Velvet Canary Song".into(),
+            artists: vec![("y".into(), "Quiet Harbor".into())],
+            album: "Paper Lanterns".into(),
+            cover: None,
+            duration_ms: 1,
+        };
+        np.remember(other);
+        let mut names = np.private_names();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "Never Gonna Give You Up", "Paper Lanterns", "Quiet Harbor", "Rick Astley", "Someone",
+                "Velvet Canary Song", "Whenever You Need Somebody",
+            ]
+        );
     }
 
     #[test]

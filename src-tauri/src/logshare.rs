@@ -3,8 +3,10 @@
 //! collapse repeats, cap the size (spec: plans/2026-10-09-anonymized-logs, P3).
 
 use regex::Regex;
-use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// The anonymized text keeps its newest lines up to this size.
 pub const CAP_BYTES: usize = 1_048_576;
@@ -330,9 +332,73 @@ pub fn header(h: &Header, a: &Anonymized) -> String {
     s
 }
 
+/// One export at a time: a second click waits, then writes the file again.
+static EXPORT: Mutex<()> = Mutex::new(());
+
+/// Writes `<app dir>/anonymized-logs/stylus-log-anonymized.txt` from `logs/stylus.1.log` (if
+/// any) and `logs/stylus.log`, and gives its path. Blocking: run it off the main thread.
+pub fn export<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let _one = EXPORT.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = crate::paths::app_dir();
+    let logs = dir.join("logs");
+    let mut raw = std::fs::read_to_string(logs.join("stylus.1.log")).unwrap_or_default();
+    match std::fs::read_to_string(logs.join("stylus.log")) {
+        Ok(s) => raw.push_str(&s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("read stylus.log: {e}")),
+    }
+    let a = anonymize(&raw, &private_values(app), CAP_BYTES);
+    let h = Header {
+        app: app.package_info().version.to_string(),
+        macos: command_line("sw_vers", &["-productVersion"]).unwrap_or_else(|| "unknown".into()),
+        made_at: command_line("date", &["-u", "+%Y-%m-%d %H:%M:%SZ"]).unwrap_or_else(|| "unknown".into()),
+    };
+    let out_dir = dir.join("anonymized-logs");
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;
+    let path = out_dir.join("stylus-log-anonymized.txt");
+    std::fs::write(&path, format!("{}\n{}", header(&h, &a), a.text)).map_err(|e| format!("write {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+/// The values to mask: the engine's (account, device names, track names) and this Mac's user
+/// and computer names. Tidied (`tidy_private`).
+fn private_values<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
+    let mut values = app.try_state::<crate::player::Engine>().map(|e| e.private_values()).unwrap_or_default();
+    values.extend(std::env::var("USER").ok());
+    values.extend(command_line("scutil", &["--get", "ComputerName"]));
+    values.extend(command_line("scutil", &["--get", "LocalHostName"]));
+    tidy_private(values)
+}
+
+/// Trimmed, 4+ characters, each one time (the first spelling, case-insensitive).
+fn tidy_private(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .map(|v| v.trim().to_string())
+        .filter(|v| v.chars().count() >= 4 && seen.insert(v.to_lowercase()))
+        .collect()
+}
+
+/// The trimmed stdout of a command that exits 0 with output; None otherwise.
+fn command_line(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program).args(args).output().ok()?;
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !s.is_empty()).then_some(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tidy_private_trims_drops_short_and_dedupes() {
+        let v = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            tidy_private(v(&["  Alice Phone ", "abc", "", "alice phone", "kass", " kass", "Kitchen"])),
+            v(&["Alice Phone", "kass", "Kitchen"])
+        );
+    }
 
     fn run(raw: &str) -> Anonymized {
         anonymize(raw, &[], CAP_BYTES)
