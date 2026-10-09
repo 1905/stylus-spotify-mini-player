@@ -30,7 +30,7 @@ futures-util = "0.3"
 librespot-core = "0.8.0"
 librespot-playback = { version = "0.8.0", features = ["rodio-backend"] }
 librespot-connect = "0.8.0"
-# track names, artists and covers for the in-app player's now-playing (nowplaying.rs): no Web API
+# track names, artists and covers for the in-app player's now-playing (nowplaying.rs)
 librespot-metadata = "0.8.0"
 # only for AuthenticationType: the session hands back its reusable login as raw fields
 librespot-protocol = "0.8.0"

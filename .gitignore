@@ -6,7 +6,6 @@ src-tauri/gen/
 *.log
 .DS_Store
 .env*
-tokens.json*
 *.invalid
 .playwright-cli/
 

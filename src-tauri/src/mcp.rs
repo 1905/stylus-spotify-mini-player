@@ -367,7 +367,7 @@ Stylus's MCP server (`stylus`) controls Spotify through the Stylus app on this M
 - Search before you play when the user names a song or album you don't have a uri for (`search`, then `play` with the `uri`).
 - When the user names a playlist or mix (\"my Bonobo Radio\", \"Daily Mix 2\", \"Discover Weekly\"), play it with `play` `name`; `list_mixes` and `list_playlists` show what exists.
 - A Spotify share link (open.spotify.com/...) goes to `open_link`; `save: true` keeps it in Stylus's library, `play: true` plays it.
-- \"This Mac\" is Stylus's own speaker. It keeps working when Spotify rate-limits Stylus's Web API; other devices need the Web API.
+- \"This Mac\" is Stylus's own speaker: every command works there. Other devices are listed, and `transfer` to This Mac works; a command for another device that Stylus can't send answers \"Not available for other devices\".
 - `play` on This Mac waits up to 5 s: `status: playing` names the track that started. `status: requested` means not confirmed yet: call `now_playing` once a few seconds later. After `transfer`, call `now_playing` once. Never poll it in a loop.
 - Volume: `set_volume` (0-100), `volume_step` (+/-), `mute` / `unmute`.
 - If a name matches several items, the error lists them with uris: pick one, or ask the user.

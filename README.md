@@ -136,17 +136,15 @@ npx tauri build --bundles app   # → src-tauri/target/release/bundle/macos/Styl
 
 ### Spotify login
 
-Stylus signs in twice on first launch, both in your browser: once for **library access** (the Spotify Web API, OAuth with PKCE, no client secret) and once for **the player** (the built-in Spotify Connect speaker).
-
-The included client ID belongs to a Spotify developer app in development mode, so Spotify only lets accounts on its allowlist sign in. To use your own, create an app at [developer.spotify.com](https://developer.spotify.com/dashboard), add the redirect URI `http://127.0.0.1:1420/callback`, and put its client ID in `CLIENT_ID` in `src-tauri/src/auth.rs` before you build.
+Stylus has one login: the player login. On first launch, select **Log in with Spotify**. Your browser opens the Spotify login page (OAuth with PKCE, no client secret), and Stylus gets the login for its built-in Spotify Connect speaker. Stylus uses this login for playback and also for your library, search and playlists. The account must have Spotify Premium: without Premium, the login screen says so. You do not need a Spotify developer app.
 
 <details>
 <summary>How it works</summary>
 
 - **App shell:** [Tauri 2](https://tauri.app) with a plain JavaScript frontend.
 - **Playback:** [librespot](https://github.com/librespot-org/librespot) 0.8, embedded as a Spotify Connect device, with a custom audio output that applies volume at playback time.
-- **Library data:** Spotify's internal endpoints, the same ones the official apps use, through the player's own session. The public Web API is a fallback; when Spotify rate-limits it, Stylus respects `Retry-After` and keeps playing.
-- **State on disk:** `~/Library/Application Support/stylus/` holds the login tokens, the player credentials (`0600`), the session, settings, a list cache and the log `logs/stylus.log`.
+- **Library data:** Spotify's internal endpoints, the same ones the official apps use, through the player's own session.
+- **State on disk:** `~/Library/Application Support/stylus/` holds the player credentials (`0600`), the session, settings, a list cache and the log `logs/stylus.log`.
 
 </details>
 
