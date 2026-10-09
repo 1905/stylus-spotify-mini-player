@@ -44,6 +44,8 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// One connect attempt (access point, login, Connect registration) may take this long.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long the Premium check waits for the account type (ProductInfo can come after Spirc::new).
+const ACCOUNT_TYPE_WAIT: Duration = Duration::from_secs(2);
 /// A session that stayed up this long resets the reconnect backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// No Connect cluster this long after Connect came up (the dealer's connection id): the UI sees "nothing active" and This Mac
@@ -601,6 +603,21 @@ fn remember_live(engine: &Engine, generation: u64, creds: &Credentials) {
     });
 }
 
+/// The account type from `get`, polled every 50 ms until it is there or `wait` is over.
+/// librespot gives no signal when ProductInfo arrives: its attributes are a plain read.
+async fn account_type(get: impl Fn() -> Option<String>, wait: Duration) -> Option<String> {
+    let deadline = tokio::time::Instant::now() + wait;
+    loop {
+        if let Some(t) = get() {
+            return Some(t);
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return None;
+        }
+        tokio::time::sleep_until(deadline.min(tokio::time::Instant::now() + Duration::from_millis(50))).await;
+    }
+}
+
 /// `initial_volume`: the session's volume, so launches and reconnects keep it.
 fn connect_config(initial_volume: u16) -> ConnectConfig {
     ConnectConfig {
@@ -693,17 +710,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 let up_since = Instant::now();
                 now_playing.set_session(session.clone());
-                let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
-                creds = kept;
-                remember_live(&engine, generation, &creds);
-                if save_error.is_some() {
-                    *lock(&engine.0.save_error) = save_error;
-                }
                 {
                     let (t, account) = (tracker.clone(), session.username());
                     let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
                 }
-                let account_type = session.get_user_attribute("type");
+                let account_type = account_type(|| session.get_user_attribute("type"), ACCOUNT_TYPE_WAIT).await;
                 if !type_logged {
                     log::info!(target: "stylus::player", "account type: {}", account_type.as_deref().unwrap_or("unknown"));
                     type_logged = true;
@@ -717,6 +728,13 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     }
                     Premium::Unknown => log::warn!(target: "stylus::player", "no account type from Spotify: the Premium check is skipped"),
                     Premium::Yes => {}
+                }
+                // after the Premium check: a Free account's login is never stored or kept
+                let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
+                creds = kept;
+                remember_live(&engine, generation, &creds);
+                if save_error.is_some() {
+                    *lock(&engine.0.save_error) = save_error;
                 }
                 match engine.apply(generation, Event::Connected) {
                     State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
@@ -1705,6 +1723,24 @@ mod tests {
         // nothing new to save: no save, no error
         assert_eq!(store_reusable(Arc::new(FailStore), stored(&[]), token.clone()).await, (token, None));
         assert_eq!(store_reusable(Arc::new(FailStore), stored(&[1]), stored(&[1])).await, (stored(&[1]), None));
+    }
+
+    // real time, short waits: tokio's `test-util` (time::pause) is not enabled in Cargo.toml
+    #[tokio::test]
+    async fn account_type_waits_for_product_info() {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let get = || (calls.fetch_add(1, Ordering::SeqCst) >= 3).then(|| "free".to_string());
+        assert_eq!(account_type(get, ACCOUNT_TYPE_WAIT).await.as_deref(), Some("free"));
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn account_type_gives_up_after_the_wait() {
+        let wait = Duration::from_millis(300);
+        let start = Instant::now();
+        assert_eq!(account_type(|| None, wait).await, None);
+        let waited = start.elapsed();
+        assert!(waited >= wait && waited < wait + Duration::from_millis(500), "{waited:?}");
     }
 
     #[test]
