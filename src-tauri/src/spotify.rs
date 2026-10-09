@@ -6,7 +6,8 @@
 //! Errors starting with `AUTH_EXPIRED`, `NO_ACTIVE_DEVICE` or `RATE_LIMITED` are codes the
 //! frontend matches with `startsWith`.
 
-use crate::auth::{http, urlencode, valid_access_token};
+use crate::auth::valid_access_token;
+use crate::paths::{http, urlencode};
 use crate::internal::{
     self, serve, web, with_api,
     Source::{Fallback, Primary},

@@ -103,8 +103,8 @@ static BLOCK: Mutex<Option<Block>> = Mutex::new(None);
 fn with_block<T>(f: impl FnOnce(&mut Block) -> T) -> T {
     let mut guard = lock(&BLOCK);
     let block = guard.get_or_insert_with(|| {
-        let b = Block::from_stored(crate::store::get(STORE_KEY).as_ref(), crate::auth::now());
-        let left = b.left(crate::auth::now());
+        let b = Block::from_stored(crate::store::get(STORE_KEY).as_ref(), crate::paths::now());
+        let left = b.left(crate::paths::now());
         if left > 0 {
             log::warn!(target: LOG, "Web API still blocked from the last run: {} left", human(left));
         }
@@ -121,7 +121,7 @@ fn persist(value: Value) {
 
 /// Before every Web API request: Err(RATE_LIMITED…) while blocked, no request made.
 pub fn check() -> Result<(), String> {
-    match with_block(|b| b.check(crate::auth::now())) {
+    match with_block(|b| b.check(crate::paths::now())) {
         Check::Open => Ok(()),
         Check::Blocked(left) => Err(rate_limited_error(left)),
         Check::Ended => {
@@ -135,7 +135,7 @@ pub fn check() -> Result<(), String> {
 /// A 429 on `path`: block for Retry-After, store the end, and return the error for the caller.
 pub fn on_429(retry_after: Option<&str>, path: &str) -> String {
     let secs = retry_after_secs(retry_after);
-    let now = crate::auth::now();
+    let now = crate::paths::now();
     let (started, stored, left) = with_block(|b| {
         let started = b.hit(secs, now);
         (started, b.stored(), b.left(now))
@@ -156,7 +156,7 @@ pub fn on_429(retry_after: Option<&str>, path: &str) -> String {
 /// Seconds left on the block, 0 when open.
 pub fn blocked_for() -> u64 {
     let _ = check(); // ends a block that ran out (logs it once)
-    with_block(|b| b.left(crate::auth::now()))
+    with_block(|b| b.left(crate::paths::now()))
 }
 
 /// "14.8 h", "12 min", "30 s".

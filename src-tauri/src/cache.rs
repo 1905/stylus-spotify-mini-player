@@ -24,7 +24,7 @@ pub(crate) struct Cache {
 
 /// The app's list cache.
 pub(crate) fn lists() -> Cache {
-    Cache::new(crate::auth::app_dir().join("cache").join("lists"))
+    Cache::new(crate::paths::app_dir().join("cache").join("lists"))
 }
 
 impl Cache {
@@ -59,9 +59,9 @@ impl Cache {
         if let Err(e) = std::fs::create_dir_all(&self.dir) {
             return eprintln!("cache: could not create {}: {e}", self.dir.display());
         }
-        let body = json!({ "key": full, "saved_at": crate::auth::now(), "value": value });
+        let body = json!({ "key": full, "saved_at": crate::paths::now(), "value": value });
         let path = self.path(&full);
-        if let Err(e) = crate::auth::write_private(&path, &body.to_string()) {
+        if let Err(e) = crate::paths::write_private(&path, &body.to_string()) {
             return eprintln!("cache: could not write {}: {e}", path.display());
         }
         self.evict();
@@ -116,7 +116,7 @@ mod tests {
 
     /// A fresh, empty dir under the system temp dir.
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("stylus-cache-{name}-{}-{}", std::process::id(), crate::auth::now()));
+        let dir = std::env::temp_dir().join(format!("stylus-cache-{name}-{}-{}", std::process::id(), crate::paths::now()));
         let _ = std::fs::create_dir_all(&dir);
         dir
     }

@@ -15,6 +15,7 @@ pub mod mcp_tools;
 mod media;
 mod nowplaying;
 mod parse;
+mod paths;
 mod pb;
 mod player;
 mod quota;

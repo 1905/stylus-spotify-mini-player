@@ -132,7 +132,7 @@ fn item_of(v: &Value) -> Value {
     json!({
         "kind": v["kind"], "id": v["id"], "uri": v["uri"], "name": v["name"], "cover": v["cover"],
         "owner": v["owner"], "owner_id": v["owner_id"], "artists": v["artists"], "total": v["total"],
-        "tab": v["tab"], "added": crate::auth::now(),
+        "tab": v["tab"], "added": crate::paths::now(),
     })
 }
 
@@ -205,14 +205,14 @@ async fn home_mixes(account: &str, refresh: bool) -> Vec<Value> {
     let stored = crate::store::get(HOME_KEY).filter(|v| v["account"] == account);
     let items = |v: &Value| v["items"].as_array().cloned().unwrap_or_default();
     if let Some(s) = &stored {
-        if !refresh && crate::auth::now().saturating_sub(s["at"].as_u64().unwrap_or(0)) < HOME_FRESH_SECS {
+        if !refresh && crate::paths::now().saturating_sub(s["at"].as_u64().unwrap_or(0)) < HOME_FRESH_SECS {
             return items(s);
         }
     }
     match crate::internal::Api::current() {
         Ok(api) => match api.home_mixes().await {
             Ok(list) => {
-                let _ = crate::store::store_set(HOME_KEY.into(), json!({ "account": account, "at": crate::auth::now(), "items": list }));
+                let _ = crate::store::store_set(HOME_KEY.into(), json!({ "account": account, "at": crate::paths::now(), "items": list }));
                 log::info!(target: LOG, "home feed: {} mixes", list.len());
                 list
             }

@@ -25,7 +25,7 @@ impl Default for Settings {
 }
 
 fn path() -> std::path::PathBuf {
-    crate::auth::app_dir().join("settings.json")
+    crate::paths::app_dir().join("settings.json")
 }
 
 /// The settings in `json`; anything unknown or broken falls back to the default.
@@ -42,7 +42,7 @@ pub fn load() -> Settings {
 
 pub fn save(settings: &Settings) -> Result<(), String> {
     let json = serde_json::to_string(settings).map_err(|e| e.to_string())?;
-    crate::auth::write_private(&path(), &json).map_err(|e| format!("could not save {}: {e}", path().display()))
+    crate::paths::write_private(&path(), &json).map_err(|e| format!("could not save {}: {e}", path().display()))
 }
 
 /// Load, change with `f`, save: one at a time, so two writers can't drop each other's change.

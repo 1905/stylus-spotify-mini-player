@@ -158,7 +158,7 @@ fn read_for(path: &Path, account: &str) -> Option<Saved> {
 fn write(path: &Path, saved: &Saved) {
     let result = serde_json::to_string(saved)
         .map_err(|e| e.to_string())
-        .and_then(|json| crate::auth::write_private(path, &json).map_err(|e| e.to_string()));
+        .and_then(|json| crate::paths::write_private(path, &json).map_err(|e| e.to_string()));
     if let Err(e) = result {
         log::warn!(target: LOG, "could not save session.json: {e}");
     }
@@ -277,7 +277,7 @@ impl Live {
             shuffle: self.shuffle,
             repeat: self.repeat,
             volume: self.volume,
-            saved_at: crate::auth::now_ms(),
+            saved_at: crate::paths::now_ms(),
         })
     }
 
@@ -509,7 +509,7 @@ pub async fn listen(tracker: std::sync::Arc<Tracker>, mut events: PlayerEventCha
 
 /// `<app dir>/session.json`.
 pub fn default_path() -> PathBuf {
-    crate::auth::app_dir().join("session.json")
+    crate::paths::app_dir().join("session.json")
 }
 
 /// Log line for a restore.
@@ -545,7 +545,7 @@ mod tests {
     use super::*;
 
     fn temp_file(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), crate::auth::now_ms()));
+        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), crate::paths::now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("session.json")
     }

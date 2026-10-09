@@ -9,7 +9,7 @@ use std::sync::Mutex;
 static STATE: Mutex<Option<Map<String, Value>>> = Mutex::new(None);
 
 fn path() -> std::path::PathBuf {
-    crate::auth::app_dir().join("state.json")
+    crate::paths::app_dir().join("state.json")
 }
 
 /// The map in `json`, or None when it isn't a JSON object.
@@ -39,7 +39,7 @@ fn with_state<T>(f: impl FnOnce(&mut Map<String, Value>) -> T) -> T {
 
 fn save(state: &Map<String, Value>) -> Result<(), String> {
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
-    crate::auth::write_private(&path(), &json).map_err(|e| {
+    crate::paths::write_private(&path(), &json).map_err(|e| {
         log::warn!(target: "stylus::store", "could not save state.json: {e}");
         format!("could not save state: {e}")
     })

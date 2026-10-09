@@ -31,7 +31,7 @@ pub fn not_ready(why: &str) -> String {
 
 impl Api {
     pub fn new(session: Session) -> Api {
-        Api { session, http: crate::auth::http() }
+        Api { session, http: crate::paths::http() }
     }
 
     /// The engine's live session, or `ENGINE_NOT_READY`.
@@ -320,7 +320,7 @@ impl Api {
 
     /// Fallback: `context-resolve` of a search uri gives its top tracks (no albums).
     pub async fn search_context(&self, query: &str) -> Result<Value, String> {
-        let ctx = self.session.spclient().get_context(&format!("spotify:search:{}", crate::auth::urlencode(query))).await.map_err(|e| format!("context-resolve: {e}"))?;
+        let ctx = self.session.spclient().get_context(&format!("spotify:search:{}", crate::paths::urlencode(query))).await.map_err(|e| format!("context-resolve: {e}"))?;
         let uris: Vec<String> = ctx.pages.iter().flat_map(|p| p.tracks.iter()).map(|t| t.uri().to_string()).filter(|u| u.starts_with("spotify:track:")).take(SEARCH_PAGE as usize).collect();
         Ok(json!({ "tracks": self.tracks(&uris).await?, "albums": [] }))
     }
@@ -348,7 +348,7 @@ impl Api {
 
     pub async fn rootlist(&self) -> Result<Vec<crate::pb::RootEntry>, String> {
         let user = self.username();
-        let path = format!("/playlist/v2/user/{}/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=0&length=1000", crate::auth::urlencode(&user));
+        let path = format!("/playlist/v2/user/{}/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=0&length=1000", crate::paths::urlencode(&user));
         crate::pb::rootlist(&self.spclient(reqwest::Method::GET, &path, None, None, None).await?)
     }
 
@@ -413,7 +413,7 @@ impl Api {
 
     /// One `playlist/v2` page (protobuf).
     async fn playlist_pb_page(&self, playlist_id: &str, from: usize, length: usize) -> Result<crate::pb::PlaylistPage, String> {
-        let path = format!("/playlist/v2/playlist/{}?from={from}&length={length}", crate::auth::urlencode(playlist_id));
+        let path = format!("/playlist/v2/playlist/{}?from={from}&length={length}", crate::paths::urlencode(playlist_id));
         crate::pb::playlist(&self.spclient(reqwest::Method::GET, &path, None, None, None).await?)
     }
 
@@ -500,7 +500,7 @@ impl Api {
 
     /// Adds (`saved`) or removes a track from Liked Songs. Changes real data.
     pub async fn set_saved(&self, track_id: &str, saved: bool) -> Result<(), String> {
-        let item = crate::pb::CollectionItem { uri: format!("spotify:track:{track_id}"), added_at: if saved { crate::auth::now() as i64 } else { 0 }, is_removed: !saved };
+        let item = crate::pb::CollectionItem { uri: format!("spotify:track:{track_id}"), added_at: if saved { crate::paths::now() as i64 } else { 0 }, is_removed: !saved };
         let update_id = format!("{:016x}", rand::random::<u64>());
         self.post_pb("/collection/v2/write", crate::pb::write_request(&self.username(), "collection", &[item], &update_id)).await.map(|_| ())
     }
@@ -611,7 +611,7 @@ impl Api {
     /// The last played track of each recent context, newest first: `[{track, played_at, context_uri}]`.
     /// Track details from pathfinder's lookup; extended metadata when that fails.
     pub async fn recently_played(&self) -> Result<Vec<Value>, String> {
-        let path = format!("/recently-played/v3/user/{}/recently-played?format=json&offset=0&limit=50&filter=default,collection-new-episodes", crate::auth::urlencode(&self.username()));
+        let path = format!("/recently-played/v3/user/{}/recently-played?format=json&offset=0&limit=50&filter=default,collection-new-episodes", crate::paths::urlencode(&self.username()));
         let body = self.spclient(reqwest::Method::GET, &path, None, Some("application/json"), None).await?;
         let v: Value = serde_json::from_slice(&body).map_err(|e| format!("recently-played: {e}"))?;
         let contexts = crate::parse::recent_contexts(&v);
@@ -670,7 +670,7 @@ pub fn engine() -> Option<crate::player::Engine> {
 /// device is active. Err without a cluster (the player isn't up).
 pub fn cluster_state() -> Result<Option<Value>, String> {
     let (cluster, _, _) = connect()?;
-    Ok(crate::pb::cluster_state(&cluster, crate::auth::now_ms() as i64))
+    Ok(crate::pb::cluster_state(&cluster, crate::paths::now_ms() as i64))
 }
 
 /// This Mac's id while the engine is ready.

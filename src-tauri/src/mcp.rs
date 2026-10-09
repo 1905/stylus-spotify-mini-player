@@ -108,7 +108,7 @@ fn log_call(tool: &str, args: &Value, result: &Result<Value, String>, ms: u128) 
 static CALLS: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 fn today() -> u64 {
-    crate::auth::now() / 86_400
+    crate::paths::now() / 86_400
 }
 
 fn count_call() {

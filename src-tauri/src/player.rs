@@ -177,7 +177,7 @@ fn backoff(attempt: u32) -> Duration {
 /// `player-device-id` next to the credentials file. A stable id lets Spotify treat
 /// the app as the same Connect device across launches.
 fn device_id_path() -> std::path::PathBuf {
-    crate::auth::app_dir().join("player-device-id")
+    crate::paths::app_dir().join("player-device-id")
 }
 
 /// The stored device id, or a new UUID v4 written to `path` (0600). A write failure
@@ -190,7 +190,7 @@ fn load_or_create_device_id(path: &std::path::Path) -> String {
         }
     }
     let id = new_device_id();
-    if let Err(e) = crate::auth::write_private(path, &id) {
+    if let Err(e) = crate::paths::write_private(path, &id) {
         eprintln!("engine: could not store the player device id: {e}");
     }
     id
@@ -216,7 +216,7 @@ pub struct FileStore;
 
 impl FileStore {
     fn path() -> std::path::PathBuf {
-        crate::auth::app_dir().join("player-credentials.json")
+        crate::paths::app_dir().join("player-credentials.json")
     }
 }
 
@@ -227,7 +227,7 @@ impl CredStore for FileStore {
 
     fn save(&self, creds: &Credentials) -> Result<(), String> {
         let json = serde_json::to_string(creds).map_err(|e| e.to_string())?;
-        crate::auth::write_private(&Self::path(), &json).map_err(|e| e.to_string())
+        crate::paths::write_private(&Self::path(), &json).map_err(|e| e.to_string())
     }
 }
 
