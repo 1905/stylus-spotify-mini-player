@@ -90,14 +90,27 @@ fn resolve_app_dir(base: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// Writes a secret file readable by this user only (0600), replacing it atomically.
+/// Each call writes its own temp file `<file>.<pid>.<n>.tmp`, so parallel writes to one
+/// path never share a temp file.
 pub(crate) fn write_private(path: &std::path::Path, data: &str) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let tmp = path.with_extension("tmp");
-    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-    f.write_all(data.as_bytes())?;
-    f.sync_all()?;
-    std::fs::rename(&tmp, path)
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT_TMP.fetch_add(1, Ordering::Relaxed);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{}.{n}.tmp", std::process::id()));
+    let tmp = path.with_file_name(name);
+    let written = (|| {
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+        f.write_all(data.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written
 }
 
 /// Files of the old Web API login (a refresh token of a client id the app no longer has).
@@ -169,6 +182,34 @@ mod tests {
         assert!(dir.join("state.json").exists());
         // a second run finds nothing
         assert!(super::remove_legacy_files_in(&dir).is_empty());
+    }
+
+    #[test]
+    fn write_private_survives_parallel_writes_to_one_path() {
+        let dir = migrate_base("write-private");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("secret.json");
+        let workers: Vec<_> = (0..8u8)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..50u8 {
+                        // a different 4 KiB payload for each write
+                        let payload = format!("{t:02}{i:02}").repeat(1024);
+                        super::write_private(&path, &payload).unwrap();
+                        let read = std::fs::read_to_string(&path).unwrap();
+                        assert_eq!(read.len(), 4096);
+                        assert!(read == read[..4].repeat(1024), "torn write");
+                    }
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().unwrap();
+        }
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left, [std::ffi::OsString::from("secret.json")]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
