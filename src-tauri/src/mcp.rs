@@ -204,6 +204,10 @@ fn live_key() -> Arc<RwLock<String>> {
     KEY.get_or_init(|| Arc::new(RwLock::new(String::new()))).clone()
 }
 
+/// One key change at a time: every "settings update + `set_live_key`" holds it, so the live key
+/// is always the saved one (two resets can't publish in the other order than they saved).
+static KEY_OP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn set_live_key(key: &str) {
     if let Ok(mut k) = live_key().write() {
         *k = key.to_string();
@@ -254,6 +258,7 @@ fn stop() {
 
 /// At launch: start when the setting is on.
 pub async fn start_if_enabled() {
+    let _op = KEY_OP.lock().await;
     let s = tokio::task::spawn_blocking(crate::settings::load).await.unwrap_or_default();
     if !s.mcp_enabled {
         return;
@@ -287,6 +292,7 @@ pub fn mcp_status() -> Value {
 /// Turns the server on (making the key on first use) or off, and saves the choice.
 #[tauri::command]
 pub async fn mcp_set_enabled(on: bool) -> Result<Value, String> {
+    let _op = KEY_OP.lock().await;
     let (_, s) = tokio::task::spawn_blocking(move || {
         crate::settings::update(|s| {
             s.mcp_enabled = on;
@@ -310,6 +316,7 @@ pub async fn mcp_set_enabled(on: bool) -> Result<Value, String> {
 /// A new key: the old connect text stops working at once.
 #[tauri::command]
 pub async fn mcp_reset_key() -> Result<Value, String> {
+    let _op = KEY_OP.lock().await;
     let (key, _) = tokio::task::spawn_blocking(|| {
         crate::settings::update(|s| {
             let k = crate::settings::new_key();
@@ -322,6 +329,24 @@ pub async fn mcp_reset_key() -> Result<Value, String> {
     set_live_key(&key);
     log::info!(target: LOG, "key reset");
     Ok(status())
+}
+
+/// At logout: drop the key and turn the server off, saved, then stop it. The next account
+/// gets a new key on its first enable.
+pub async fn disable_for_logout() -> Result<(), String> {
+    let _op = KEY_OP.lock().await;
+    tokio::task::spawn_blocking(|| {
+        crate::settings::update(|s| {
+            s.mcp_key = None;
+            s.mcp_enabled = false;
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    set_live_key("");
+    stop();
+    log::info!(target: LOG, "off for logout, key dropped");
+    Ok(())
 }
 
 /// The text a client needs: `format` "json" (the mcpServers block most clients take) or
@@ -424,6 +449,33 @@ mod tests {
         assert_eq!(connect_text("claude", "abc", 5590).unwrap(), "claude mcp add --scope user --transport http stylus http://127.0.0.1:5590/mcp --header \"Authorization: Bearer abc\"");
         assert!(connect_text("yaml", "abc", 5590).is_err());
         assert!(SKILL.starts_with("---\nname: stylus\n"));
+    }
+
+    /// The key tests share one settings file (the test app dir): one at a time.
+    static SETTINGS_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn parallel_key_resets_leave_the_saved_key_live() {
+        let _t = SETTINGS_TEST.lock().await;
+        let calls: Vec<_> = (0..16).map(|_| tokio::spawn(mcp_reset_key())).collect();
+        for c in calls {
+            c.await.unwrap().unwrap();
+        }
+        let saved = crate::settings::load().mcp_key.expect("a key");
+        assert_eq!(*live_key().read().unwrap(), saved);
+    }
+
+    #[tokio::test]
+    async fn logout_drops_the_key_and_turns_mcp_off() {
+        let _t = SETTINGS_TEST.lock().await;
+        mcp_reset_key().await.unwrap();
+        crate::settings::update(|s| s.mcp_enabled = true).unwrap();
+        disable_for_logout().await.unwrap();
+        let s = crate::settings::load();
+        assert_eq!(s.mcp_key, None);
+        assert!(!s.mcp_enabled);
+        assert_eq!(*live_key().read().unwrap(), "");
+        assert!(!with_server(|s| s.running.is_some()));
     }
 
     #[test]

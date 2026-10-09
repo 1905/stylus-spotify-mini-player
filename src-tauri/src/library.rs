@@ -199,10 +199,22 @@ fn remember_info(id: &str, v: Option<Value>, now: Instant) {
     lock(&INFO).get_or_insert_with(HashMap::new).insert(id.to_string(), (v, now));
 }
 
+/// The Mixes tab's account: the engine's username only. Unknown (no engine) → `None`, and
+/// then there are no Made For You items: never the stored feed of the previous account.
+fn mixes_account(engine_user: Result<String, String>) -> Option<String> {
+    engine_user.ok().filter(|u| !u.is_empty())
+}
+
+/// The stored home feed, only when it belongs to `account`.
+fn stored_home_for(stored: Option<Value>, account: Option<&str>) -> Option<Value> {
+    let account = account?;
+    stored.filter(|v| v["account"] == account)
+}
+
 /// The home feed's mixes for `account`: the stored copy while fresh (or when the feed fails),
 /// else the feed. Empty without the player's session and no stored copy.
 async fn home_mixes(account: &str, refresh: bool) -> Vec<Value> {
-    let stored = crate::store::get(HOME_KEY).filter(|v| v["account"] == account);
+    let stored = stored_home_for(crate::store::get(HOME_KEY), Some(account));
     let items = |v: &Value| v["items"].as_array().cloned().unwrap_or_default();
     if let Some(s) = &stored {
         if !refresh && crate::paths::now().saturating_sub(s["at"].as_u64().unwrap_or(0)) < HOME_FRESH_SECS {
@@ -229,9 +241,12 @@ async fn home_mixes(account: &str, refresh: bool) -> Vec<Value> {
 /// seen playing that are in neither; each once. `[{id, uri, name, cover, source}]`, source
 /// "added" | "made_for_you" | "played". `refresh`: ask the home feed now.
 pub async fn mixes(refresh: bool) -> Vec<Value> {
-    let account = crate::internal::Api::current().map(|a| a.username()).ok().or_else(|| crate::store::get(HOME_KEY).and_then(|v| v["account"].as_str().map(str::to_string))).unwrap_or_default();
+    let account = mixes_account(crate::internal::Api::current().map(|a| a.username()));
     let added: Vec<Value> = saved_links().into_iter().filter(|i| i["tab"] == "mixes").collect();
-    let home = home_mixes(&account, refresh).await;
+    let home = match &account {
+        Some(a) => home_mixes(a, refresh).await,
+        None => Vec::new(),
+    };
     let played: Vec<String> = crate::store::get(KNOWN_KEY)
         .and_then(|v| v.as_array().cloned())
         .unwrap_or_default()
@@ -380,5 +395,23 @@ mod tests {
         assert_eq!(sources, ["added", "made_for_you", "played"]);
         assert_eq!(m[1]["uri"], "spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
         assert!(m[2]["name"].is_null(), "named later");
+    }
+
+    #[test]
+    fn mixes_account_is_the_engine_user_only() {
+        assert_eq!(mixes_account(Ok("bob".into())), Some("bob".to_string()));
+        // no engine (logged out, launch): unknown, never the stored feed's account
+        assert_eq!(mixes_account(Err("not logged in".into())), None);
+        assert_eq!(mixes_account(Ok(String::new())), None);
+    }
+
+    #[test]
+    fn stored_home_only_for_its_account() {
+        let feed = json!({"account": "alice", "at": 1, "items": [{"id": "37i9dQZF1E4yLltmVk3nyb"}]});
+        assert_eq!(stored_home_for(Some(feed.clone()), Some("alice")), Some(feed.clone()));
+        assert_eq!(stored_home_for(Some(feed.clone()), Some("bob")), None, "another account's mixes");
+        assert_eq!(stored_home_for(Some(feed), None), None, "unknown account: no made_for_you");
+        assert_eq!(stored_home_for(Some(json!({"items": []})), None), None);
+        assert_eq!(stored_home_for(None, Some("alice")), None);
     }
 }
