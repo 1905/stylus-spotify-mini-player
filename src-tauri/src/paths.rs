@@ -131,6 +131,11 @@ pub(crate) fn urlencode(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn urlencode_basic() {
+        assert_eq!(super::urlencode("a b&c"), "a%20b%26c");
+    }
+
+    #[test]
     fn app_dir_moves_only_into_a_free_name() {
         use super::{dir_action, DirAction};
         // [needle, rust-spotify]

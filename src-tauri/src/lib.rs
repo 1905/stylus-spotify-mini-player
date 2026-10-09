@@ -18,7 +18,6 @@ mod parse;
 mod paths;
 mod pb;
 mod player;
-mod quota;
 mod session;
 mod settings;
 mod spotify;
@@ -46,8 +45,6 @@ pub fn run() {
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
             tauri::async_runtime::spawn(async move { engine.restart(None).await });
-            // one Web API usage line every 10 minutes (quota.rs)
-            tauri::async_runtime::spawn(quota::summaries());
             // the menu-bar icon and its mini player (tray.rs); the app runs fine without them
             if let Err(e) = tray::init(app.handle()) {
                 log::warn!("menu bar: {e}");
@@ -110,7 +107,6 @@ pub fn run() {
             player::local_shuffle,
             player::local_repeat,
             player::local_state,
-            quota::api_status,
             spotify::mix_info,
             spotify::get_top,
             spotify::get_artist,

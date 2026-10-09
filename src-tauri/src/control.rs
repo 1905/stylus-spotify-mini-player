@@ -1,7 +1,7 @@
 //! Playback control with the device routing in Rust (the UI keeps its own in src/lib/route.js):
 //! when the target device is This Mac (the in-app player) and the engine is ready, Spirc
-//! directly (player.rs, no Web API); any other device through the Web API (spotify.rs, quota-
-//! guarded). Used by the MCP server (mcp_app.rs).
+//! directly (player.rs). Any other device gives `NOT_AVAILABLE_REMOTE` for now. Used by the MCP
+//! server (mcp_app.rs) and the UI's playback commands (spotify.rs).
 
 use std::time::{Duration, Instant};
 
@@ -15,12 +15,17 @@ pub const NO_DEVICE: &str = "No device to play on: open Stylus or Spotify somewh
 pub const NOTHING_PLAYING: &str = "Nothing is playing";
 pub const NOT_READY: &str = "This Mac isn't ready: the player is still connecting";
 
+/// The error for a command that this app can't send to another device yet.
+pub fn not_available_remote(action: &str) -> String {
+    format!("NOT_AVAILABLE_REMOTE: {action} on other devices")
+}
+
 /// Where a command goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Path {
     /// This Mac's Spirc.
     Local,
-    /// The Web API, for this device id.
+    /// Another device, by its id.
     Remote(String),
 }
 
@@ -208,16 +213,7 @@ pub async fn play(src: Source, device: Option<String>) -> Result<Value, String> 
             out["state"] = json!(state);
             Ok(out)
         }
-        Path::Remote(id) => {
-            match src.context_uri {
-                Some(ctx) => spotify::play_context(id.clone(), ctx, src.track_uri).await?,
-                None => {
-                    let at = src.track_uri.as_ref().and_then(|t| src.uris.iter().position(|u| u == t)).unwrap_or(0);
-                    spotify::play_on_device(id.clone(), src.uris[at..].to_vec()).await?
-                }
-            }
-            Ok(outcome(&v, &Path::Remote(id)))
-        }
+        Path::Remote(_) => Err(not_available_remote("play")),
     }
 }
 
@@ -230,6 +226,21 @@ pub enum Cmd {
     Seek(u32),
     Shuffle(bool),
     Repeat(String),
+}
+
+impl Cmd {
+    /// The command's name in a `NOT_AVAILABLE_REMOTE` error.
+    fn action(&self) -> &'static str {
+        match self {
+            Cmd::Pause => "pause",
+            Cmd::Resume => "resume",
+            Cmd::Next => "next",
+            Cmd::Previous => "previous",
+            Cmd::Seek(_) => "seek",
+            Cmd::Shuffle(_) => "shuffle",
+            Cmd::Repeat(_) => "repeat",
+        }
+    }
 }
 
 pub async fn transport(cmd: Cmd) -> Result<Value, String> {
@@ -249,15 +260,7 @@ pub async fn transport(cmd: Cmd) -> Result<Value, String> {
                 Cmd::Repeat(mode) => e.set_repeat(&mode),
             }?
         }
-        Path::Remote(id) => match cmd {
-            Cmd::Pause => spotify::pause().await?,
-            Cmd::Resume => spotify::resume(id.clone()).await?,
-            Cmd::Next => spotify::next_track().await?,
-            Cmd::Previous => spotify::previous_track().await?,
-            Cmd::Seek(ms) => spotify::seek(u64::from(ms)).await?,
-            Cmd::Shuffle(on) => spotify::set_shuffle(on).await?,
-            Cmd::Repeat(mode) => spotify::set_repeat(mode).await?,
-        },
+        Path::Remote(_) => return Err(not_available_remote(cmd.action())),
     }
     Ok(outcome(&v, &path))
 }
@@ -303,7 +306,7 @@ pub async fn set_volume(percent: u8, device: Option<String>) -> Result<Value, St
                 out["note"] = json!("This Mac isn't playing: the level applies when it starts playing here");
             }
         }
-        Path::Remote(id) => spotify::set_volume(percent.min(100), Some(id.clone())).await?,
+        Path::Remote(_) => return Err(not_available_remote("volume")),
     }
     Ok(out)
 }
@@ -317,7 +320,7 @@ pub async fn queue_add(uri: String) -> Result<Value, String> {
 }
 
 /// Moves playback to `device`. To This Mac: it loads what the active device plays, at its
-/// position (no Web API); anything else: the Web API transfer.
+/// position; with nothing playing, `NOTHING_PLAYING`. Other devices: `NOT_AVAILABLE_REMOTE`.
 pub async fn transfer(device: String, play: bool) -> Result<Value, String> {
     let v = view().await;
     if let Path::Local = route_play(&v, Some(&device))? {
@@ -331,9 +334,9 @@ pub async fn transfer(device: String, play: bool) -> Result<Value, String> {
                 return Ok(outcome(&v, &Path::Local));
             }
         }
+        return Err(NOTHING_PLAYING.into());
     }
-    spotify::transfer_playback(device.clone(), play).await?;
-    Ok(outcome(&v, &Path::Remote(device)))
+    Err(not_available_remote("transfer"))
 }
 
 #[cfg(test)]

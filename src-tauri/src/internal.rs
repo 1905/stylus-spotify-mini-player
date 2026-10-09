@@ -1,5 +1,5 @@
 //! Spotify's internal endpoints, reached with the in-app player's own librespot Session
-//! (login5 Bearer token + client-token), so the app's rate-limited Web API client id is not used.
+//! (login5 Bearer token + client-token). The app has no other data source.
 //! See spikes/internal-api/REPORT.md for what was probed.
 
 use std::sync::OnceLock;
@@ -133,8 +133,6 @@ pub enum Source {
     Primary,
     /// The internal protobuf path (spclient / extended metadata), or another internal fallback.
     Fallback,
-    /// The public Web API (spotify.rs), quota-guarded.
-    Web,
 }
 
 impl std::fmt::Display for Source {
@@ -142,7 +140,6 @@ impl std::fmt::Display for Source {
         f.write_str(match self {
             Source::Primary => "internal",
             Source::Fallback => "internal fallback",
-            Source::Web => "Web API",
         })
     }
 }
@@ -150,16 +147,11 @@ impl std::fmt::Display for Source {
 /// One step of a chain: a source and its (lazy) request.
 pub type Attempt<'a, T> = (Source, futures_util::future::BoxFuture<'a, Result<T, String>>);
 
-/// The error a failed chain returns. The Web API's error, unless it only says the app is
-/// rate-limited while an internal source failed for a real reason: then that reason, which says
-/// more. With no Web API step, the first real internal error.
+/// The error a failed chain returns: the first error that is not `ENGINE_NOT_READY`, else the
+/// first error, else "no source".
 pub fn final_error(errs: &[(Source, String)]) -> String {
-    let real_internal = errs.iter().find(|(s, e)| *s != Source::Web && !e.starts_with("ENGINE_NOT_READY")).map(|(_, e)| e);
-    match errs.iter().rev().find(|(s, _)| *s == Source::Web) {
-        Some((_, w)) if w.starts_with("RATE_LIMITED") => real_internal.unwrap_or(w).clone(),
-        Some((_, w)) => w.clone(),
-        None => real_internal.or(errs.first().map(|(_, e)| e)).cloned().unwrap_or_else(|| "no source".into()),
-    }
+    let real = errs.iter().find(|(_, e)| !e.starts_with("ENGINE_NOT_READY"));
+    real.or(errs.first()).map(|(_, e)| e.clone()).unwrap_or_else(|| "no source".into())
 }
 
 /// Lets one warning per key through per window (`WARN_EVERY` by default).
@@ -196,7 +188,7 @@ impl WarnGate {
 fn warn_failure(op: &str, src: Source, err: &str) {
     static GATE: std::sync::Mutex<Option<WarnGate>> = std::sync::Mutex::new(None);
     // the player not being up yet is normal at launch: no warning
-    if src == Source::Web || err.starts_with("ENGINE_NOT_READY") {
+    if err.starts_with("ENGINE_NOT_READY") {
         log::debug!(target: LOG, "{op}: {src} failed: {err}");
         return;
     }
@@ -236,18 +228,40 @@ where
     (src, async move { f(Api::current()?).await }.boxed())
 }
 
-/// A Web API step.
-pub fn web<'a, T, Fut>(fut: Fut) -> Attempt<'a, T>
-where
-    Fut: std::future::Future<Output = Result<T, String>> + Send + 'a,
-{
-    use futures_util::FutureExt;
-    (Source::Web, fut.boxed())
-}
-
 // ---- operations ----------------------------------------------------------------------------
 
-use crate::spotify::PAGE_CONCURRENCY;
+/// How many page requests a list fetch keeps in flight.
+pub(crate) const PAGE_CONCURRENCY: usize = 4;
+
+/// The offsets still to fetch after the first page (offset 0) of an offset-paged
+/// list holding `total` items, up to `max_items`.
+fn page_offsets(total: usize, page_size: usize, max_items: usize) -> Vec<usize> {
+    (page_size..total.min(max_items)).step_by(page_size.max(1)).collect()
+}
+
+/// Up to `max_items` items of an offset-paged list: `first` is the page at offset 0 (`{total,
+/// items}`), `fetch(offset)` returns the page at that offset. The remaining pages are fetched
+/// `concurrency` at a time; items come back in offset order whatever order the pages complete in.
+/// Any failed page fails the whole call.
+pub(crate) async fn pages_with<F, Fut>(first: Value, page_size: usize, max_items: usize, concurrency: usize, fetch: F) -> Result<Vec<Value>, String>
+where
+    F: Fn(usize) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    use futures_util::stream::{self, StreamExt, TryStreamExt};
+    let total = first["total"].as_u64().unwrap_or(0) as usize;
+    let mut all: Vec<Value> = first["items"].as_array().cloned().unwrap_or_default();
+    let pages: Vec<Value> = stream::iter(page_offsets(total, page_size, max_items))
+        .map(fetch)
+        .buffered(concurrency.max(1))
+        .try_collect()
+        .await?;
+    for page in pages {
+        all.extend(page["items"].as_array().into_iter().flatten().cloned());
+    }
+    all.truncate(max_items);
+    Ok(all)
+}
 /// Tracks per extended-metadata request.
 const META_BATCH: usize = 100;
 const COLLECTION_CT: &str = "application/vnd.collection-v2.spotify.proto";
@@ -267,7 +281,7 @@ fn search_vars(query: &str, offset: u32, limit: u32) -> Value {
            "includeArtistHasConcertsField": false, "includePreReleases": false, "includeLocalConcertsField": false, "includeAuthors": false})
 }
 
-/// `{total, items}` for spotify.rs's offset pager.
+/// `{total, items}` for the offset pager (`pages_with`).
 fn page_value(items: Vec<Value>, total: u64) -> Value {
     json!({ "total": total, "items": items })
 }
@@ -280,7 +294,7 @@ where
 {
     let first = fetch(0).await?;
     let total = first["total"].as_u64().unwrap_or(0);
-    let items = crate::spotify::pages_with(first, page, max, PAGE_CONCURRENCY, fetch).await?;
+    let items = pages_with(first, page, max, PAGE_CONCURRENCY, fetch).await?;
     Ok((items, total))
 }
 
@@ -390,7 +404,7 @@ impl Api {
 
     /// The rest of a playlist after its first page.
     pub async fn playlist_rest(&self, playlist_id: &str, first: Value, page: usize) -> Result<Vec<Value>, String> {
-        crate::spotify::pages_with(first, page, usize::MAX, PAGE_CONCURRENCY, |offset| async move { Ok(self.playlist_page(playlist_id, offset, page).await?.0) }).await
+        pages_with(first, page, usize::MAX, PAGE_CONCURRENCY, |offset| async move { Ok(self.playlist_page(playlist_id, offset, page).await?.0) }).await
     }
 
     /// A playlist's details (`parse::playlist_meta`): a pasted link, a mix's name and cover.
@@ -433,7 +447,7 @@ impl Api {
         let snapshot = first.snapshot_id.clone();
         let total = first.length.max(0) as u64;
         let first = page_value(first.uris.into_iter().map(Value::from).collect(), total);
-        let uris: Vec<String> = crate::spotify::pages_with(first, PAGE, usize::MAX, PAGE_CONCURRENCY, |from| async move {
+        let uris: Vec<String> = pages_with(first, PAGE, usize::MAX, PAGE_CONCURRENCY, |from| async move {
             let p = self.playlist_pb_page(playlist_id, from, PAGE).await?;
             Ok(page_value(p.uris.into_iter().map(Value::from).collect(), total))
         })
@@ -673,6 +687,41 @@ pub fn cluster_state() -> Result<Option<Value>, String> {
     Ok(crate::pb::cluster_state(&cluster, crate::paths::now_ms() as i64))
 }
 
+/// The UI's playback state from the Connect cluster: `{active:false}` when no device is active,
+/// else `{active, is_playing, progress_ms, device_id, device_name, track, shuffle, repeat,
+/// volume_percent, supports_volume, context_uri}`. Track names come from the internal API (just the
+/// uri when that fails), the device name and volume from the device list.
+pub async fn playback_snapshot() -> Result<Value, String> {
+    let Some(c) = cluster_state()? else { return Ok(json!({ "active": false })) };
+    let track = match c["track_uri"].as_str() {
+        Some(uri) => match Api::current() {
+            Ok(api) => api.tracks(&[uri.to_string()]).await.ok().and_then(|t| t.into_iter().next()).unwrap_or_else(|| json!({ "uri": uri })),
+            Err(_) => json!({ "uri": uri }),
+        },
+        None => Value::Null,
+    };
+    Ok(snapshot_shape(&c, track, &devices().unwrap_or_default()))
+}
+
+/// `playback_snapshot`'s shape from a `cluster_state`, its track and the device list.
+fn snapshot_shape(c: &Value, track: Value, devices: &Value) -> Value {
+    let none = Value::Null;
+    let dev = devices.as_array().into_iter().flatten().find(|d| d["id"] == c["device_id"]).unwrap_or(&none);
+    json!({
+        "active": true,
+        "is_playing": c["is_playing"].as_bool().unwrap_or(false),
+        "progress_ms": c["position_ms"],
+        "device_id": c["device_id"],
+        "device_name": dev["name"],
+        "track": track,
+        "shuffle": c["shuffle"].as_bool().unwrap_or(false),
+        "repeat": c["repeat"].as_str().unwrap_or("off"),
+        "volume_percent": dev["volume_percent"],
+        "supports_volume": dev["supports_volume"].as_bool().unwrap_or(false),
+        "context_uri": c["context_uri"],
+    })
+}
+
 /// This Mac's id while the engine is ready.
 pub fn own_device_id() -> Option<String> {
     ENGINE.get()?.live_session().map(|s| s.device_id().to_string())
@@ -713,7 +762,7 @@ pub async fn queue() -> Result<Value, String> {
 }
 
 /// Queues `uri` on this Mac through Spotify Connect (a player command from this device to itself;
-/// Spirc handles `add_to_queue`). Other devices: Err, the Web API does those.
+/// Spirc handles `add_to_queue`). Other devices: Err.
 pub async fn add_to_queue(device_id: &str, uri: &str) -> Result<(), String> {
     let own = own_device_id().ok_or_else(|| not_ready("the player isn't connected"))?;
     if device_id != own {
@@ -737,16 +786,133 @@ mod tests {
     #[test]
     fn final_error_rules() {
         let e = |s: Source, m: &str| (s, m.to_string());
-        // the Web API's own error wins (AUTH_EXPIRED etc. keep their meaning)
-        assert_eq!(final_error(&[e(Source::Primary, "HTTP 500: x"), e(Source::Web, "AUTH_EXPIRED: 401")]), "AUTH_EXPIRED: 401");
-        // rate-limited Web API: the real internal reason says more
-        assert_eq!(final_error(&[e(Source::Primary, "GraphQL: PersistedQueryNotFound"), e(Source::Fallback, "HTTP 404: y"), e(Source::Web, "RATE_LIMITED:9: z")]), "GraphQL: PersistedQueryNotFound");
-        // …but a player that isn't up is no reason: the rate limit is the news
-        assert_eq!(final_error(&[e(Source::Primary, "ENGINE_NOT_READY: x"), e(Source::Web, "RATE_LIMITED:9: z")]), "RATE_LIMITED:9: z");
-        // no Web API step: the first real internal error, else the first
+        // the first error that is not ENGINE_NOT_READY, else the first, else "no source"
         assert_eq!(final_error(&[e(Source::Primary, "ENGINE_NOT_READY: x"), e(Source::Fallback, "HTTP 403")]), "HTTP 403");
         assert_eq!(final_error(&[e(Source::Primary, "ENGINE_NOT_READY: x")]), "ENGINE_NOT_READY: x");
         assert_eq!(final_error(&[]), "no source");
+        assert_eq!(final_error(&[e(Source::Primary, "GraphQL: PersistedQueryNotFound"), e(Source::Fallback, "HTTP 404: y")]), "GraphQL: PersistedQueryNotFound");
+    }
+
+    /// The fixture of the old Web API `simplify_state` tests, as a cluster + device list.
+    #[test]
+    fn playback_snapshot_shape_full() {
+        let c = json!({ "device_id": "d1", "track_uri": "spotify:track:1", "context_uri": "spotify:playlist:p1",
+            "is_playing": true, "position_ms": 42, "duration_ms": 1000, "shuffle": true, "repeat": "context" });
+        let devices = json!([{ "id": "d0", "name": "Phone" }, { "id": "d1", "name": "Mac", "volume_percent": 55, "supports_volume": true }]);
+        let track = json!({ "id": "1", "uri": "spotify:track:1" });
+        let s = snapshot_shape(&c, track, &devices);
+        assert_eq!(
+            s,
+            json!({ "active": true, "is_playing": true, "progress_ms": 42, "device_id": "d1", "device_name": "Mac",
+                "track": { "id": "1", "uri": "spotify:track:1" }, "shuffle": true, "repeat": "context",
+                "volume_percent": 55, "supports_volume": true, "context_uri": "spotify:playlist:p1" })
+        );
+    }
+
+    #[test]
+    fn playback_snapshot_shape_sparse() {
+        let c = json!({ "device_id": "d2", "track_uri": null, "context_uri": null, "is_playing": false, "position_ms": 0,
+            "shuffle": false, "repeat": "track" });
+        let s = snapshot_shape(&c, Value::Null, &json!([{ "id": "d2", "name": "Amp", "volume_percent": null }]));
+        assert!(s["track"].is_null());
+        assert_eq!(s["shuffle"], false);
+        assert_eq!(s["repeat"], "track");
+        assert!(s["volume_percent"].is_null());
+        assert_eq!(s["supports_volume"], false);
+        assert!(s["context_uri"].is_null());
+        // missing fields entirely, and a device that isn't listed
+        let s = snapshot_shape(&json!({ "device_id": "gone" }), Value::Null, &Value::Null);
+        assert_eq!(s["active"], true);
+        assert_eq!(s["is_playing"], false);
+        assert_eq!(s["shuffle"], false);
+        assert_eq!(s["repeat"], "off");
+        assert_eq!(s["supports_volume"], false);
+        assert!(s["device_name"].is_null());
+    }
+
+    #[test]
+    fn page_offsets_from_total() {
+        assert_eq!(page_offsets(759, 50, usize::MAX).len(), 15);
+        assert_eq!(page_offsets(759, 50, usize::MAX)[..3], [50, 100, 150]);
+        assert_eq!(*page_offsets(759, 50, usize::MAX).last().unwrap(), 750);
+        assert_eq!(page_offsets(100, 50, usize::MAX), vec![50]);
+        assert_eq!(page_offsets(50, 50, usize::MAX), Vec::<usize>::new());
+        assert_eq!(page_offsets(0, 50, usize::MAX), Vec::<usize>::new());
+        // capped: Liked Songs stops at 1000
+        assert_eq!(*page_offsets(5000, 50, 1000).last().unwrap(), 950);
+        assert_eq!(page_offsets(5000, 50, 1000).len(), 19);
+    }
+
+    /// A page of `n` numbered items starting at `offset`.
+    fn page_at(offset: usize, n: usize) -> Value {
+        json!({ "items": (offset..offset + n).collect::<Vec<_>>() })
+    }
+
+    #[tokio::test]
+    async fn pages_keep_offset_order_when_completing_out_of_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        let total = 230;
+        let first = json!({ "total": total, "items": (0..50).collect::<Vec<_>>() });
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let (in_flight, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let fetch = |offset: usize| {
+            let (asked, in_flight, peak) = (asked.clone(), in_flight.clone(), peak.clone());
+            async move {
+                asked.lock().unwrap().push(offset);
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                // later offsets finish first
+                tokio::time::sleep(std::time::Duration::from_millis(60 - offset as u64 / 5)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(page_at(offset, (total - offset).min(50)))
+            }
+        };
+        let items = pages_with(first, 50, usize::MAX, 4, fetch).await.unwrap();
+        assert_eq!(items, (0..total).map(|i| json!(i)).collect::<Vec<_>>());
+        let mut asked = asked.lock().unwrap().clone();
+        asked.sort();
+        assert_eq!(asked, vec![50, 100, 150, 200]);
+        assert!(peak.load(Ordering::SeqCst) <= 4);
+        assert!(peak.load(Ordering::SeqCst) > 1, "pages run in parallel");
+    }
+
+    #[tokio::test]
+    async fn pages_concurrency_is_capped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let (in_flight, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let fetch = |offset: usize| {
+            let (in_flight, peak) = (in_flight.clone(), peak.clone());
+            async move {
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(page_at(offset, 50))
+            }
+        };
+        let first = json!({ "total": 1000, "items": (0..50).collect::<Vec<_>>() });
+        let items = pages_with(first, 50, 1000, 4, fetch).await.unwrap();
+        assert_eq!(items.len(), 1000);
+        assert_eq!(peak.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn pages_cap_and_error() {
+        let first = json!({ "total": 500, "items": (0..50).collect::<Vec<_>>() });
+        let items = pages_with(first.clone(), 50, 120, 4, |o| async move { Ok(page_at(o, 50)) }).await.unwrap();
+        assert_eq!(items.len(), 120);
+        assert_eq!(items[119], 119);
+        let err = pages_with(first, 50, usize::MAX, 4, |o| async move {
+            if o == 200 { Err("HTTP 500: boom".to_string()) } else { Ok(page_at(o, 50)) }
+        })
+        .await;
+        assert_eq!(err, Err("HTTP 500: boom".to_string()));
+        // total ≤ one page: no requests
+        let one = json!({ "total": 3, "items": [0, 1, 2] });
+        let items = pages_with(one, 50, usize::MAX, 4, |_| async { Err::<Value, _>("no".to_string()) }).await.unwrap();
+        assert_eq!(items.len(), 3);
     }
 
     #[tokio::test]
@@ -762,11 +928,11 @@ mod tests {
             }
             .boxed())
         };
-        let got = serve("t", vec![step(Source::Primary, Err("HTTP 500".into())), step(Source::Fallback, Ok(2)), step(Source::Web, Ok(3))]).await;
+        let got = serve("t", vec![step(Source::Primary, Err("HTTP 500".into())), step(Source::Fallback, Ok(2)), step(Source::Fallback, Ok(3))]).await;
         assert_eq!(got, Ok(2));
-        assert_eq!(ran.load(Ordering::SeqCst), 2, "the Web API step never ran");
-        let got = serve("t", vec![step(Source::Primary, Err("ENGINE_NOT_READY: x".into())), step(Source::Web, Err("RATE_LIMITED:5: y".into()))]).await;
-        assert_eq!(got, Err("RATE_LIMITED:5: y".into()));
+        assert_eq!(ran.load(Ordering::SeqCst), 2, "the third step never ran");
+        let got = serve("t", vec![step(Source::Primary, Err("ENGINE_NOT_READY: x".into())), step(Source::Fallback, Err("HTTP 404: y".into()))]).await;
+        assert_eq!(got, Err("HTTP 404: y".into()));
     }
 
     #[tokio::test]

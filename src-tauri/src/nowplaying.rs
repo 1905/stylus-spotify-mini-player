@@ -70,7 +70,7 @@ pub struct TrackInfo {
 
 impl TrackInfo {
     /// The UI's `Track`: `{id, uri, name, artists, artist_list:[{id,name}], album, cover, duration_ms}`,
-    /// the shape spotify.rs `simplify_track` gives.
+    /// the shape of every track list in the app.
     pub fn payload(&self) -> Value {
         let names: Vec<&str> = self.artists.iter().map(|(_, n)| n.as_str()).collect();
         let list: Vec<Value> = self.artists.iter().map(|(id, name)| json!({ "id": id, "name": name })).collect();
@@ -583,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn track_payload_matches_simplify_track() {
+    fn track_payload_shape() {
         assert_eq!(
             info().payload(),
             json!({

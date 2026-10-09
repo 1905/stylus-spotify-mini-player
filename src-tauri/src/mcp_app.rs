@@ -150,23 +150,7 @@ async fn now_playing() -> Result<Value, String> {
             Err(e) if e.starts_with("RATE_LIMITED") => Ok(idle(Some(e))),
             Err(e) => Err(e),
         },
-        NowFrom::Cluster(c) => {
-            // names from the internal API (no Web API); just the uri when that fails
-            let track = match c["track_uri"].as_str() {
-                Some(uri) => match crate::internal::Api::current() {
-                    Ok(api) => api.tracks(&[uri.to_string()]).await.ok().and_then(|t| t.into_iter().next()).unwrap_or_else(|| json!({ "uri": uri })),
-                    Err(_) => json!({ "uri": uri }),
-                },
-                None => Value::Null,
-            };
-            let devices = spotify::list_devices().await.unwrap_or_default();
-            let dev = devices.as_array().into_iter().flatten().find(|d| d["id"] == c["device_id"]).cloned().unwrap_or_default();
-            Ok(json!({
-                "active": true, "is_playing": c["is_playing"], "progress_ms": c["position_ms"],
-                "device_id": c["device_id"], "device_name": dev["name"], "track": track,
-                "shuffle": c["shuffle"], "repeat": c["repeat"], "volume_percent": dev["volume_percent"], "context_uri": c["context_uri"],
-            }))
-        }
+        NowFrom::Cluster(_) => crate::internal::playback_snapshot().await,
     }
 }
 

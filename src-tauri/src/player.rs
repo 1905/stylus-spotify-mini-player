@@ -1,10 +1,9 @@
 //! The app's own Spotify Connect speaker "This Mac" (librespot): Session + Player +
-//! SoftMixer + Spirc, kept alive by a reconnect loop. The UI controls other devices
-//! through the Web API (spotify.rs). For "This Mac" it can also call the `local_*`
-//! commands, which drive Spirc directly with no Web API round trip.
+//! SoftMixer + Spirc, kept alive by a reconnect loop. For "This Mac" the UI calls the
+//! `local_*` commands, which drive Spirc directly.
 //!
-//! The player needs its own login: Spotify's keymaster client id, not the app's
-//! (the app's token logs librespot in, but every audio fetch fails, P0 spike).
+//! The player logs in with Spotify's keymaster client id (a token of another client id logs
+//! librespot in, but every audio fetch fails, P0 spike).
 //! librespot's reusable credentials live in the credentials file. They are never logged.
 //!
 //! The playback session (what plays here, where, at what volume) is kept by session.rs:
@@ -86,16 +85,14 @@ pub enum State {
     Ready,
     Reconnecting,
     Failed(String),
-    /// The player and the app are logged in to different accounts. The engine stops.
-    AccountMismatch(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// The engine (re)starts, with or without credentials to log in with.
     Start { has_credentials: bool },
-    /// Spirc is up as `player`. `app` is the Web API account; None = unknown, check skipped.
-    Connected { player: String, app: Option<String> },
+    /// Spirc is up.
+    Connected,
     /// A connect attempt failed for a passing reason, or a running session ended.
     Dropped,
     /// Spotify refused the player's credentials.
@@ -109,16 +106,11 @@ pub fn next_state(state: &State, event: Event) -> State {
     match (state, event) {
         (_, Event::Start { has_credentials: true }) => Starting,
         (_, Event::Start { has_credentials: false }) => NeedsLogin,
-        (Starting | Reconnecting, Event::Connected { player, app }) => match app {
-            Some(app) if !app.eq_ignore_ascii_case(&player) => {
-                AccountMismatch(format!("the player is logged in as {player}, the app as {app}"))
-            }
-            _ => Ready,
-        },
+        (Starting | Reconnecting, Event::Connected) => Ready,
         (Starting | Ready | Reconnecting, Event::Dropped) => Reconnecting,
         (Starting | Ready | Reconnecting, Event::AuthRejected) => NeedsLogin,
         (Starting | Ready | Reconnecting, Event::Fatal(reason)) => Failed(reason),
-        // a stopped engine (needs_login, failed, account_mismatch) only leaves through Start
+        // a stopped engine (needs_login, failed) only leaves through Start
         (s, _) => s.clone(),
     }
 }
@@ -142,7 +134,6 @@ impl Status {
             State::Ready => ("ready", None),
             State::Reconnecting => ("reconnecting", None),
             State::Failed(r) => ("failed", Some(r.clone())),
-            State::AccountMismatch(r) => ("account_mismatch", Some(r.clone())),
         };
         let device_id = if *s == State::Ready { device_id.map(str::to_string) } else { None };
         Status { state, name: DEVICE_NAME, reason, device_id }
@@ -456,7 +447,7 @@ impl Engine {
         match settled {
             State::Ready => Ok(()),
             State::NeedsLogin => Err("Spotify refused the player login".into()),
-            State::Failed(reason) | State::AccountMismatch(reason) => Err(reason),
+            State::Failed(reason) => Err(reason),
             State::Starting | State::Reconnecting => unreachable!(),
         }
     }
@@ -472,28 +463,9 @@ fn connect_config(initial_volume: u16) -> ConnectConfig {
     }
 }
 
-/// The Web API account (`/me`), with the app's token. None when the app isn't
-/// logged in or the call fails: the account and Premium checks are then skipped.
-async fn app_account() -> Option<serde_json::Value> {
-    crate::spotify::get("/me").await.ok().filter(|v| !v.is_null())
-}
-
-/// A known non-Premium account. librespot refuses those (upstream even exits the process;
-/// our vendored copy only logs), so the engine must not start for them.
-fn premium_missing(me: &serde_json::Value) -> bool {
-    matches!(me["product"].as_str(), Some(p) if p != "premium")
-}
-
 /// The connect loop of one engine generation: Session → Spirc → wait for it to end →
 /// reconnect with backoff. Player and mixer live for the whole loop.
 async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
-    // one /me per run: the app account changes only through login/logout, which start a new run
-    let me = app_account().await;
-    let app_user = me.as_ref().and_then(|m| m["id"].as_str()).map(str::to_string);
-    if me.is_some_and(|me| premium_missing(&me)) {
-        engine.apply(generation, Event::Fatal("Spotify Premium is required to play on this Mac".into()));
-        return;
-    }
     // the persisted device id: the same Connect device across reconnects and launches
     let device_id = {
         let engine = engine.clone();
@@ -562,18 +534,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 let up_since = Instant::now();
                 now_playing.set_session(session.clone());
                 creds = keep_reusable(&engine, &session, creds).await;
-                let player_user = session.username();
                 {
-                    let (t, account) = (tracker.clone(), player_user.clone());
+                    let (t, account) = (tracker.clone(), session.username());
                     let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
                 }
-                let event = Event::Connected { player: player_user, app: app_user.clone() };
-                match engine.apply(generation, event) {
-                    State::AccountMismatch(_) => {
-                        engine.stop_spirc();
-                        spirc_task.await;
-                        return;
-                    }
+                match engine.apply(generation, Event::Connected) {
                     State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
                         tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string()));
                     }
@@ -676,9 +641,9 @@ async fn restore(engine: Engine, device_id: String) {
         log::info!(target: LOG, "restore skipped: the player already has a track");
         return;
     }
-    // another device playing must not be interrupted. Spotify's own device state (the Connect
-    // cluster) answers first: it works while the Web API is rate-limited, and the first update
-    // arrives within seconds of connecting. Without an answer from either, don't restore.
+    // another device playing must not be interrupted: Spotify's own device state (the Connect
+    // cluster) tells, and its first update arrives within seconds of connecting. Without it,
+    // don't restore.
     let mut cluster = None;
     for _ in 0..12 {
         cluster = engine.0.now.cluster();
@@ -694,18 +659,8 @@ async fn restore(engine: Engine, device_id: String) {
             return;
         }
     } else {
-        match crate::spotify::get("/me/player").await {
-            Ok(p) if p["is_playing"].as_bool() == Some(true) && p["device"]["id"].as_str() != Some(device_id.as_str()) => {
-                let name = p["device"]["name"].as_str().unwrap_or("another device");
-                log::info!(target: LOG, "restore skipped: {name} is playing");
-                return;
-            }
-            Ok(_) => {}
-            Err(e) => {
-                log::info!(target: LOG, "restore skipped: can't tell whether another device is playing ({e})");
-                return;
-            }
-        }
+        log::info!(target: LOG, "restore skipped: no Connect state, can't tell whether another device is playing");
+        return;
     }
     if tracker.has_track() {
         log::info!(target: LOG, "restore skipped: the player got a track meanwhile");
@@ -821,7 +776,7 @@ pub async fn engine_set_quality(engine: Managed<'_, Engine>, kbps: u16) -> Resul
     Ok(())
 }
 
-// ---- local transport (Spirc, no Web API) -----------------------------------
+// ---- local transport (Spirc) --------------------------------------------
 
 /// Most tracks one `local_load` takes.
 const MAX_LOAD_URIS: usize = 200;
@@ -1145,42 +1100,18 @@ mod tests {
     use super::*;
     use State::*;
 
-    fn connected(player: &str, app: Option<&str>) -> Event {
-        Event::Connected { player: player.into(), app: app.map(Into::into) }
-    }
-
     #[test]
     fn start_depends_on_credentials() {
-        for s in [NeedsLogin, Ready, Failed("x".into()), AccountMismatch("x".into())] {
+        for s in [NeedsLogin, Ready, Failed("x".into())] {
             assert_eq!(next_state(&s, Event::Start { has_credentials: true }), Starting);
             assert_eq!(next_state(&s, Event::Start { has_credentials: false }), NeedsLogin);
         }
     }
 
     #[test]
-    fn premium_check() {
-        assert!(premium_missing(&serde_json::json!({"product": "free"})));
-        assert!(!premium_missing(&serde_json::json!({"product": "premium"})));
-        // the field can be missing (Feb 2026 docs say it was removed): don't block on unknown
-        assert!(!premium_missing(&serde_json::json!({"id": "x"})));
-    }
-
-    #[test]
-    fn connected_same_account_is_ready() {
-        assert_eq!(next_state(&Starting, connected("alice", Some("alice"))), Ready);
-        assert_eq!(next_state(&Reconnecting, connected("alice", Some("alice"))), Ready);
-        // the app isn't logged in or /me failed: nothing to compare
-        assert_eq!(next_state(&Starting, connected("alice", None)), Ready);
-        // usernames and ids differ only in case for some old accounts
-        assert_eq!(next_state(&Starting, connected("Alice", Some("alice"))), Ready);
-    }
-
-    #[test]
-    fn connected_other_account_is_mismatch_naming_both() {
-        let AccountMismatch(reason) = next_state(&Starting, connected("alice", Some("bob"))) else {
-            panic!("expected account_mismatch")
-        };
-        assert!(reason.contains("alice") && reason.contains("bob"), "{reason}");
+    fn connected_is_ready() {
+        assert_eq!(next_state(&Starting, Event::Connected), Ready);
+        assert_eq!(next_state(&Reconnecting, Event::Connected), Ready);
     }
 
     #[test]
@@ -1203,9 +1134,9 @@ mod tests {
 
     #[test]
     fn a_stopped_engine_ignores_its_old_loop() {
-        for s in [NeedsLogin, Failed("x".into()), AccountMismatch("x".into())] {
+        for s in [NeedsLogin, Failed("x".into())] {
             assert_eq!(next_state(&s, Event::Dropped), s);
-            assert_eq!(next_state(&s, connected("a", Some("a"))), s);
+            assert_eq!(next_state(&s, Event::Connected), s);
             assert_eq!(next_state(&s, Event::Fatal("y".into())), s);
         }
     }
@@ -1291,16 +1222,13 @@ mod tests {
             v,
             serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null})
         );
-        let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting, AccountMismatch("m".into())]
-            .iter()
-            .map(|s| Status::new(s, Some("dev-1")).state)
-            .collect();
-        assert_eq!(names, ["needs_login", "starting", "reconnecting", "account_mismatch"]);
+        let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting].iter().map(|s| Status::new(s, Some("dev-1")).state).collect();
+        assert_eq!(names, ["needs_login", "starting", "reconnecting"]);
     }
 
     #[test]
     fn status_device_id_only_when_ready() {
-        for s in [NeedsLogin, Starting, Reconnecting, Failed("x".into()), AccountMismatch("x".into())] {
+        for s in [NeedsLogin, Starting, Reconnecting, Failed("x".into())] {
             assert_eq!(Status::new(&s, Some("dev-1")).device_id, None, "{s:?}");
         }
         assert_eq!(Status::new(&Ready, Some("dev-1")).device_id.as_deref(), Some("dev-1"));
