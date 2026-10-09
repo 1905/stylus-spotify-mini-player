@@ -46,6 +46,8 @@ component! {
         accesspoint: Option<SocketAddress> = None,
         strategy: RequestStrategy = RequestStrategy::default(),
         client_token: Option<Token> = None,
+        // Stylus patch: the latest connect-state PUT response (the cluster), for Stylus' listener
+        connect_state_responses: tokio::sync::watch::Sender<Option<Bytes>> = tokio::sync::watch::channel(None).0,
     }
 }
 
@@ -555,8 +557,19 @@ impl SpClient {
         let mut headers = HeaderMap::new();
         headers.insert(CONNECTION_ID, self.session().connection_id().parse()?);
 
-        self.request_with_protobuf(&Method::PUT, &endpoint, Some(headers), state)
-            .await
+        // Stylus patch: keep the response body (the cluster) for `connect_state_responses`
+        let response = self
+            .request_with_protobuf(&Method::PUT, &endpoint, Some(headers), state)
+            .await;
+        if let Ok(body) = &response {
+            self.lock(|inner| inner.connect_state_responses.send_replace(Some(body.clone())));
+        }
+        response
+    }
+
+    // Stylus patch: each later connect-state PUT response body; never a body sent before this call
+    pub fn connect_state_responses(&self) -> tokio::sync::watch::Receiver<Option<Bytes>> {
+        self.lock(|inner| inner.connect_state_responses.subscribe())
     }
 
     pub async fn delete_connect_state_request(&self) -> SpClientResult {

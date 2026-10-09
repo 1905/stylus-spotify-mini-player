@@ -77,10 +77,11 @@ codegen-units = 1
 # panic = "unwind" (default): librespot's audio output panics when no output device exists; abort would take the whole app down
 strip = true
 
-# librespot-core 0.8.0, vendored with 3 patches (re-apply when upgrading librespot):
+# librespot-core 0.8.0, vendored with 4 patches (re-apply when upgrading librespot):
 # 1. session.rs check_catalogue: no exit(1) on a non-Premium account (would kill the app)
 # 2. dealer/mod.rs: a failed dealer-URL/token fetch retries instead of ending the worker
 # 3. login5.rs Login5Manager::invalidate: drops a cached token that got HTTP 401 (internal.rs Api::send)
+# 4. spclient.rs put_connect_state_request: keeps each response (the cluster) for our listener (player.rs put_clusters)
 # librespot-connect 0.8.0, vendored with 1 patch (re-apply when upgrading librespot):
 # 1. spirc.rs handle_player_event: a Playing event moves Paused → Playing (pause race, plans 2026-10-09)
 [patch.crates-io]

@@ -681,8 +681,13 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     let mut attempt = 0;
     let mut type_logged = false;
     loop {
-        // registered before Spirc starts the dealer, so no update of this session is missed
-        let mut cluster = cluster_updates(&session);
+        // registered before Spirc starts the dealer and does its first PUT, so no update of
+        // this session is missed. Dealer and PUT clusters both feed `on_cluster` and the
+        // restore gate; only dealer clusters feed `follow_cluster` (see the select arm)
+        let mut cluster = futures_util::stream::select(
+            cluster_updates(&session).map(|u| (u, false)),
+            put_clusters(&session).map(|u| (u, true)),
+        );
         let mut connect_ups = connection_ids(&session);
         let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
@@ -766,9 +771,15 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     tokio::select! {
                         _ = &mut spirc_task => break,
                         Some(event) = events.recv() => was_here = active_after(was_here, &event, session.is_invalid()),
-                        Some(update) = cluster.next() => {
+                        Some((update, from_put)) = cluster.next() => {
                             if let Ok(update) = update {
-                                follow_cluster(&tracker, &update, session.device_id());
+                                // not for a PUT cluster: a PUT response echoes This Mac's own state
+                                // back, and `follow_cluster` would take Spirc's context for one
+                                // another client loaded (e.g. our own track-list load's context);
+                                // another client's load comes as a dealer update
+                                if !from_put {
+                                    follow_cluster(&tracker, &update, session.device_id());
+                                }
                                 now_playing.on_cluster(&update, session.device_id());
                                 // the restore that found no Connect state runs once, now
                                 if let Some(why) = lock(&engine.0.restore_pending).take() {
@@ -858,8 +869,8 @@ fn active_after(active: bool, event: &PlayerEvent, session_dead: bool) -> bool {
 
 /// Connect cluster updates (the account's devices and the active one's player state).
 /// Spirc listens too; the dealer hands each update to every listener. The cluster Spotify
-/// sends back for Spirc's first connect-state PUT is that PUT's HTTP response, not a dealer
-/// message: only Spirc sees it. With no other device active, the first update here can come
+/// sends back for each connect-state PUT is that PUT's HTTP response, not a dealer message:
+/// `put_clusters` gives those. With no other device active, the first dealer update can come
 /// late or never (`cluster_or_quiet`, `restore_gate`).
 fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
     match session.dealer().listen_for("hm://connect-state/v1/cluster", Message::from_raw::<ClusterUpdate>) {
@@ -869,6 +880,41 @@ fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
             Box::pin(futures_util::stream::pending())
         }
     }
+}
+
+/// The cluster of each connect-state PUT Spirc makes (its HTTP response; vendored
+/// librespot-core patch 4, `SpClient::connect_state_responses`). Spirc's first PUT comes right
+/// after the dealer's connection id, so this is usually the session's first cluster. Subscribed
+/// before Spirc starts: a new Session has a new SpClient, and the receiver never gives a body
+/// sent before it subscribed. A body that is not a cluster is skipped (logged once per session).
+fn put_clusters(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
+    let bodies = session.spclient().connect_state_responses();
+    Box::pin(futures_util::stream::unfold((bodies, false), |(mut bodies, mut logged)| async move {
+        loop {
+            // an error: the SpClient (the session) is gone
+            bodies.changed().await.ok()?;
+            let Some(body) = bodies.borrow_and_update().clone() else { continue };
+            match cluster_from_put(&body) {
+                Some(update) => return Some((Ok(update), (bodies, logged))),
+                None if !logged => {
+                    logged = true;
+                    log::info!(target: "stylus::session", "a connect-state PUT response ({} bytes) is not a cluster: skipped", body.len());
+                }
+                None => {}
+            }
+        }
+    }))
+}
+
+/// A connect-state PUT response body as a cluster update. None when it doesn't parse, or
+/// when it is empty: an empty body parses as an empty Cluster, which would hide the real one.
+fn cluster_from_put(body: &[u8]) -> Option<ClusterUpdate> {
+    use protobuf::Message as _;
+    if body.is_empty() {
+        return None;
+    }
+    let cluster = librespot_protocol::connect::Cluster::parse_from_bytes(body).ok()?;
+    Some(ClusterUpdate { cluster: Some(cluster).into(), ..Default::default() })
 }
 
 /// The dealer's connection id messages: Spirc does its first connect-state PUT on the first
@@ -1867,6 +1913,41 @@ mod tests {
         assert_eq!(restore_gate(Some(&cluster("phone", true, false)), "mac", s(1)), Gate::OtherDevicePlaying);
         assert_eq!(restore_gate(Some(&cluster("phone", true, true)), "mac", s(1)), Gate::Load, "the phone is paused");
         assert_eq!(restore_gate(Some(&cluster("phone", false, false)), "mac", s(1)), Gate::Load, "the phone is stopped");
+    }
+
+    fn put_body(active: &str, playing: bool) -> Vec<u8> {
+        use librespot_protocol::connect::{Cluster, DeviceInfo};
+        use protobuf::Message as _;
+        let mut c = Cluster::new();
+        c.active_device_id = active.into();
+        c.device.insert(active.into(), DeviceInfo { device_id: active.into(), name: "Phone".into(), ..Default::default() });
+        c.player_state.mut_or_insert_default().is_playing = playing;
+        c.write_to_bytes().unwrap()
+    }
+
+    #[test]
+    fn cluster_from_put_parses_a_cluster() {
+        let update = cluster_from_put(&put_body("phone", true)).expect("a cluster");
+        assert_eq!(update.cluster.active_device_id, "phone");
+        assert_eq!(update.cluster.device["phone"].name, "Phone");
+        assert!(update.cluster.player_state.is_playing);
+    }
+
+    #[test]
+    fn put_clusters_skips_a_bad_body() {
+        // field 15 with wire type 7: no such wire type
+        assert!(cluster_from_put(&[0xff, 0x00]).is_none());
+        // an empty body parses as an empty Cluster: it says nothing, so it is skipped
+        assert!(cluster_from_put(&[]).is_none());
+    }
+
+    #[test]
+    fn put_cluster_blocks_restore() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        let update = cluster_from_put(&put_body("phone", true)).unwrap();
+        engine.0.now.on_cluster(&update, "mac");
+        assert_eq!(restore_gate(engine.0.now.cluster().as_deref(), "mac", None), Gate::OtherDevicePlaying);
+        assert!(!may_load(&engine, "mac", Restore::Launch), "the phone keeps its music");
     }
 
     #[test]
