@@ -316,6 +316,9 @@ struct Inner {
     /// The connection dropped while this Mac was the active device: the next ready loads
     /// the session back (paused), so the UI doesn't fall to "no device".
     reload_after_drop: AtomicBool,
+    /// The launch restore gave up only because no Connect state came in time: the first
+    /// cluster update runs it.
+    restore_pending: AtomicBool,
     /// What plays here, for the UI (`player-state` events, nowplaying.rs).
     now: Arc<NowPlaying>,
     /// The volume set while This Mac was inactive, for its next load (`PendingVolume`).
@@ -341,6 +344,7 @@ impl Engine {
             session,
             restore_tried: AtomicBool::new(false),
             reload_after_drop: AtomicBool::new(false),
+            restore_pending: AtomicBool::new(false),
             now,
             pending_volume: Mutex::new(PendingVolume::default()),
             save_error: Mutex::new(None),
@@ -516,6 +520,7 @@ impl Engine {
         // the next login is a new start: it restores that account's session
         self.0.restore_tried.store(false, Ordering::SeqCst);
         self.0.reload_after_drop.store(false, Ordering::SeqCst);
+        self.0.restore_pending.store(false, Ordering::SeqCst);
         let result = first_error(results);
         match &result {
             Ok(()) => log::info!(target: "stylus::player", "logged out"),
@@ -672,6 +677,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 match engine.apply(generation, Event::Connected) {
                     State::Ready if !engine.0.restore_tried.swap(true, Ordering::SeqCst) => {
                         engine.0.reload_after_drop.store(false, Ordering::SeqCst);
+                        engine.0.restore_pending.store(false, Ordering::SeqCst);
                         tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
                     }
                     State::Ready if engine.0.reload_after_drop.swap(false, Ordering::SeqCst) => {
@@ -689,6 +695,10 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                             if let Ok(update) = update {
                                 follow_cluster(&tracker, &update, session.device_id());
                                 now_playing.on_cluster(&update, session.device_id());
+                                // the launch restore that found no Connect state runs once, now
+                                if engine.0.restore_pending.swap(false, Ordering::SeqCst) {
+                                    tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
+                                }
                             }
                         }
                         _ = tokio::time::sleep(Duration::from_secs(5)) => {
@@ -795,24 +805,22 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
         return;
     }
     // another device playing must not be interrupted: Spotify's own device state (the Connect
-    // cluster) tells, and its first update arrives within seconds of connecting. Without it,
-    // don't restore.
-    let mut cluster = None;
+    // cluster) tells, and its first update usually arrives within seconds of connecting
     for _ in 0..12 {
-        cluster = engine.0.now.cluster();
-        if cluster.is_some() {
+        if engine.0.now.cluster().is_some() {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
-    if let Some(c) = cluster {
-        let state = &c.player_state;
-        if !c.active_device_id.is_empty() && c.active_device_id != device_id && state.is_playing && !state.is_paused {
-            log::info!(target: LOG, "restore ({why:?}) skipped: another device is playing (Connect state)");
+    if why == Restore::Launch && engine.0.now.cluster().is_none() {
+        engine.0.restore_pending.store(true, Ordering::SeqCst);
+        // a cluster that came in after the last look has already passed the loop's check
+        if engine.0.now.cluster().is_none() || !engine.0.restore_pending.swap(false, Ordering::SeqCst) {
+            log::info!(target: LOG, "restore (Launch) waits for the first Connect state");
             return;
         }
-    } else {
-        log::info!(target: LOG, "restore ({why:?}) skipped: no Connect state, can't tell whether another device is playing");
+    }
+    if !may_load(&engine, &device_id, why) {
         return;
     }
     if why == Restore::Launch && tracker.has_track() {
@@ -820,16 +828,59 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
         return;
     }
     let Some(saved) = saved else {
-        load_default(&engine).await;
+        load_default(&engine, &device_id).await;
         return;
     };
     let Some(source) = saved.source.clone() else { return };
+    if !may_load(&engine, &device_id, why) {
+        return;
+    }
     match send_load(&engine, source, saved.track_uri.clone(), saved.position_ms, saved.shuffle, saved.repeat, saved.volume) {
         Ok(()) => {
             log::info!(target: LOG, "restored ({why:?}) {}{}", session::describe(&saved), if saved.finished { ", finished: from the top" } else { "" });
             emit_restored(&engine, &saved);
         }
         Err(e) => log::warn!(target: LOG, "restore ({why:?}) failed: {e}"),
+    }
+}
+
+/// What the Connect cluster says about a restore load now.
+#[derive(Debug, PartialEq)]
+enum Gate {
+    Load,
+    /// Another device plays: a load here would take its music away.
+    OtherDevicePlaying,
+    /// No cluster yet (or a new session's): can't tell whether another device plays.
+    NoState,
+}
+
+fn restore_gate(cluster: Option<&librespot_protocol::connect::Cluster>, device_id: &str) -> Gate {
+    let Some(c) = cluster else { return Gate::NoState };
+    let state = &c.player_state;
+    if !c.active_device_id.is_empty() && c.active_device_id != device_id && state.is_playing && !state.is_paused {
+        Gate::OtherDevicePlaying
+    } else {
+        Gate::Load
+    }
+}
+
+/// Checks the current cluster right before a restore load (the user can start music on
+/// another device while a restore waits). No state at a launch: the next cluster update retries.
+fn may_load(engine: &Engine, device_id: &str, why: Restore) -> bool {
+    const LOG: &str = "stylus::session";
+    match restore_gate(engine.0.now.cluster().as_deref(), device_id) {
+        Gate::Load => true,
+        Gate::OtherDevicePlaying => {
+            log::info!(target: LOG, "restore ({why:?}) skipped: another device is playing");
+            false
+        }
+        Gate::NoState => {
+            log::info!(target: LOG, "restore ({why:?}) skipped: no Connect state, can't tell whether another device is playing");
+            if why == Restore::Launch {
+                engine.0.restore_pending.store(true, Ordering::SeqCst);
+            }
+            false
+        }
     }
 }
 
@@ -861,7 +912,7 @@ const DEFAULT_CONTEXT_WAIT: Duration = Duration::from_secs(10);
 /// No saved session (first launch, after logout): load Liked Songs, paused, on its first
 /// track (`session::default_sources`). The context first; the list of the first 200 liked
 /// uris when the context shows no track in time. Empty Liked Songs: nothing.
-async fn load_default(engine: &Engine) {
+async fn load_default(engine: &Engine, device_id: &str) {
     const LOG: &str = "stylus::session";
     let tracker = engine.0.session.clone();
     let username = tracker.account().unwrap_or_default();
@@ -887,6 +938,9 @@ async fn load_default(engine: &Engine) {
             Source::Uris { .. } => "list",
         };
         let is_context = what == "context";
+        if !may_load(engine, device_id, Restore::Launch) {
+            return;
+        }
         tracker.loaded(source.clone(), None, 0, false, Repeat::Off);
         if let Err(e) = send_load(engine, source, None, 0, false, Repeat::Off, tracker.volume()) {
             log::warn!(target: LOG, "default session: Liked Songs {what} not sent: {e}");
@@ -1550,6 +1604,7 @@ mod tests {
         assert!(dir.join("player-credentials.json").exists() && dir.join("cache").exists() && dir.join("session.json").exists());
         engine.0.restore_tried.store(true, Ordering::SeqCst);
         engine.0.reload_after_drop.store(true, Ordering::SeqCst);
+        engine.0.restore_pending.store(true, Ordering::SeqCst);
 
         engine.logout().await.unwrap();
 
@@ -1564,8 +1619,28 @@ mod tests {
         assert_eq!(engine.auth_status(), "login");
         assert!(!engine.0.restore_tried.load(Ordering::SeqCst), "the next login restores again");
         assert!(!engine.0.reload_after_drop.load(Ordering::SeqCst), "no reload of the old session after a logout");
+        assert!(!engine.0.restore_pending.load(Ordering::SeqCst), "no late restore of the old account");
         // a second logout finds nothing to remove: still Ok
         engine.logout().await.unwrap();
+    }
+
+    #[test]
+    fn restore_loads_only_when_no_other_device_plays() {
+        use librespot_protocol::connect::Cluster;
+        let cluster = |active: &str, playing: bool, paused: bool| {
+            let mut c = Cluster::new();
+            c.active_device_id = active.into();
+            let ps = c.player_state.mut_or_insert_default();
+            ps.is_playing = playing;
+            ps.is_paused = paused;
+            c
+        };
+        assert_eq!(restore_gate(None, "mac"), Gate::NoState, "no cluster yet: wait, never guess");
+        assert_eq!(restore_gate(Some(&cluster("", false, false)), "mac"), Gate::Load, "no active device");
+        assert_eq!(restore_gate(Some(&cluster("mac", true, false)), "mac"), Gate::Load, "this Mac is the active one");
+        assert_eq!(restore_gate(Some(&cluster("phone", true, false)), "mac"), Gate::OtherDevicePlaying);
+        assert_eq!(restore_gate(Some(&cluster("phone", true, true)), "mac"), Gate::Load, "the phone is paused");
+        assert_eq!(restore_gate(Some(&cluster("phone", false, false)), "mac"), Gate::Load, "the phone is stopped");
     }
 
     #[test]
