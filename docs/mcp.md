@@ -72,7 +72,7 @@ All tools return short JSON. Errors are plain sentences. A track is `{uri, name,
 
 ### Devices
 
-"This Mac" is Stylus's own speaker. Commands for it go straight to the player in Stylus. Stylus lists your other Spotify Connect devices, and `transfer` can move playback from them to This Mac. A command that Stylus cannot send to another device fails with a sentence that starts with "Not available for other devices". Library lists, search and the mixes come from Spotify's internal API, through the player's own session.
+"This Mac" is Stylus's own speaker. Commands for it go straight to the player in Stylus. Stylus lists your other Spotify Connect devices. Play, pause, skip, seek, shuffle, repeat, volume and `transfer` work on them through Spotify Connect. Adding to the queue of another device is not available; that command fails with a sentence that starts with "Not available for other devices". Library lists, search and the mixes come from Spotify's internal API, through the player's own session.
 
 ## Security
 
