@@ -2617,8 +2617,6 @@ dependencies = [
 [[package]]
 name = "librespot-connect"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b2a21e9e19b906c6676b1a515fc5529d5414f69049f5a167dfb2ea3206e5a27"
 dependencies = [
  "futures-util",
  "librespot-core",
@@ -2947,40 +2945,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
-]
-
-[[package]]
-name = "stylus"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "dirs 5.0.1",
- "futures-util",
- "librespot-connect",
- "librespot-core",
- "librespot-metadata",
- "librespot-playback",
- "librespot-protocol",
- "log",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "protobuf",
- "rand 0.8.8",
- "reqwest 0.12.28",
- "rmcp",
- "rodio",
- "serde",
- "serde_json",
- "sha2",
- "souvlaki",
- "subtle",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -4920,6 +4884,40 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "stylus"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "futures-util",
+ "librespot-connect",
+ "librespot-core",
+ "librespot-metadata",
+ "librespot-playback",
+ "librespot-protocol",
+ "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "protobuf",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "rmcp",
+ "rodio",
+ "serde",
+ "serde_json",
+ "sha2",
+ "souvlaki",
+ "subtle",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "tokio-util",
+]
 
 [[package]]
 name = "subtle"
