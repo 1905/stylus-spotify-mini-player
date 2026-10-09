@@ -33,7 +33,7 @@ function render() {
   $("mini").classList.toggle("is-playing", st.playing);
   $("mini").classList.toggle("is-loading", st.loading || Boolean(st.skipping));
 
-  setText($("miniTitle"), song ? st.title : st.status || "Nothing playing");
+  setText($("miniTitle"), song ? st.title : st.loading ? "" : st.status || "Nothing playing");
   setText($("miniArtist"), song ? st.artist || "" : "");
   $("miniArtist").hidden = !song;
   $("miniDevice").hidden = !st.device;

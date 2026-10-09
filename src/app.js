@@ -987,7 +987,7 @@ function renderNow() {
   // a play of an unknown track, or the restore of one: a loader, never "Nothing playing"
   const starting = (playPending() && !t) || restoringNow();
   if (starting) {
-    head = "Loading…";
+    head = ""; // the loader animation says it; no text
     line = "";
   } else if (state.mode === "other" && state.device) {
     const name = labelOf(state.device);
@@ -3407,7 +3407,7 @@ async function playMix(src) {
     { contextUri: `spotify:playlist:${src.id}` },
     { kind: "mix", refused: (e) => mixRefused(e) && (refused = true) },
   );
-  closeOverlay(); // the main screen: "Loading…" until the mix's first song shows
+  closeOverlay(); // the main screen: the loader until the mix's first song shows
   await played;
   if (refused) {
     toast("Spotify won't start this mix from here");
