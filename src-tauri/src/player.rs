@@ -46,10 +46,10 @@ const READY_TIMEOUT: Duration = Duration::from_secs(60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// A session that stayed up this long resets the reconnect backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
-/// No Connect cluster this long after connecting: the UI sees "nothing active" and This Mac
+/// No Connect cluster this long after Connect came up (the dealer's connection id): the UI sees "nothing active" and This Mac
 /// alone, not an endless ENGINE_NOT_READY (`cluster_or_quiet`).
 const QUIET_VIEW_AFTER: Duration = Duration::from_secs(4);
-/// No Connect cluster this long after connecting: the launch restore runs anyway (`restore_gate`).
+/// No Connect cluster this long after Connect came up: the launch restore runs anyway (`restore_gate`).
 const QUIET_RESTORE_AFTER: Duration = Duration::from_secs(5);
 /// The scopes librespot's own binary asks for (librespot 0.8.0 src/main.rs `OAUTH_SCOPES`).
 const OAUTH_SCOPES: &[&str] = &[
@@ -635,6 +635,7 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
     loop {
         // registered before Spirc starts the dealer, so no update of this session is missed
         let mut cluster = cluster_updates(&session);
+        let mut connect_ups = connection_ids(&session);
         let connect = Spirc::new(connect_config(tracker.volume()), session.clone(), creds.clone(), player.clone(), mixer.clone());
         // a stalled connect (half-open network after sleep) counts as a drop, not a hang in "starting"
         let connected = tokio::time::timeout(CONNECT_TIMEOUT, connect)
@@ -696,10 +697,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                     }
                     _ => {}
                 }
-                // a launch restore still waiting for a cluster runs anyway once this fires
-                let quiet = tokio::time::sleep(QUIET_RESTORE_AFTER.saturating_sub(now_playing.since_session().unwrap_or_default()));
+                // a launch restore still waiting for a cluster runs anyway once this fires;
+                // armed when the dealer has its connection id (`connect_ups`), not before
+                let quiet = tokio::time::sleep(QUIET_RESTORE_AFTER);
                 tokio::pin!(quiet);
-                let mut quiet_done = false;
+                let (mut quiet_armed, mut quiet_done) = (false, false);
                 // "This Mac was active", kept past Spirc's own disconnect at a drop (`active_after`);
                 // the Spirc task has not run yet, so this channel sees all its events
                 let mut events = player.get_player_event_channel();
@@ -724,10 +726,17 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                                 }
                             }
                         }
-                        _ = &mut quiet, if !quiet_done => {
+                        Some(_) = connect_ups.next() => {
+                            if now_playing.connect_up() {
+                                log::info!(target: "stylus::session", "Connect is up (dealer connection id): the quiet clock starts");
+                                quiet.as_mut().reset(tokio::time::Instant::now() + QUIET_RESTORE_AFTER);
+                                quiet_armed = true;
+                            }
+                        }
+                        _ = &mut quiet, if quiet_armed && !quiet_done => {
                             quiet_done = true;
                             if now_playing.cluster().is_none() {
-                                log::info!(target: "stylus::session", "no Connect cluster {} s after connecting: no other device is active", QUIET_RESTORE_AFTER.as_secs());
+                                log::info!(target: "stylus::session", "no Connect cluster {} s after Connect came up: no other device is active", QUIET_RESTORE_AFTER.as_secs());
                                 if engine.0.restore_pending.swap(false, Ordering::SeqCst) {
                                     tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Launch));
                                 }
@@ -808,6 +817,20 @@ fn cluster_updates(session: &Session) -> BoxedStreamResult<ClusterUpdate> {
         Err(e) => {
             log::warn!(target: "stylus::session", "no cluster updates, loads by other clients keep their first track only: {e}");
             Box::pin(futures_util::stream::pending())
+        }
+    }
+}
+
+/// The dealer's connection id messages: Spirc does its first connect-state PUT on the first
+/// one, so Connect is up from then on (the quiet clock, `NowPlaying::connect_up`). The dealer
+/// hands each message to every listener: Spirc still gets its own. With no listener, the
+/// stream fires at once: the clock starts at the session, as a fallback.
+fn connection_ids(session: &Session) -> BoxedStreamResult<()> {
+    match session.dealer().listen_for("hm://pusher/v1/connections/", |_| Ok(())) {
+        Ok(stream) => stream,
+        Err(e) => {
+            log::warn!(target: "stylus::session", "no connection id updates, the quiet clock starts at the session: {e}");
+            Box::pin(futures_util::stream::once(async { Ok(()) }))
         }
     }
 }
@@ -897,16 +920,16 @@ enum Gate {
     OtherDevicePlaying,
     /// No cluster yet (or a new session's): can't tell whether another device plays.
     NoState,
-    /// No cluster `QUIET_RESTORE_AFTER` after connecting: a load may go.
+    /// No cluster `QUIET_RESTORE_AFTER` after Connect came up: a load may go.
     Quiet,
 }
 
-/// `since_session`: the time since the session connected (`NowPlaying::since_session`).
+/// `since_session`: the time since Connect came up (`NowPlaying::since_session`); None before.
 /// No cluster for `QUIET_RESTORE_AFTER` counts as "no other device is active": Spotify pushes a
 /// cluster update to the devices of the account when one of them plays or changes state, so
 /// another active device would have sent one by then. Before that, no cluster means "wait":
 /// a load could take a phone's music away.
-/// The cluster for the UI: the latest one; else, `QUIET_VIEW_AFTER` after connecting with none,
+/// The cluster for the UI: the latest one; else, `QUIET_VIEW_AFTER` after Connect came up with none,
 /// an empty one (no device active, This Mac alone in the list); else None (ENGINE_NOT_READY).
 fn cluster_or_quiet(cluster: Option<Arc<librespot_protocol::connect::Cluster>>, since_session: Option<Duration>) -> Option<Arc<librespot_protocol::connect::Cluster>> {
     match cluster {
@@ -1721,10 +1744,11 @@ mod tests {
             c
         };
         let s = |secs: u64| Some(Duration::from_secs(secs));
+        let just_before = Some(QUIET_RESTORE_AFTER - Duration::from_millis(1));
         assert_eq!(restore_gate(None, "mac", s(0)), Gate::NoState, "no cluster yet: wait, never guess");
-        assert_eq!(restore_gate(None, "mac", None), Gate::NoState, "no session yet");
-        assert_eq!(restore_gate(None, "mac", s(4)), Gate::NoState, "still waiting for a cluster");
-        assert_eq!(restore_gate(None, "mac", s(5)), Gate::Quiet, "no cluster for 5 s: nothing else is active");
+        assert_eq!(restore_gate(None, "mac", None), Gate::NoState, "Connect not up yet (no connection id)");
+        assert_eq!(restore_gate(None, "mac", just_before), Gate::NoState, "still waiting for a cluster");
+        assert_eq!(restore_gate(None, "mac", Some(QUIET_RESTORE_AFTER)), Gate::Quiet, "no cluster for 5 s: nothing else is active");
         assert_eq!(restore_gate(Some(&cluster("phone", true, false)), "mac", s(30)), Gate::OtherDevicePlaying, "a cluster always wins");
         assert_eq!(restore_gate(Some(&cluster("", false, false)), "mac", s(1)), Gate::Load, "no active device");
         assert_eq!(restore_gate(Some(&cluster("mac", true, false)), "mac", s(1)), Gate::Load, "this Mac is the active one");
@@ -1737,9 +1761,9 @@ mod tests {
     fn ui_sees_nothing_active_when_no_cluster_comes() {
         use librespot_protocol::connect::Cluster;
         let s = |secs: u64| Some(Duration::from_secs(secs));
-        assert!(cluster_or_quiet(None, None).is_none(), "no session");
-        assert!(cluster_or_quiet(None, s(3)).is_none(), "the first cluster may still come");
-        let quiet = cluster_or_quiet(None, s(4)).expect("an empty cluster after 4 s");
+        assert!(cluster_or_quiet(None, None).is_none(), "Connect not up yet (no connection id)");
+        assert!(cluster_or_quiet(None, Some(QUIET_VIEW_AFTER - Duration::from_millis(1))).is_none(), "the first cluster may still come");
+        let quiet = cluster_or_quiet(None, Some(QUIET_VIEW_AFTER)).expect("an empty cluster after 4 s");
         assert!(quiet.active_device_id.is_empty() && quiet.device.is_empty());
         assert_eq!(crate::pb::cluster_state(&quiet, 0), None, "nothing active");
         let own = crate::internal::with_own_device(crate::pb::devices(&quiet), "mac", &quiet.active_device_id, 50);

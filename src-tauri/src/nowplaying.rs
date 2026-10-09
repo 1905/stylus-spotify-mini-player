@@ -287,12 +287,18 @@ pub struct NowPlaying {
     /// The latest Connect cluster (all devices, the active one's player state), for
     /// `list_devices` / `get_queue`. None until the first update of a session.
     cluster: Mutex<Option<Arc<Cluster>>>,
-    /// When the current session connected: how long it has gone without a cluster.
+    /// When the current session's dealer got its connection id (Connect is up): how long it
+    /// has gone without a cluster. None until then.
     session_since: Mutex<Option<Instant>>,
     app: OnceLock<AppHandle>,
     tracker: Arc<Tracker>,
     /// An event was seen: before that, `local_state` is null.
     seen: Mutex<bool>,
+}
+
+/// The time from `start` to `now`; None with no start (no connection id yet).
+fn since(start: Option<Instant>, now: Instant) -> Option<std::time::Duration> {
+    start.map(|t| now.saturating_duration_since(t))
 }
 
 /// A mutex's guard, poisoned or not: a panic elsewhere must not take the state down with it.
@@ -324,12 +330,23 @@ impl NowPlaying {
     pub fn set_session(&self, session: Session) {
         *lock(&self.session) = Some(session);
         *lock(&self.cluster) = None;
-        *lock(&self.session_since) = Some(Instant::now());
+        *lock(&self.session_since) = None;
     }
 
-    /// The time since the current session connected. None before the first session.
+    /// The dealer of the current session got its connection id: Spirc's first connect-state
+    /// PUT goes now. The first call per session starts the quiet clock; true then.
+    pub fn connect_up(&self) -> bool {
+        let mut since = lock(&self.session_since);
+        let first = since.is_none();
+        if first {
+            *since = Some(Instant::now());
+        }
+        first
+    }
+
+    /// The time since Connect came up (`connect_up`). None before that.
     pub fn since_session(&self) -> Option<std::time::Duration> {
-        lock(&self.session_since).map(|t| t.elapsed())
+        since(*lock(&self.session_since), Instant::now())
     }
 
     /// The latest Connect cluster of the current session.
@@ -574,6 +591,15 @@ pub async fn listen(np: Arc<NowPlaying>, mut events: PlayerEventChannel) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn quiet_clock_starts_with_the_connection_id() {
+        let t0 = std::time::Instant::now();
+        assert_eq!(super::since(None, t0), None, "no connection id yet: no clock");
+        let later = t0 + std::time::Duration::from_secs(4);
+        assert_eq!(super::since(Some(t0), later), Some(std::time::Duration::from_secs(4)));
+        assert_eq!(super::since(Some(later), t0), Some(std::time::Duration::ZERO), "never negative");
+    }
+
     use super::*;
     use std::time::Duration;
 
