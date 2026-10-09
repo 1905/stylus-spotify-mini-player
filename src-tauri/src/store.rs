@@ -95,6 +95,23 @@ pub fn store_set(key: String, value: Value) -> Result<(), String> {
     })
 }
 
+/// Removes `keys` (absent keys are skipped), written to disk before it returns.
+pub fn remove(keys: &[&str]) -> Result<(), String> {
+    with_state(|s| {
+        if !keys.iter().any(|k| s.contains_key(*k)) {
+            return Ok(());
+        }
+        // a changed copy is written first, then kept: a failed save leaves memory as on disk
+        let mut changed = s.clone();
+        for k in keys {
+            changed.remove(*k);
+        }
+        save(&changed)?;
+        *s = changed;
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

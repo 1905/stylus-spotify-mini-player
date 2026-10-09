@@ -208,6 +208,10 @@ fn live_key() -> Arc<RwLock<String>> {
 /// is always the saved one (two resets can't publish in the other order than they saved).
 static KEY_OP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// Tests that change the settings file hold it (mcp.rs, player.rs logout).
+#[cfg(test)]
+pub(crate) static SETTINGS_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn set_live_key(key: &str) {
     if let Ok(mut k) = live_key().write() {
         *k = key.to_string();
@@ -392,7 +396,7 @@ Stylus's MCP server (`stylus`) controls Spotify through the Stylus app on this M
 - Search before you play when the user names a song or album you don't have a uri for (`search`, then `play` with the `uri`).
 - When the user names a playlist or mix (\"my Bonobo Radio\", \"Daily Mix 2\", \"Discover Weekly\"), play it with `play` `name`; `list_mixes` and `list_playlists` show what exists.
 - A Spotify share link (open.spotify.com/...) goes to `open_link`; `save: true` keeps it in Stylus's library, `play: true` plays it.
-- \"This Mac\" is Stylus's own speaker: every command works there. Other devices are listed, and `transfer` to This Mac works; a command for another device that Stylus can't send answers \"Not available for other devices\".
+- \"This Mac\" is Stylus's own speaker. Other devices on the account are listed, and the playback commands and `transfer` work on them too. `queue_add` works only on This Mac. A device that refuses a command answers \"Not available for other devices\".
 - `play` on This Mac waits up to 5 s: `status: playing` names the track that started. `status: requested` means not confirmed yet: call `now_playing` once a few seconds later. After `transfer`, call `now_playing` once. Never poll it in a loop.
 - Volume: `set_volume` (0-100), `volume_step` (+/-), `mute` / `unmute`.
 - If a name matches several items, the error lists them with uris: pick one, or ask the user.
@@ -452,8 +456,6 @@ mod tests {
     }
 
     /// The key tests share one settings file (the test app dir): one at a time.
-    static SETTINGS_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn parallel_key_resets_leave_the_saved_key_live() {
         let _t = SETTINGS_TEST.lock().await;

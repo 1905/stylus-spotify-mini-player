@@ -229,6 +229,8 @@ fn new_device_id() -> String {
 pub trait CredStore: Send + Sync {
     fn load(&self) -> Option<Credentials>;
     fn save(&self, creds: &Credentials) -> Result<(), String>;
+    /// Removes the stored credentials (logout). None stored is Ok.
+    fn clear(&self) -> Result<(), String>;
 }
 
 /// `player-credentials.json` in the app folder, readable by this user only
@@ -251,6 +253,13 @@ impl CredStore for FileStore {
         let json = serde_json::to_string(creds).map_err(|e| e.to_string())?;
         crate::paths::write_private(&Self::path(), &json).map_err(|e| e.to_string())
     }
+
+    fn clear(&self) -> Result<(), String> {
+        match std::fs::remove_file(Self::path()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove the credentials file: {e}")),
+            _ => Ok(()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -265,6 +274,11 @@ impl CredStore for MemoryStore {
 
     fn save(&self, creds: &Credentials) -> Result<(), String> {
         *self.0.lock().unwrap() = Some(serde_json::to_string(creds).map_err(|e| e.to_string())?);
+        Ok(())
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        *self.0.lock().unwrap() = None;
         Ok(())
     }
 }
@@ -437,13 +451,7 @@ impl Engine {
     /// stored credentials when None. No credentials → `needs_login`.
     pub async fn restart(&self, creds: Option<Credentials>) {
         let mut task = self.0.task.lock().await;
-        let generation = self.retire();
-        if let Some(mut old) = task.take() {
-            // let Spirc say goodbye to Spotify; a loop asleep in its backoff is just cut
-            if tokio::time::timeout(Duration::from_secs(3), &mut old).await.is_err() {
-                old.abort();
-            }
-        }
+        let generation = self.end_loop(&mut task).await;
         let creds = match creds {
             Some(c) => Some(c),
             None => {
@@ -455,6 +463,49 @@ impl Engine {
         if let Some(creds) = creds {
             *task = Some(tauri::async_runtime::spawn(run(self.clone(), generation, creds)));
         }
+    }
+
+    /// Retires the running loop (if any) and waits up to 3 s for it to end. Returns the new generation.
+    async fn end_loop(&self, task: &mut Option<JoinHandle<()>>) -> u64 {
+        let generation = self.retire();
+        if let Some(mut old) = task.take() {
+            // let Spirc say goodbye to Spotify; a loop asleep in its backoff is just cut
+            if tokio::time::timeout(Duration::from_secs(3), &mut old).await.is_err() {
+                old.abort();
+            }
+        }
+        generation
+    }
+
+    /// Stops the loop and Spirc (playback stops). The engine then waits in `needs_login`.
+    async fn stop(&self) {
+        let mut task = self.0.task.lock().await;
+        let generation = self.end_loop(&mut task).await;
+        self.apply(generation, Event::Start { has_credentials: false });
+    }
+
+    /// Stops the engine, then removes the account's data: the player login, the list cache,
+    /// the home-feed and known-mixes store keys, the saved session, the MCP key. A failed
+    /// step is logged and the next steps still run; the first error is the result.
+    pub async fn logout(&self) -> Result<(), String> {
+        self.stop().await;
+        let store = self.0.store.clone();
+        let session = self.0.session.clone();
+        let results = vec![
+            ("credentials", blocking(move || store.clear()).await),
+            ("list cache", blocking(crate::cache::clear_all).await),
+            ("saved state", blocking(|| crate::store::remove(&[crate::library::HOME_KEY, crate::library::KNOWN_KEY])).await),
+            ("session", blocking(move || session.forget()).await),
+            ("MCP", crate::mcp::disable_for_logout().await),
+        ];
+        // the next login is a new start: it restores that account's session
+        self.0.restore_tried.store(false, Ordering::SeqCst);
+        let result = first_error(results);
+        match &result {
+            Ok(()) => log::info!(target: "stylus::player", "logged out"),
+            Err(e) => log::warn!(target: "stylus::player", "logged out, with an error: {e}"),
+        }
+        result
     }
 
     /// On app exit: stop Spirc and give it up to 2s to disconnect. Not async: called
@@ -765,6 +816,23 @@ async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -
     reusable
 }
 
+/// `f` on the blocking pool; a panic is an Err.
+async fn blocking(f: impl FnOnce() -> Result<(), String> + Send + 'static) -> Result<(), String> {
+    tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string()).and_then(|r| r)
+}
+
+/// Logs each failed step; Err with the first failure (`<step>: <error>`), else Ok.
+fn first_error(results: Vec<(&str, Result<(), String>)>) -> Result<(), String> {
+    let mut first = None;
+    for (step, r) in results {
+        if let Err(e) = r {
+            log::warn!(target: "stylus::player", "logout: {step}: {e}");
+            first.get_or_insert(format!("{step}: {e}"));
+        }
+    }
+    first.map_or(Ok(()), Err)
+}
+
 // ---- commands --------------------------------------------------------------
 
 /// `{state, name: "This Mac", reason?, device_id}`; `device_id` is null until ready.
@@ -788,6 +856,13 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     .await;
     engine.0.login_busy.store(false, Ordering::SeqCst);
     result
+}
+
+/// Stops the player and removes the account's data (`Engine::logout`). The UI then shows the
+/// login screen.
+#[tauri::command]
+pub async fn logout(engine: Managed<'_, Engine>) -> Result<(), String> {
+    engine.logout().await
 }
 
 /// Restart with the stored credentials.
@@ -1251,6 +1326,55 @@ mod tests {
         };
         store.save(&creds).unwrap();
         assert_eq!(store.load(), Some(creds));
+    }
+
+    #[test]
+    fn first_error_keeps_the_first_failure() {
+        assert_eq!(first_error(vec![("a", Ok(())), ("b", Ok(()))]), Ok(()));
+        assert_eq!(first_error(vec![("a", Ok(())), ("b", Err("x".into())), ("c", Err("y".into()))]), Err("b: x".into()));
+    }
+
+    /// In the test app folder (`paths::app_dir`), never the real one.
+    #[tokio::test]
+    async fn logout_removes_the_account_data() {
+        let _t = crate::mcp::SETTINGS_TEST.lock().await;
+        let dir = crate::paths::app_dir();
+        assert!(dir.to_string_lossy().contains("stylus-test-appdir-"), "{}", dir.display());
+        let creds = Credentials {
+            username: Some("alice".into()),
+            auth_type: AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
+            auth_data: vec![1, 2, 3],
+        };
+        FileStore.save(&creds).unwrap();
+        crate::cache::lists().put("alice", "liked", &serde_json::json!([1]));
+        crate::store::store_set(crate::library::HOME_KEY.into(), serde_json::json!({"account": "alice"})).unwrap();
+        crate::store::store_set(crate::library::KNOWN_KEY.into(), serde_json::json!(["spotify:playlist:x"])).unwrap();
+        crate::settings::update(|s| {
+            s.mcp_enabled = true;
+            s.mcp_key = Some("old".into());
+        })
+        .unwrap();
+        let engine = Engine::new(Arc::new(FileStore));
+        engine.0.session.use_account("alice");
+        engine.0.session.loaded(Source::Uris { uris: vec!["spotify:track:a".into()] }, None, 0, false, Repeat::Off);
+        engine.0.session.save_if_due();
+        assert!(dir.join("player-credentials.json").exists() && dir.join("cache").exists() && dir.join("session.json").exists());
+        engine.0.restore_tried.store(true, Ordering::SeqCst);
+
+        engine.logout().await.unwrap();
+
+        assert!(!dir.join("player-credentials.json").exists());
+        assert!(!dir.join("cache").exists());
+        assert!(!dir.join("session.json").exists());
+        assert_eq!(crate::store::get(crate::library::HOME_KEY), None);
+        assert_eq!(crate::store::get(crate::library::KNOWN_KEY), None);
+        let s = crate::settings::load();
+        assert_eq!((s.mcp_enabled, s.mcp_key), (false, None));
+        assert_eq!(engine.state(), NeedsLogin);
+        assert_eq!(engine.auth_status(), "login");
+        assert!(!engine.0.restore_tried.load(Ordering::SeqCst), "the next login restores again");
+        // a second logout finds nothing to remove: still Ok
+        engine.logout().await.unwrap();
     }
 
     #[test]

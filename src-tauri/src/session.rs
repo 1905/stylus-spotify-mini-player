@@ -485,6 +485,22 @@ impl Tracker {
             log::info!(target: LOG, "saved at exit: {} at {} ms", saved.track_uri.as_deref().unwrap_or("-"), saved.position_ms);
         }
     }
+
+    /// At logout: forgets the live session and removes its file. Nothing is written until
+    /// the next account (`use_account`). A missing file is Ok.
+    pub fn forget(&self) -> Result<(), String> {
+        let _writing = lock(&self.writing);
+        {
+            let mut live = self.live();
+            let closed = live.closed;
+            *live = Live::new(Instant::now());
+            live.closed = closed;
+        }
+        match std::fs::remove_file(&self.path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove {}: {e}", self.path.display())),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Feeds librespot's player events into `tracker` and writes when due (off the async thread,
@@ -649,6 +665,25 @@ mod tests {
         for bad in ["", "spotify:web-api", "spotify:search:abc", "spotify:local-files", "spotify:track:t", "context://x"] {
             assert_eq!(loadable_context(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn forget_drops_the_session_and_its_file() {
+        let path = temp_file("forget");
+        let t = Tracker::new(path.clone());
+        t.use_account("alice");
+        t.loaded(Source::Uris { uris: vec!["spotify:track:a".into()] }, None, 500, false, Repeat::Off);
+        t.save_if_due();
+        assert!(path.exists());
+        t.forget().unwrap();
+        assert!(!path.exists());
+        assert!(t.current().is_none());
+        assert_eq!(t.account(), None);
+        // no account: nothing is written until the next one
+        t.loaded(Source::Uris { uris: vec!["spotify:track:b".into()] }, None, 0, false, Repeat::Off);
+        t.save_if_due();
+        assert!(!path.exists());
+        t.forget().unwrap();
     }
 
     #[test]

@@ -46,6 +46,10 @@ pub fn run() {
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
             tauri::async_runtime::spawn(async move { engine.restart(None).await });
+            // "Log Out" in the app menu (and the handler for the tray menu's one)
+            if let Err(e) = tray::init_app_menu(app.handle()) {
+                log::warn!("app menu: {e}");
+            }
             // the menu-bar icon and its mini player (tray.rs); the app runs fine without them
             if let Err(e) = tray::init(app.handle()) {
                 log::warn!("menu bar: {e}");
@@ -61,6 +65,7 @@ pub fn run() {
             player::engine_status,
             player::engine_login,
             player::engine_restart,
+            player::logout,
             player::engine_get_quality,
             player::engine_set_quality,
             dock::set_dock_art,

@@ -21,8 +21,8 @@ use crate::nowplaying::lock;
 const LOG: &str = "stylus::library";
 pub const EVENT: &str = "library-changed";
 const LINKS_KEY: &str = "savedLinks";
-const KNOWN_KEY: &str = "knownMixes";
-const HOME_KEY: &str = "homeMixes";
+pub(crate) const KNOWN_KEY: &str = "knownMixes";
+pub(crate) const HOME_KEY: &str = "homeMixes";
 /// How long the home feed's mixes count as fresh.
 const HOME_FRESH_SECS: u64 = 6 * 3600;
 /// Most links kept.

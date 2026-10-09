@@ -639,6 +639,18 @@
         loginRunning = false;
       }
     },
+    // Rust player.rs logout: the player stops and leaves the device list; the account's data goes
+    logout: () => {
+      if (state.deviceId === RUN_ID) { state.deviceId = null; state.isPlaying = false; state.active = false; }
+      state.devices = state.devices.filter((d) => d.id !== RUN_ID);
+      delete store.homeMixes;
+      delete store.knownMixes;
+      cache.clear();
+      mcp.enabled = false;
+      mcp.key = null;
+      setEngine("needs_login");
+      return null;
+    },
     engine_restart: () => {
       if (state.engine.state === "ready") {
         setEngine("starting");
@@ -730,7 +742,7 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|engine_|control_transfer$|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|links_list$|link_remove$)/;
+  const LOCAL = /^(auth_status|logout$|engine_|control_transfer$|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|links_list$|link_remove$)/;
   // commands that can change what the in-app player plays: a player-state follows them
   const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|control_transfer$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
   // `refused`: the remote commands and their action names in Rust's NOT_AVAILABLE_REMOTE (control.rs, internal.rs)

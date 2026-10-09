@@ -241,8 +241,26 @@ async function onLogin() {
   }
 }
 
+// The menu's "Log Out" (Rust emits logout-requested). Rust stops the player and removes the
+// account's data; then the login screen. The engine's needs_login on the way is not "session ended".
+let loggingOut = false;
+async function logout() {
+  if (loggingOut) return;
+  loggingOut = true;
+  let failed = null;
+  try {
+    // not session-tagged: the logout outlives the session it ends
+    await window.__TAURI__.core.invoke("logout");
+  } catch (e) {
+    failed = e;
+  }
+  loggingOut = false; // Rust logs the result
+  showLogin("logged_out");
+  if (failed) toast(`Logged out, but not everything was removed: ${reason(failed)}`);
+}
+
 function expire() {
-  if ($("stage").hidden) return; // already on the login screen: a straggler, nothing to end
+  if ($("stage").hidden || loggingOut) return; // on the login screen, or a logout ends the session: nothing to end
   showLogin("ended");
   $("loginBtn").focus(); // the stage the user was in is gone: land on the way back
 }
@@ -4435,6 +4453,7 @@ async function boot() {
     kick();
   });
   listenEvent("media-command", onMediaCommand);
+  listenEvent("logout-requested", logout);
   listenEvent("mini-command", onMiniCommand);
   listenEvent("mini-visible", onMiniVisible);
   // this Mac's player: what plays, from librespot; the loop renders from it

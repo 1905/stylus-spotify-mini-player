@@ -26,6 +26,9 @@ const REOPEN_GUARD: Duration = Duration::from_millis(250);
 const TITLE_MAX: usize = 24;
 /// What the popover and the menu may ask the main webview for.
 const ACTIONS: [&str; 6] = ["toggle", "next", "previous", "volume", "mute", "heart"];
+/// The "Log Out" item in the app menu and the tray menu; the main webview runs the logout.
+const LOGOUT: &str = "logout";
+pub const LOGOUT_EVENT: &str = "logout-requested";
 
 struct Tray {
     /// The last payload from the main webview (None until the first push).
@@ -125,10 +128,11 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     let next = MenuItem::with_id(app, "next", "Next", false, None::<&str>)?;
     let previous = MenuItem::with_id(app, "previous", "Previous", false, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Stylus", true, None::<&str>)?;
+    let logout = MenuItem::with_id(app, LOGOUT, "Log Out", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Stylus", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&toggle, &next, &previous, &sep, &show, &sep2, &quit])?;
+    let menu = Menu::with_items(app, &[&toggle, &next, &previous, &sep, &show, &sep2, &logout, &quit])?;
     app.manage(MenuItems { toggle, next, previous });
 
     let (visible, show_title) = stored_flags();
@@ -146,6 +150,26 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         })
         .build(app)?;
     icon.set_visible(visible)?;
+    Ok(())
+}
+
+/// The macOS app menu with "Log Out" above Quit, and the one handler for every "Log Out" item
+/// (Tauri gives each menu event, the tray menu's too, to the app's menu handlers). Runs in `setup`.
+pub fn init_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    app.on_menu_event(|app, event| {
+        if event.id().as_ref() == LOGOUT {
+            show_main(app);
+            let _ = app.emit(LOGOUT_EVENT, ());
+        }
+    });
+    let menu = Menu::default(app)?;
+    // the first submenu is the app menu: About, Services, Hide…, then Quit last
+    if let Some(tauri::menu::MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+        let quit_at = app_menu.items()?.len().saturating_sub(1);
+        let logout = MenuItem::with_id(app, LOGOUT, "Log Out", true, None::<&str>)?;
+        app_menu.insert_items(&[&logout, &PredefinedMenuItem::separator(app)?], quit_at)?;
+    }
+    app.set_menu(menu)?;
     Ok(())
 }
 

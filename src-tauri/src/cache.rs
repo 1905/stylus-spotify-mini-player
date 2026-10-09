@@ -27,6 +27,19 @@ pub(crate) fn lists() -> Cache {
     Cache::new(crate::paths::app_dir().join("cache").join("lists"))
 }
 
+/// At logout: removes the whole cache folder (every account's lists). A missing folder is Ok.
+pub(crate) fn clear_all() -> Result<(), String> {
+    remove_dir(&crate::paths::app_dir().join("cache"))
+}
+
+/// Removes `dir` and everything in it; a missing `dir` is Ok.
+fn remove_dir(dir: &std::path::Path) -> Result<(), String> {
+    match std::fs::remove_dir_all(dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("could not remove {}: {e}", dir.display())),
+        _ => Ok(()),
+    }
+}
+
 impl Cache {
     pub(crate) fn new(dir: PathBuf) -> Self {
         Cache { dir, max_bytes: MAX_BYTES, target_bytes: TARGET_BYTES }
@@ -211,6 +224,15 @@ mod tests {
         assert_eq!(c.get("acc", "new"), Some(json!("v")));
         let total: u64 = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum();
         assert!(total <= 4000);
+    }
+
+    #[test]
+    fn remove_dir_takes_the_folder_and_ignores_a_missing_one() {
+        let dir = temp_dir("clear");
+        Cache::new(dir.clone()).put("acc", "liked", &json!(1));
+        remove_dir(&dir).unwrap();
+        assert!(!dir.exists());
+        remove_dir(&dir).unwrap();
     }
 
     #[test]
