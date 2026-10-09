@@ -7,7 +7,7 @@ import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
-import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
+import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
 import { isEngineDevice, isLocal, refusedText, volumeTiming } from "./lib/route.js";
@@ -221,13 +221,22 @@ function showLogin(kind) {
   syncMini(); // the mini player says to log in
 }
 
+/** The player login. A login that works but can't be saved resolves too, with a toast: it lasts this launch. */
+function engineLogin() {
+  return invoke("engine_login").catch((e) => {
+    const why = notSavedReason(e);
+    if (why === null) throw e;
+    toast(`Logged in, but Stylus couldn't save the login (${why}). You'll log in again at the next launch.`);
+  });
+}
+
 async function onLogin() {
   const btn = $("loginBtn");
   btn.disabled = true;
   btn.textContent = "Waiting for Spotify…";
   $("loginError").hidden = true;
   try {
-    await invoke("engine_login"); // resolved = logged in and the player is ready
+    await engineLogin(); // resolved = logged in and the player is ready
     const { status } = await invoke("auth_status");
     if (status === "ok") return startStage();
     showLogin(status);
@@ -2028,7 +2037,7 @@ async function playOnThisMac() {
     if (!st) return void toast("This Mac is still connecting to Spotify. Try again in a moment.");
     if (NEEDS_LOGIN.has(st.state)) {
       setBusy("login");
-      await invoke("engine_login"); // resolved = logged in and ready (no event to wait for)
+      await engineLogin(); // resolved = logged in and ready (no event to wait for)
       if (sess !== authSession) return;
       setEngine({ ...st, state: "ready", reason: undefined });
       await refreshEngine(); // its device id: how the list shows it

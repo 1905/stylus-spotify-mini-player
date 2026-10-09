@@ -9,6 +9,16 @@ export const CONNECTING = new Set(["starting", "reconnecting"]);
 /** States that a player login (engine_login) fixes. */
 export const NEEDS_LOGIN = new Set(["needs_login"]);
 
+/** The start of engine_login's error when the login works but can't be saved (Rust player.rs `LOGIN_NOT_SAVED`). */
+export const LOGIN_NOT_SAVED = "logged in, but the login could not be saved";
+
+/** Why engine_login couldn't save the login (the player is logged in for this launch), or null for another error. */
+export function notSavedReason(e) {
+  const s = String(e);
+  if (!s.startsWith(LOGIN_NOT_SAVED)) return null;
+  return s.slice(LOGIN_NOT_SAVED.length).replace(/^:\s*/, "") || "unknown error";
+}
+
 /** The engine stopped because the account has no Premium (Rust player.rs `PREMIUM_REQUIRED`). */
 export const isPremiumRequired = (st) => Boolean(st && st.state === "failed" && /Premium is required/.test(st.reason || ""));
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { thisMacRow, isHere, isPremiumRequired, deviceLabel, HERE, THE_RUN_MISSING_MS, preferredDevice } from "./engine.js";
+import { thisMacRow, isHere, isPremiumRequired, deviceLabel, HERE, THE_RUN_MISSING_MS, preferredDevice, notSavedReason } from "./engine.js";
 
 // the in-app player: Spotify lists it as "This Mac"; the engine's device id says it's ours
 const RUN = { id: "r", name: "This Mac", type: "Computer" };
@@ -112,5 +112,14 @@ describe("preferredDevice", () => {
   });
   it("never picks a restricted device", () => {
     expect(preferredDevice([{ ...run, is_restricted: true }, marantz], READY).id).toBe("m");
+  });
+});
+
+describe("notSavedReason", () => {
+  it("gives the save error of Rust's LOGIN_NOT_SAVED only", () => {
+    expect(notSavedReason("logged in, but the login could not be saved: disk full")).toBe("disk full");
+    expect(notSavedReason("logged in, but the login could not be saved")).toBe("unknown error");
+    expect(notSavedReason("Spotify refused the player login")).toBe(null);
+    expect(notSavedReason(null)).toBe(null);
   });
 });

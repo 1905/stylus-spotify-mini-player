@@ -78,6 +78,10 @@ const OAUTH_SCOPES: &[&str] = &[
 
 // ---- state machine ---------------------------------------------------------
 
+/// The start of `engine_login`'s error when the login works but its file can't be written.
+/// The UI matches it (src/lib/engine.js `LOGIN_NOT_SAVED`).
+pub const LOGIN_NOT_SAVED: &str = "logged in, but the login could not be saved";
+
 /// The `Fatal` reason for an account without Premium. `auth_status` matches it.
 pub const PREMIUM_REQUIRED: &str = "Spotify Premium is required to play on this Mac";
 
@@ -311,6 +315,8 @@ struct Inner {
     now: Arc<NowPlaying>,
     /// The volume set while This Mac was inactive, for its next load (`PendingVolume`).
     pending_volume: Mutex<PendingVolume>,
+    /// Why a save of the player login failed since the last `engine_login` began. It reports it.
+    save_error: Mutex<Option<String>>,
 }
 
 impl Engine {
@@ -330,6 +336,7 @@ impl Engine {
             restore_tried: AtomicBool::new(false),
             now,
             pending_volume: Mutex::new(PendingVolume::default()),
+            save_error: Mutex::new(None),
         }))
     }
 
@@ -621,7 +628,11 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 let up_since = Instant::now();
                 now_playing.set_session(session.clone());
-                creds = keep_reusable(&engine, &session, creds).await;
+                let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
+                creds = kept;
+                if save_error.is_some() {
+                    *lock(&engine.0.save_error) = save_error;
+                }
                 {
                     let (t, account) = (tracker.clone(), session.username());
                     let _ = tokio::task::spawn_blocking(move || t.use_account(&account)).await;
@@ -798,22 +809,38 @@ async fn restore(engine: Engine, device_id: String) {
 /// player login these replace the short-lived OAuth token, and they are stored.
 /// librespot's own cache keeps exactly these fields; the type is always "stored
 /// credentials" (checked against the P0 spike's cache file: auth_type 1).
-async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -> Credentials {
+/// Also gives the save error, if the save failed: the session still works for this launch.
+async fn keep_reusable(engine: &Engine, session: &Session, creds: Credentials) -> (Credentials, Option<String>) {
     let reusable = Credentials {
         username: Some(session.username()),
         auth_type: AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
         auth_data: session.auth_data(),
     };
+    store_reusable(engine.0.store.clone(), reusable, creds).await
+}
+
+/// Saves `reusable` unless it is empty or the same as `creds`. The credentials to keep using,
+/// and the save error.
+async fn store_reusable(store: Arc<dyn CredStore>, reusable: Credentials, creds: Credentials) -> (Credentials, Option<String>) {
     if reusable.auth_data.is_empty() || reusable == creds {
-        return creds;
+        return (creds, None);
     }
-    let store = engine.0.store.clone();
     let to_save = reusable.clone();
     let saved = tokio::task::spawn_blocking(move || store.save(&to_save)).await.map_err(|e| e.to_string()).and_then(|r| r);
-    if let Err(e) = saved {
-        eprintln!("engine: could not store the player login in the credentials file: {e}");
+    if let Err(e) = &saved {
+        log::warn!(target: "stylus::player", "could not store the player login in the credentials file: {e}");
     }
-    reusable
+    (reusable, saved.err())
+}
+
+/// `engine_login`'s answer: the settle result, then a failed save of the login as an Err
+/// (the engine stays logged in for this launch).
+fn login_result(settled: Result<(), String>, save_error: Option<String>) -> Result<(), String> {
+    settled?;
+    match save_error {
+        Some(e) => Err(format!("{LOGIN_NOT_SAVED}: {e}")),
+        None => Ok(()),
+    }
 }
 
 /// `f` on the blocking pool; a panic is an Err.
@@ -850,8 +877,10 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     }
     let result = async {
         let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT).await?;
+        lock(&engine.0.save_error).take();
         engine.restart(Some(Credentials::with_access_token(token.access_token))).await;
-        engine.settled().await
+        let settled = engine.settled().await;
+        login_result(settled, lock(&engine.0.save_error).clone())
     }
     .await;
     engine.0.login_busy.store(false, Ordering::SeqCst);
@@ -1326,6 +1355,51 @@ mod tests {
         };
         store.save(&creds).unwrap();
         assert_eq!(store.load(), Some(creds));
+    }
+
+    /// A store whose save always fails (a full disk, a read-only folder).
+    struct FailStore;
+
+    impl CredStore for FailStore {
+        fn load(&self) -> Option<Credentials> {
+            None
+        }
+        fn save(&self, _: &Credentials) -> Result<(), String> {
+            Err("disk full".into())
+        }
+        fn clear(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn stored(data: &[u8]) -> Credentials {
+        Credentials {
+            username: Some("alice".into()),
+            auth_type: AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
+            auth_data: data.to_vec(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_save_keeps_the_login_and_gives_the_error() {
+        let token = Credentials::with_access_token("t");
+        let (kept, err) = store_reusable(Arc::new(FailStore), stored(&[1]), token.clone()).await;
+        assert_eq!(kept, stored(&[1]), "the session's reusable login stays in use");
+        assert_eq!(err.as_deref(), Some("disk full"));
+        let mem = Arc::new(MemoryStore::default());
+        let (kept, err) = store_reusable(mem.clone(), stored(&[1]), token.clone()).await;
+        assert_eq!((kept, err), (stored(&[1]), None));
+        assert_eq!(mem.load(), Some(stored(&[1])));
+        // nothing new to save: no save, no error
+        assert_eq!(store_reusable(Arc::new(FailStore), stored(&[]), token.clone()).await, (token, None));
+        assert_eq!(store_reusable(Arc::new(FailStore), stored(&[1]), stored(&[1])).await, (stored(&[1]), None));
+    }
+
+    #[test]
+    fn login_reports_a_failed_save() {
+        assert_eq!(login_result(Ok(()), None), Ok(()));
+        assert_eq!(login_result(Ok(()), Some("disk full".into())), Err("logged in, but the login could not be saved: disk full".into()));
+        assert_eq!(login_result(Err("refused".into()), Some("disk full".into())), Err("refused".into()));
     }
 
     #[test]
