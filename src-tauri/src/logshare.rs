@@ -120,7 +120,9 @@ fn re(pattern: &str) -> Regex {
 static URI: LazyLock<Regex> = LazyLock::new(|| re(r#"spotify:([A-Za-z_-]+):[^\s"'<>()\[\],]+"#));
 static URL: LazyLock<Regex> =
     LazyLock::new(|| re(r#"\b([A-Za-z][A-Za-z0-9+.-]*)://([^/\s?#"'<>]+)([/?#][^\s"'<>)\]]*)?"#));
-static DOUBLE_QUOTED: LazyLock<Regex> = LazyLock::new(|| re(r#""(?:[^"\\]|\\.)+""#));
+/// `"…"` with `\"` and `\\` escapes inside (Rust `{:?}`, `JSON.stringify`). A quote with no
+/// closing one (a line cut short) runs to the end.
+static DOUBLE_QUOTED: LazyLock<Regex> = LazyLock::new(|| re(r#""(?:[^"\\]|\\.?)*("|\z)"#));
 static ANGLED: LazyLock<Regex> = LazyLock::new(|| re(r"<[^<>]+>"));
 static EMAIL: LazyLock<Regex> =
     LazyLock::new(|| re(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"));
@@ -202,8 +204,16 @@ fn is_ipv6(s: &str, start: usize, end: usize) -> bool {
 }
 
 /// One case-insensitive pattern for the known private values of 4+ characters, longest first.
+/// A value with `"` or `\\` also matches its escaped form (`{:?}`, `JSON.stringify`).
 fn known_values(private: &[String]) -> Option<Regex> {
-    let mut vals: Vec<&str> = private.iter().map(|v| v.trim()).filter(|v| v.chars().count() >= 4).collect();
+    let mut vals: Vec<String> = Vec::new();
+    for v in private.iter().map(|v| v.trim()).filter(|v| v.chars().count() >= 4) {
+        let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
+        if escaped != v {
+            vals.push(escaped);
+        }
+        vals.push(v.to_string());
+    }
     if vals.is_empty() {
         return None;
     }
@@ -213,20 +223,31 @@ fn known_values(private: &[String]) -> Option<Regex> {
     Some(re(&format!("(?i){}", alts.join("|"))))
 }
 
-/// Masks private values in one message (or one line with no stamp): the pattern rules in the
-/// locked sequence, then the known values. Gives the text and the count of replacements.
+/// Masks private values in one message (or one line with no stamp): the known values, the
+/// pattern rules in the locked sequence, then the known values again. Gives the text and the
+/// count of replacements.
 pub fn mask(msg: &str, private: &[String]) -> (String, usize) {
     mask_with(msg, known_values(private).as_ref())
 }
 
 fn mask_with(msg: &str, known: Option<&Regex>) -> (String, usize) {
     let mut n = 0;
-    let s = sub(msg, &URI, &mut n, |c| Some(format!("spotify:{}:•", &c[1])));
+    // first: a rule below can cut a known value apart (`Alice "Office" Mac` → `Alice "•" Mac`)
+    let known_rule = |s: String, n: &mut usize| match known {
+        Some(k) => sub(&s, k, n, |_| Some("•".into())),
+        None => s,
+    };
+    let s = known_rule(msg.to_string(), &mut n);
+    let s = sub(&s, &URI, &mut n, |c| Some(format!("spotify:{}:•", &c[1])));
     let s = sub(&s, &URL, &mut n, |c| match c.get(3) {
         Some(p) if p.as_str() != "/" => Some(format!("{}://{}/•", &c[1], &c[2])),
         _ => None,
     });
-    let s = sub(&s, &DOUBLE_QUOTED, &mut n, |_| Some("\"•\"".into()));
+    let s = sub(&s, &DOUBLE_QUOTED, &mut n, |c| match &c[0] {
+        "\"•\"" | "\"\"" => None, // already masked (a known value), or empty
+        _ if c[1].is_empty() => Some("\"•".into()),
+        _ => Some("\"•\"".into()),
+    });
     let s = single_quotes(&s, &mut n);
     let s = sub(&s, &ANGLED, &mut n, |_| Some("<•>".into()));
     let s = sub(&s, &EMAIL, &mut n, |_| Some("•@•".into()));
@@ -243,10 +264,7 @@ fn mask_with(msg: &str, known: Option<&Regex>) -> (String, usize) {
     let s = sub(&s, &TOKEN, &mut n, |c| has_digit(&c[0]).then(|| "•".into()));
     let s = sub(&s, &HEX, &mut n, |c| has_digit(&c[0]).then(|| "•".into()));
     let s = sub(&s, &DIGIT_RUN, &mut n, |_| Some("•".into()));
-    let s = match known {
-        Some(k) => sub(&s, k, &mut n, |_| Some("•".into())),
-        None => s,
-    };
+    let s = known_rule(s, &mut n);
     (s, n)
 }
 
@@ -605,6 +623,33 @@ no log lines yet\n"
     }
 
     #[test]
+    fn mask_double_quotes_with_escaped_inner_quotes() {
+        let (out, _) = m(r#"device pick "Alice \"Private Office\" Mac" (abc): ok"#);
+        assert_eq!(out, r#"device pick "•" (abc): ok"#);
+        for v in ["Alice", "Private", "Office", "Mac\""] {
+            assert!(!out.contains(v), "{v} survived: {out}");
+        }
+        // a quote cut off at the end (an MCP args line cut at 160 chars) masks to the end
+        assert_eq!(m(r#"play {"name":"Alice Priv"#).0, r#"play {"•":"•"#);
+        assert_eq!(m(r#"x "a\"#).0, r#"x "•"#);
+    }
+
+    #[test]
+    fn mask_mcp_device_error() {
+        let (out, _) = m(r#"play {} error 3 ms: No device named "x". Devices: "Family Speaker", "Kitchen""#);
+        assert_eq!(out, r#"play {} error 3 ms: No device named "•". Devices: "•", "•""#);
+    }
+
+    #[test]
+    fn known_value_with_inner_quotes_is_masked() {
+        let private = [r#"Alice "Private Office" Mac"#.to_string()];
+        // raw, in an unquoted spot: the known values go first, before the quote rule splits it
+        assert_eq!(mask(r#"device Alice "Private Office" Mac left"#, &private), ("device • left".into(), 1));
+        // escaped, as Debug or JSON writes it
+        assert_eq!(mask(r#"names Alice \"Private Office\" Mac"#, &private), ("names •".into(), 1));
+    }
+
+    #[test]
     fn mask_rule_04_single_quotes() {
         assert_eq!(m("Authenticated as 'kass' !"), ("Authenticated as '•' !".into(), 1));
         assert_eq!(m("x=('a b'), y:'c'."), ("x=('•'), y:'•'.".into(), 2));
@@ -704,11 +749,18 @@ no log lines yet\n"
 2026-10-09 14:00:12.000Z ERROR stylus::x: names CANARYUSER42 velvet canary song ZED CANARY alex canary iphone
    continued: Alex Canary iPhone owned by canaryuser42 at 192.168.1.23
 2026-10-09 14:00:13.000Z INFO  stylus::auth: ui: device Alex Canary iPhone picked for Velvet Canary Song
+2026-10-09 14:00:14.000Z WARN  stylus::ui: device pick "Bob \"Hidden Den\" Mac" (abc): failed
+2026-10-09 14:00:15.000Z WARN  stylus::mcp: transfer {"device":"x"} error 4 ms: No device called "x". Devices: "Family Canary Speaker", "Canary Kitchen"
+2026-10-09 14:00:16.000Z WARN  stylus::x: unquoted Carol "Attic Canary" Mac left
+2026-10-09 14:00:17.000Z WARN  stylus::mcp: play {"name":"Truncated Canary Na
 "#;
         let private: Vec<String> =
-            ["canaryuser42", "Alex Canary iPhone", "Velvet Canary Song", "Zed Canary"].iter().map(|s| s.to_string()).collect();
+            ["canaryuser42", "Alex Canary iPhone", "Velvet Canary Song", "Zed Canary", r#"Carol "Attic Canary" Mac"#]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
         let a = anonymize(fixture, &private, CAP_BYTES);
-        assert_eq!(a.kept, 14);
+        assert_eq!(a.kept, 18);
         let out = a.text.to_lowercase();
         for v in [
             "canaryuser42",
@@ -726,6 +778,13 @@ no log lines yet\n"
             "exp=1791285544",
             "/Users/alex",
             "65b708073fc0480ea92a077233ca87bd",
+            "Bob",
+            "Hidden Den",
+            "Family Canary Speaker",
+            "Canary Kitchen",
+            "Carol",
+            "Attic Canary",
+            "Truncated Canary",
         ] {
             assert!(!out.contains(&v.to_lowercase()), "a canary value survived (index {})", v.len());
         }

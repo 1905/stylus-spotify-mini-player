@@ -263,9 +263,9 @@ pub fn pick(query: &str, candidates: &[(String, Value)]) -> Result<Option<Value>
         0 => Ok(None),
         1 => Ok(Some(found[0].1.clone())),
         n => {
-            let list: Vec<String> = found.iter().take(10).map(|(name, it)| format!("\"{name}\" ({})", it["uri"].as_str().unwrap_or("?"))).collect();
+            let list: Vec<String> = found.iter().take(10).map(|(name, it)| format!("{name:?} ({})", it["uri"].as_str().unwrap_or("?"))).collect();
             let more = if n > 10 { format!(" and {} more", n - 10) } else { String::new() };
-            Err(format!("\"{query}\" matches {n}: {}{more}. Give the uri of the one you mean.", list.join(", ")))
+            Err(format!("{query:?} matches {n}: {}{more}. Give the uri of the one you mean.", list.join(", ")))
         }
     }
 }
@@ -391,7 +391,7 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
         "set_repeat" => {
             let mode = arg_str(a, "mode").ok_or("Give mode: off, context or track")?;
             if !matches!(mode, "off" | "context" | "track") {
-                return Err(format!("Unknown repeat mode \"{mode}\": use off, context or track"));
+                return Err(format!("Unknown repeat mode {mode:?}: use off, context or track"));
             }
             b.transport(Cmd::Repeat(mode.into())).await.map(|r| with(r, "repeat", json!(mode)))
         }
@@ -456,7 +456,7 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
                 "short" | "short_term" => "short_term",
                 "medium" | "medium_term" => "medium_term",
                 "long" | "long_term" => "long_term",
-                r => return Err(format!("Unknown range \"{r}\": use short, medium or long")),
+                r => return Err(format!("Unknown range {r:?}: use short, medium or long")),
             };
             let v = b.top(kind.into(), range.into()).await?;
             let items: Vec<Value> = if kind == "tracks" { slim_tracks(&v) } else { v.as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "uri": uri_of("artist", x) })).collect() };
@@ -490,7 +490,7 @@ async fn run(b: &dyn Backend, name: &str, a: &Value) -> Result<Value, String> {
             Ok(json!({ "liked": on, "track": if t["name"].is_null() { t["uri"].clone() } else { slim_track(&t) } }))
         }
         "open_link" => open_link(b, a).await,
-        _ => Err(format!("Unknown tool \"{name}\"")),
+        _ => Err(format!("Unknown tool {name:?}")),
     }
 }
 
@@ -624,14 +624,14 @@ async fn search(b: &dyn Backend, a: &Value) -> Result<Value, String> {
         "album" => r["albums"].as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "artists": x["artists"], "uri": uri_of("album", x) })).collect(),
         "artist" => r["artists"].as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "uri": uri_of("artist", x) })).collect(),
         "playlist" => r["playlists"].as_array().into_iter().flatten().map(|x| json!({ "name": x["name"], "uri": uri_of("playlist", x), "owner": x["owner"]["display_name"] })).collect(),
-        k => return Err(format!("Unknown type \"{k}\": use track, album, artist or playlist")),
+        k => return Err(format!("Unknown type {k:?}: use track, album, artist or playlist")),
     };
     Ok(json!({ "type": kind, "results": items.into_iter().take(limit).collect::<Vec<_>>() }))
 }
 
 async fn top_track(b: &dyn Backend, query: &str) -> Result<Value, String> {
     let r = b.search(query.into()).await?;
-    r["tracks"].as_array().and_then(|t| t.iter().find(|t| t["uri"].is_string())).cloned().ok_or_else(|| format!("No song found for \"{query}\""))
+    r["tracks"].as_array().and_then(|t| t.iter().find(|t| t["uri"].is_string())).cloned().ok_or_else(|| format!("No song found for {query:?}"))
 }
 
 /// The devices and This Mac's id: the local player's own device id when it's in the list (every
@@ -664,8 +664,9 @@ fn find_device_in(list: &[Value], own: Option<&str>, q: &str) -> Result<Value, S
     }
     let named: Vec<(String, Value)> = list.iter().filter_map(|d| Some((d["name"].as_str()?.to_string(), json!({ "uri": d["id"], "id": d["id"], "name": d["name"] })))).collect();
     pick(q, &named)?.ok_or_else(|| {
-        let names: Vec<&str> = list.iter().filter_map(|d| d["name"].as_str()).collect();
-        format!("No device called \"{q}\". Devices: {}", if names.is_empty() { "none".into() } else { names.join(", ") })
+        // `{:?}`: a quote inside a name is escaped, so the anonymized log masks the whole name
+        let names: Vec<String> = list.iter().filter_map(|d| d["name"].as_str()).map(|n| format!("{n:?}")).collect();
+        format!("No device called {q:?}. Devices: {}", if names.is_empty() { "none".into() } else { names.join(", ") })
     })
 }
 
@@ -703,12 +704,12 @@ async fn find_by_name(b: &dyn Backend, q: &str, kind: Kind) -> Result<Value, Str
     let r = b.search(q.into()).await?;
     let hits = named(&r[format!("{k}s")], k);
     if kind == Kind::Playlist {
-        return pick(q, &hits)?.ok_or_else(|| format!("No playlist called \"{q}\" in your playlists or mixes"));
+        return pick(q, &hits)?.ok_or_else(|| format!("No playlist called {q:?} in your playlists or mixes"));
     }
     match pick(q, &hits) {
         Ok(Some(x)) => Ok(x),
         // search ranks: its first hit is the best guess when names don't settle it
-        _ => hits.first().map(|h| h.1.clone()).ok_or_else(|| format!("No {k} found for \"{q}\"")),
+        _ => hits.first().map(|h| h.1.clone()).ok_or_else(|| format!("No {k} found for {q:?}")),
     }
 }
 
@@ -721,7 +722,7 @@ async fn find_in_library(b: &dyn Backend, q: &str) -> Result<Value, String> {
     c.extend(named(&links.unwrap_or_default(), "playlist"));
     c.extend(named(&albums.unwrap_or_default(), "album"));
     c.extend(named(&artists.unwrap_or_default(), "artist"));
-    pick(q, &c)?.ok_or_else(|| format!("Nothing called \"{q}\" in your playlists, mixes, albums or artists. Try `search`."))
+    pick(q, &c)?.ok_or_else(|| format!("Nothing called {q:?} in your playlists, mixes, albums or artists. Try `search`."))
 }
 
 /// What a uri plays as: a context, or one track (`track_source`).
@@ -750,7 +751,7 @@ fn in_album(album: String, track_uri: &str) -> Source {
 async fn play(b: &dyn Backend, a: &Value) -> Result<Value, String> {
     let device = device_arg(b, a).await?;
     let (src, what) = if let Some(u) = arg_str(a, "uri") {
-        let uri = uri_from(u, None).ok_or_else(|| format!("\"{u}\" isn't a Spotify uri or link"))?;
+        let uri = uri_from(u, None).ok_or_else(|| format!("{u:?} isn't a Spotify uri or link"))?;
         (source_of(b, &uri).await, json!({ "uri": uri }))
     } else if let Some(ctx) = arg_str(a, "context_uri") {
         let uri = uri_from(ctx, None).filter(|u| !u.starts_with("spotify:track:")).ok_or("context_uri must be a playlist, album or artist")?;
@@ -875,6 +876,19 @@ mod tests {
         assert!(e.contains("matches 2") && e.contains("spotify:playlist:b") && e.contains("spotify:playlist:c"), "{e}");
         assert_eq!(pick("jazz", &list), Ok(None));
         assert_eq!(pick("  ", &list), Ok(None));
+    }
+
+    #[test]
+    fn errors_quote_names_with_escapes() {
+        // the anonymized log masks a quoted name only when an inner quote is escaped
+        let list = vec![json!({ "id": "a", "name": "Alice \"Private Office\" Mac" }), json!({ "id": "b", "name": "Kitchen" })];
+        let e = find_device_in(&list, None, "x").unwrap_err();
+        assert_eq!(e, r#"No device called "x". Devices: "Alice \"Private Office\" Mac", "Kitchen""#);
+        let e = find_device_in(&[], None, "x").unwrap_err();
+        assert_eq!(e, r#"No device called "x". Devices: none"#);
+        let list = vec![c("Den \"A\" Mix", "spotify:playlist:a"), c("Den B Mix", "spotify:playlist:b")];
+        let e = pick("den", &list).unwrap_err();
+        assert!(e.starts_with(r#""den" matches 2: "Den \"A\" Mix" (spotify:playlist:a)"#), "{e}");
     }
 
     #[test]
