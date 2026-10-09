@@ -108,7 +108,7 @@ fn log_call(tool: &str, args: &Value, result: &Result<Value, String>, ms: u128) 
 static CALLS: Mutex<(u64, u64)> = Mutex::new((0, 0));
 
 fn today() -> u64 {
-    crate::auth::now() / 86_400
+    crate::paths::now() / 86_400
 }
 
 fn count_call() {
@@ -204,6 +204,14 @@ fn live_key() -> Arc<RwLock<String>> {
     KEY.get_or_init(|| Arc::new(RwLock::new(String::new()))).clone()
 }
 
+/// One key change at a time: every "settings update + `set_live_key`" holds it, so the live key
+/// is always the saved one (two resets can't publish in the other order than they saved).
+static KEY_OP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Tests that change the settings file hold it (mcp.rs, player.rs logout).
+#[cfg(test)]
+pub(crate) static SETTINGS_TEST: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn set_live_key(key: &str) {
     if let Ok(mut k) = live_key().write() {
         *k = key.to_string();
@@ -254,6 +262,7 @@ fn stop() {
 
 /// At launch: start when the setting is on.
 pub async fn start_if_enabled() {
+    let _op = KEY_OP.lock().await;
     let s = tokio::task::spawn_blocking(crate::settings::load).await.unwrap_or_default();
     if !s.mcp_enabled {
         return;
@@ -287,6 +296,7 @@ pub fn mcp_status() -> Value {
 /// Turns the server on (making the key on first use) or off, and saves the choice.
 #[tauri::command]
 pub async fn mcp_set_enabled(on: bool) -> Result<Value, String> {
+    let _op = KEY_OP.lock().await;
     let (_, s) = tokio::task::spawn_blocking(move || {
         crate::settings::update(|s| {
             s.mcp_enabled = on;
@@ -310,6 +320,7 @@ pub async fn mcp_set_enabled(on: bool) -> Result<Value, String> {
 /// A new key: the old connect text stops working at once.
 #[tauri::command]
 pub async fn mcp_reset_key() -> Result<Value, String> {
+    let _op = KEY_OP.lock().await;
     let (key, _) = tokio::task::spawn_blocking(|| {
         crate::settings::update(|s| {
             let k = crate::settings::new_key();
@@ -322,6 +333,26 @@ pub async fn mcp_reset_key() -> Result<Value, String> {
     set_live_key(&key);
     log::info!(target: LOG, "key reset");
     Ok(status())
+}
+
+/// At logout: drop the key and turn the server off, saved, then stop it. The next account
+/// gets a new key on its first enable.
+pub async fn disable_for_logout() -> Result<(), String> {
+    let _op = KEY_OP.lock().await;
+    // the live key goes first: a failed settings write must not leave the old key working
+    set_live_key("");
+    stop();
+    let saved = tokio::task::spawn_blocking(|| {
+        crate::settings::update(|s| {
+            s.mcp_key = None;
+            s.mcp_enabled = false;
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())
+    .and_then(|r| r.map(|_| ()));
+    log::info!(target: LOG, "off for logout, key dropped");
+    saved
 }
 
 /// The text a client needs: `format` "json" (the mcpServers block most clients take) or
@@ -367,7 +398,7 @@ Stylus's MCP server (`stylus`) controls Spotify through the Stylus app on this M
 - Search before you play when the user names a song or album you don't have a uri for (`search`, then `play` with the `uri`).
 - When the user names a playlist or mix (\"my Bonobo Radio\", \"Daily Mix 2\", \"Discover Weekly\"), play it with `play` `name`; `list_mixes` and `list_playlists` show what exists.
 - A Spotify share link (open.spotify.com/...) goes to `open_link`; `save: true` keeps it in Stylus's library, `play: true` plays it.
-- \"This Mac\" is Stylus's own speaker. It keeps working when Spotify rate-limits Stylus's Web API; other devices need the Web API.
+- \"This Mac\" is Stylus's own speaker. Other devices on the account are listed, and the playback commands and `transfer` work on them too. `queue_add` works only on This Mac. A device that refuses a command answers \"Not available for other devices\".
 - `play` on This Mac waits up to 5 s: `status: playing` names the track that started. `status: requested` means not confirmed yet: call `now_playing` once a few seconds later. After `transfer`, call `now_playing` once. Never poll it in a loop.
 - Volume: `set_volume` (0-100), `volume_step` (+/-), `mute` / `unmute`.
 - If a name matches several items, the error lists them with uris: pick one, or ask the user.
@@ -424,6 +455,31 @@ mod tests {
         assert_eq!(connect_text("claude", "abc", 5590).unwrap(), "claude mcp add --scope user --transport http stylus http://127.0.0.1:5590/mcp --header \"Authorization: Bearer abc\"");
         assert!(connect_text("yaml", "abc", 5590).is_err());
         assert!(SKILL.starts_with("---\nname: stylus\n"));
+    }
+
+    /// The key tests share one settings file (the test app dir): one at a time.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn parallel_key_resets_leave_the_saved_key_live() {
+        let _t = SETTINGS_TEST.lock().await;
+        let calls: Vec<_> = (0..16).map(|_| tokio::spawn(mcp_reset_key())).collect();
+        for c in calls {
+            c.await.unwrap().unwrap();
+        }
+        let saved = crate::settings::load().mcp_key.expect("a key");
+        assert_eq!(*live_key().read().unwrap(), saved);
+    }
+
+    #[tokio::test]
+    async fn logout_drops_the_key_and_turns_mcp_off() {
+        let _t = SETTINGS_TEST.lock().await;
+        mcp_reset_key().await.unwrap();
+        crate::settings::update(|s| s.mcp_enabled = true).unwrap();
+        disable_for_logout().await.unwrap();
+        let s = crate::settings::load();
+        assert_eq!(s.mcp_key, None);
+        assert!(!s.mcp_enabled);
+        assert_eq!(*live_key().read().unwrap(), "");
+        assert!(!with_server(|s| s.running.is_some()));
     }
 
     #[test]

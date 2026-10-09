@@ -24,7 +24,17 @@ pub(crate) struct Cache {
 
 /// The app's list cache.
 pub(crate) fn lists() -> Cache {
-    Cache::new(crate::auth::app_dir().join("cache").join("lists"))
+    Cache::new(crate::paths::app_dir().join("cache").join("lists"))
+}
+
+/// At logout: removes the whole cache folder (every account's lists). A missing folder is Ok.
+pub(crate) fn clear_all() -> Result<(), String> {
+    remove_dir(&crate::paths::app_dir().join("cache"))
+}
+
+/// Removes `dir` and everything in it; a missing `dir` is Ok.
+fn remove_dir(dir: &std::path::Path) -> Result<(), String> {
+    crate::paths::remove_if_exists(dir).map(drop).map_err(|e| format!("could not remove {}: {e}", dir.display()))
 }
 
 impl Cache {
@@ -59,9 +69,9 @@ impl Cache {
         if let Err(e) = std::fs::create_dir_all(&self.dir) {
             return eprintln!("cache: could not create {}: {e}", self.dir.display());
         }
-        let body = json!({ "key": full, "saved_at": crate::auth::now(), "value": value });
+        let body = json!({ "key": full, "saved_at": crate::paths::now(), "value": value });
         let path = self.path(&full);
-        if let Err(e) = crate::auth::write_private(&path, &body.to_string()) {
+        if let Err(e) = crate::paths::write_private(&path, &body.to_string()) {
             return eprintln!("cache: could not write {}: {e}", path.display());
         }
         self.evict();
@@ -116,7 +126,7 @@ mod tests {
 
     /// A fresh, empty dir under the system temp dir.
     fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("stylus-cache-{name}-{}-{}", std::process::id(), crate::auth::now()));
+        let dir = std::env::temp_dir().join(format!("stylus-cache-{name}-{}-{}", std::process::id(), crate::paths::now()));
         let _ = std::fs::create_dir_all(&dir);
         dir
     }
@@ -211,6 +221,15 @@ mod tests {
         assert_eq!(c.get("acc", "new"), Some(json!("v")));
         let total: u64 = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.metadata().unwrap().len()).sum();
         assert!(total <= 4000);
+    }
+
+    #[test]
+    fn remove_dir_takes_the_folder_and_ignores_a_missing_one() {
+        let dir = temp_dir("clear");
+        Cache::new(dir.clone()).put("acc", "liked", &json!(1));
+        remove_dir(&dir).unwrap();
+        assert!(!dir.exists());
+        remove_dir(&dir).unwrap();
     }
 
     #[test]

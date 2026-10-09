@@ -1,5 +1,5 @@
-//! The MCP tools' `Backend` in the app: the same commands the UI calls (spotify.rs, internal API
-//! first, the Web API last), control.rs for playback, library.rs for mixes and added links.
+//! The MCP tools' `Backend` in the app: the same commands the UI calls (spotify.rs, the internal
+//! API), control.rs for playback, library.rs for mixes and added links.
 //! The library lists read the UI's disk cache first and fill it (cache, then network, like the UI).
 
 use std::collections::HashMap;
@@ -84,13 +84,13 @@ enum NowFrom {
     Cluster(Value),
     /// Nothing plays.
     Idle,
-    /// No cluster: the Web API.
-    WebApi,
+    /// No cluster (the player isn't connected): nothing plays here, other devices unknown.
+    Unchecked(String),
 }
 
 /// This Mac's events first while they say it's active (live; the cluster lags behind them).
 /// Else the cluster's active device, unless that's This Mac (stale: its events say it isn't
-/// active). The Web API only without a cluster.
+/// active). Without a cluster, other devices can't be checked.
 fn now_from(here_active: bool, own: Option<&str>, cluster: Result<Option<Value>, String>) -> NowFrom {
     if here_active {
         return NowFrom::Here;
@@ -98,7 +98,7 @@ fn now_from(here_active: bool, own: Option<&str>, cluster: Result<Option<Value>,
     match cluster {
         Ok(Some(c)) if own.is_none_or(|o| c["device_id"] != o) => NowFrom::Cluster(c),
         Ok(_) => NowFrom::Idle,
-        Err(_) => NowFrom::WebApi,
+        Err(e) => NowFrom::Unchecked(e),
     }
 }
 
@@ -133,8 +133,8 @@ async fn here_state(e: &crate::player::Engine, own: Option<String>) -> Option<Va
     }))
 }
 
-/// Now playing (`now_from`). This Mac and the cluster need no Web API; a rate-limited Web API
-/// gives "nothing plays here, other devices unchecked" rather than an error.
+/// Now playing (`now_from`). No cluster gives "nothing plays here, other devices unchecked"
+/// rather than an error.
 async fn now_playing() -> Result<Value, String> {
     let engine = crate::internal::engine().filter(|e| e.is_ready());
     let here_active = engine.is_some() && control::here_active();
@@ -145,28 +145,8 @@ async fn now_playing() -> Result<Value, String> {
             None => Ok(idle(None)),
         },
         NowFrom::Idle => Ok(idle(None)),
-        NowFrom::WebApi => match spotify::playback_state().await {
-            Ok(s) => Ok(s),
-            Err(e) if e.starts_with("RATE_LIMITED") => Ok(idle(Some(e))),
-            Err(e) => Err(e),
-        },
-        NowFrom::Cluster(c) => {
-            // names from the internal API (no Web API); just the uri when that fails
-            let track = match c["track_uri"].as_str() {
-                Some(uri) => match crate::internal::Api::current() {
-                    Ok(api) => api.tracks(&[uri.to_string()]).await.ok().and_then(|t| t.into_iter().next()).unwrap_or_else(|| json!({ "uri": uri })),
-                    Err(_) => json!({ "uri": uri }),
-                },
-                None => Value::Null,
-            };
-            let devices = spotify::list_devices().await.unwrap_or_default();
-            let dev = devices.as_array().into_iter().flatten().find(|d| d["id"] == c["device_id"]).cloned().unwrap_or_default();
-            Ok(json!({
-                "active": true, "is_playing": c["is_playing"], "progress_ms": c["position_ms"],
-                "device_id": c["device_id"], "device_name": dev["name"], "track": track,
-                "shuffle": c["shuffle"], "repeat": c["repeat"], "volume_percent": dev["volume_percent"], "context_uri": c["context_uri"],
-            }))
-        }
+        NowFrom::Unchecked(e) => Ok(idle(Some(e))),
+        NowFrom::Cluster(c) => Ok(crate::internal::playback_snapshot_from(&c).await),
     }
 }
 
@@ -261,19 +241,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn now_playing_reads_this_mac_without_the_web_api() {
+    fn now_playing_reads_this_mac_without_a_cluster() {
         let no_cluster = || Err::<Option<Value>, String>("ENGINE_NOT_READY: no Connect cluster yet".into());
-        // the observed bug: This Mac plays, no cluster yet, Web API rate-limited → its own events
+        // the observed bug: This Mac plays, no cluster yet → its own events
         assert_eq!(now_from(true, Some("mac"), no_cluster()), NowFrom::Here);
         assert_eq!(now_from(true, Some("mac"), Ok(None)), NowFrom::Here, "a lagging cluster doesn't hide it");
-        // another device plays: the cluster (works while rate-limited)
+        // another device plays: the cluster
         let phone = json!({ "device_id": "phone", "track_uri": "spotify:track:x" });
         assert_eq!(now_from(false, Some("mac"), Ok(Some(phone.clone()))), NowFrom::Cluster(phone.clone()));
         assert_eq!(now_from(false, None, Ok(Some(phone.clone()))), NowFrom::Cluster(phone));
         // the cluster still names This Mac after it went inactive: stale, nothing plays
         assert_eq!(now_from(false, Some("mac"), Ok(Some(json!({ "device_id": "mac" })))), NowFrom::Idle);
         assert_eq!(now_from(false, Some("mac"), Ok(None)), NowFrom::Idle);
-        // no cluster and This Mac idle: only then the Web API
-        assert_eq!(now_from(false, Some("mac"), no_cluster()), NowFrom::WebApi);
+        // no cluster and This Mac idle: other devices unchecked
+        assert_eq!(now_from(false, Some("mac"), no_cluster()), NowFrom::Unchecked("ENGINE_NOT_READY: no Connect cluster yet".into()));
     }
 }

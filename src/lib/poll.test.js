@@ -1,16 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
   pollDelay, pollMode, modeReason, sanityDue, listDue, gaveUp,
-  LOCAL_TICK_MS, HIDDEN_LOCAL_TICK_MS, POLL_MS, HIDDEN_POLL_MS, BLOCKED_TICK_MS, SANITY_MS, LIST_MIN_MS, GIVE_UP_FAILURES,
+  LOCAL_TICK_MS, HIDDEN_LOCAL_TICK_MS, POLL_MS, HIDDEN_POLL_MS, SANITY_MS, LIST_MIN_MS, GIVE_UP_FAILURES,
 } from "./poll.js";
 
 const here = { active: true, engine_active: true };
 const away = { active: false, engine_active: false };
 
 describe("pollMode", () => {
-  it("this Mac active: events, even while the Web API is blocked", () => {
+  it("this Mac active: events", () => {
     expect(pollMode({ local: here })).toBe("events");
-    expect(pollMode({ local: here, blockedMs: 5000 })).toBe("events");
   });
 
   it("another device, nothing known, or a sanity check that disagrees: poll", () => {
@@ -19,15 +18,9 @@ describe("pollMode", () => {
     expect(pollMode({ local: here, distrust: true })).toBe("poll");
   });
 
-  it("rate-limited and not playing here: blocked (no requests)", () => {
-    expect(pollMode({ local: away, blockedMs: 1 })).toBe("blocked");
-    expect(pollMode({ local: null, blockedMs: 50e6 })).toBe("blocked");
-    expect(pollMode({ local: here, distrust: true, blockedMs: 1 })).toBe("blocked");
-  });
-
   it("names the reason", () => {
     expect(modeReason({ mode: "events" })).toMatch(/player-state/);
-    expect(modeReason({ mode: "blocked", blockedMs: 50_000_000 })).toBe("Spotify rate limit, 50000 s left");
+    expect(modeReason({ mode: "poll" })).toMatch(/another device or nothing/);
     expect(modeReason({ mode: "poll", distrust: true })).toMatch(/another device active/);
   });
 });
@@ -45,10 +38,6 @@ describe("pollDelay", () => {
     expect(HIDDEN_POLL_MS).toBe(30000);
   });
 
-  it("blocked: a slow local tick", () => {
-    expect(pollDelay({ hidden: false, mode: "blocked", failures: 3 })).toBe(BLOCKED_TICK_MS);
-  });
-
   it("retries back off 1, 2, 4 s, capped at the normal period", () => {
     const d = [1, 2, 3, 4, 5].map((failures) => pollDelay({ hidden: false, mode: "poll", failures }));
     expect(d).toEqual([1000, 2000, 4000, 5000, 5000]);
@@ -61,18 +50,16 @@ describe("pollDelay", () => {
   });
 });
 
-describe("Web API budget", () => {
-  it("sanity check once a minute, never while blocked", () => {
+describe("request budget", () => {
+  it("sanity check once a minute", () => {
     expect(sanityDue({ lastAt: 0, now: SANITY_MS - 1 })).toBe(false);
     expect(sanityDue({ lastAt: 0, now: SANITY_MS })).toBe(true);
-    expect(sanityDue({ lastAt: 0, now: 10 * SANITY_MS, blockedMs: 1 })).toBe(false);
   });
 
-  it("lists: only when needed, at most every 30 s, a user change goes at once, never while blocked", () => {
+  it("lists: only when needed, at most every 30 s, a user change goes at once", () => {
     expect(listDue({ lastAt: 0, now: LIST_MIN_MS, need: false })).toBe(false);
     expect(listDue({ lastAt: 0, now: LIST_MIN_MS, need: true })).toBe(true);
     expect(listDue({ lastAt: 1000, now: LIST_MIN_MS, need: true })).toBe(false);
     expect(listDue({ lastAt: 1000, now: 2000, need: false, force: true })).toBe(true);
-    expect(listDue({ lastAt: 0, now: 1e9, need: true, force: true, blockedMs: 1 })).toBe(false);
   });
 });

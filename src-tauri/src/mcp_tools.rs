@@ -290,19 +290,15 @@ fn links_of(links: &Value, tab: &str) -> Value {
 
 /// Plain sentences for the app's error codes.
 pub fn plain_error(e: &str) -> String {
-    if let Some(rest) = e.strip_prefix("RATE_LIMITED:") {
-        let secs: u64 = rest.split(':').next().and_then(|s| s.parse().ok()).unwrap_or(0);
-        let mins = secs.div_ceil(60).max(1);
-        return format!("Spotify is rate-limiting Stylus's Web API for about {mins} more min, and this needs it. Commands for This Mac (Stylus's own player) still work: play there with device \"This Mac\".");
+    if let Some(rest) = e.strip_prefix("NOT_AVAILABLE_REMOTE: ") {
+        let action = rest.strip_suffix(" on other devices").unwrap_or(rest);
+        return format!("Not available for other devices: that device doesn't take {action} from Stylus. It works on This Mac (device \"This Mac\").");
     }
     if e.starts_with("ENGINE_NOT_READY") {
         return "Stylus's player isn't connected yet: try again in a moment.".into();
     }
     if e.starts_with("NO_ACTIVE_DEVICE") {
         return crate::control::NO_DEVICE.into();
-    }
-    if e.starts_with("AUTH_EXPIRED") {
-        return "Stylus's Spotify login expired: open Stylus and log in again.".into();
     }
     if let Some(rest) = e.strip_prefix("BAD_ARGS: ") {
         return rest.to_string();
@@ -602,7 +598,7 @@ async fn context_name(b: &dyn Backend, uri: &str) -> Value {
 }
 
 /// Without a request first: the mixes and links the app keeps, then the lists the UI cached on
-/// disk. Else looked up like a link (the internal API, no Web API needed).
+/// disk. Else looked up like a link (the internal API).
 async fn lookup_name(b: &dyn Backend, uri: &str) -> Value {
     let kind = uri.split(':').nth(1).unwrap_or("playlist");
     let name_in = |list: &Value| list.as_array().into_iter().flatten().find(|it| uri_of(kind, it) == uri).map(|it| it["name"].clone());
@@ -891,7 +887,10 @@ mod tests {
 
     #[test]
     fn errors_are_sentences() {
-        assert!(plain_error("RATE_LIMITED:600: x").contains("about 10 more min"));
+        assert_eq!(
+            plain_error("NOT_AVAILABLE_REMOTE: pause on other devices"),
+            "Not available for other devices: that device doesn't take pause from Stylus. It works on This Mac (device \"This Mac\")."
+        );
         assert_eq!(plain_error("NO_ACTIVE_DEVICE: Spotify API 404"), crate::control::NO_DEVICE);
         assert_eq!(plain_error("BAD_ARGS: bad repeat mode: x"), "bad repeat mode: x");
         assert!(plain_error("ENGINE_NOT_READY: the player is starting").starts_with("Stylus's player isn't connected"));
@@ -1020,28 +1019,29 @@ mod tests {
         assert_eq!(r["playlists"][0]["uri"], "spotify:playlist:1A2b3C4d5E6f7G8h9I0jKl");
     }
 
-    const RATE_LIMITED: &str = "RATE_LIMITED:41000: Spotify paused this app's library access";
+    const LISTS_DOWN: &str = "HTTP 503: the library lists are down";
+    const NO_CLUSTER: &str = "ENGINE_NOT_READY: no Connect cluster yet";
 
-    /// This Mac is up, the Web API rate-limited: every Web-API-only call fails like the app's.
-    /// `now` is what mcp_app's now_playing answers; links resolve through the internal API.
-    struct Blocked {
+    /// This Mac is up, the library lists fail. `now` is what mcp_app's now_playing answers; links
+    /// resolve through the internal API.
+    struct NoLists {
         now: Value,
         confirmed: Option<bool>,
     }
 
-    impl Backend for Blocked {
+    impl Backend for NoLists {
         fn now_playing(&self) -> Fut<'_> {
             let s = self.now.clone();
             Box::pin(async move { Ok(s) })
         }
         fn playlists(&self) -> Fut<'_> {
-            Box::pin(async { Err(RATE_LIMITED.to_string()) })
+            Box::pin(async { Err(LISTS_DOWN.to_string()) })
         }
         fn albums(&self) -> Fut<'_> {
-            Box::pin(async { Err(RATE_LIMITED.to_string()) })
+            Box::pin(async { Err(LISTS_DOWN.to_string()) })
         }
         fn followed(&self) -> Fut<'_> {
-            Box::pin(async { Err(RATE_LIMITED.to_string()) })
+            Box::pin(async { Err(LISTS_DOWN.to_string()) })
         }
         fn mixes(&self) -> Fut<'_> {
             Box::pin(async { Ok(json!([{ "uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb", "name": "Bonobo Radio" }])) })
@@ -1064,7 +1064,7 @@ mod tests {
                 Ok(match confirmed {
                     Some(true) => json!({ "device_id": "mac", "path": "this_mac", "confirmed": true, "state": { "active": true, "is_playing": true, "track": { "uri": "spotify:track:5UAVcondwGsdqnnumvEUXw", "name": "Cycles", "artists": "Bonobo" }, "context_uri": "spotify:playlist:37i9dQZF1E4yLltmVk3nyb" } }),
                     Some(false) => json!({ "device_id": "mac", "path": "this_mac", "confirmed": false, "state": null }),
-                    None => json!({ "device_id": "tv", "path": "web_api" }),
+                    None => json!({ "device_id": "tv", "path": "connect" }),
                 })
             })
         }
@@ -1079,54 +1079,54 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn now_playing_names_the_context_while_rate_limited() {
+    async fn now_playing_names_the_context_while_the_lists_fail() {
         // a mix: from the Mixes list
-        let b = Blocked { now: here_playing("spotify:playlist:37i9dQZF1E4yLltmVk3nyb"), confirmed: None };
+        let b = NoLists { now: here_playing("spotify:playlist:37i9dQZF1E4yLltmVk3nyb"), confirmed: None };
         let r = call(&b, "now_playing", &json!({})).await.unwrap();
         assert_eq!(r["track"]["name"], "Kerala");
         assert_eq!(r["context"]["name"], "Bonobo Radio");
-        // an album (saved albums blocked): looked up like a link
-        let b = Blocked { now: here_playing("spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs"), confirmed: None };
+        // an album (saved albums fail): looked up like a link
+        let b = NoLists { now: here_playing("spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs"), confirmed: None };
         assert_eq!(call(&b, "now_playing", &json!({})).await.unwrap()["context"]["name"], "Migration");
         // unknown everywhere: the uri, name null, no error
-        let b = Blocked { now: here_playing("spotify:playlist:0000000000000000000000"), confirmed: None };
+        let b = NoLists { now: here_playing("spotify:playlist:0000000000000000000000"), confirmed: None };
         let r = call(&b, "now_playing", &json!({})).await.unwrap();
         assert_eq!((r["context"]["uri"].clone(), r["context"]["name"].clone()), (json!("spotify:playlist:0000000000000000000000"), Value::Null));
     }
 
     #[tokio::test]
-    async fn now_playing_idle_while_rate_limited_is_not_an_error() {
-        let now = json!({ "active": false, "unchecked": RATE_LIMITED, "last_here": { "track_uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR", "context_uri": "spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs", "position_ms": 5000 } });
-        let r = call(&Blocked { now, confirmed: None }, "now_playing", &json!({})).await.unwrap();
+    async fn now_playing_idle_without_a_cluster_is_not_an_error() {
+        let now = json!({ "active": false, "unchecked": NO_CLUSTER, "last_here": { "track_uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR", "context_uri": "spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs", "position_ms": 5000 } });
+        let r = call(&NoLists { now, confirmed: None }, "now_playing", &json!({})).await.unwrap();
         assert_eq!(r["playing"], false);
         assert!(r["note"].as_str().unwrap().starts_with("Nothing is playing on This Mac. Other devices can't be checked now"), "{r}");
         assert_eq!(r["last_played_here"]["track"]["name"], "Kerala");
         assert_eq!(r["last_played_here"]["context"]["name"], "Migration");
         // nothing known at all
-        let r = call(&Blocked { now: json!({ "active": false }), confirmed: None }, "now_playing", &json!({})).await.unwrap();
+        let r = call(&NoLists { now: json!({ "active": false }), confirmed: None }, "now_playing", &json!({})).await.unwrap();
         assert_eq!(r, json!({ "playing": false, "note": "Nothing is playing" }));
         // the track's metadata still loading
         let mut s = here_playing("spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
         s["loading"] = json!(true);
         s["track"] = json!({ "uri": "spotify:track:5DAjrJqXqYtgr67pVhmUeR" });
-        let r = call(&Blocked { now: s, confirmed: None }, "now_playing", &json!({})).await.unwrap();
+        let r = call(&NoLists { now: s, confirmed: None }, "now_playing", &json!({})).await.unwrap();
         assert_eq!(r["track"]["uri"], "spotify:track:5DAjrJqXqYtgr67pVhmUeR");
         assert!(r["note"].as_str().unwrap().contains("loading"));
     }
 
     #[tokio::test]
     async fn play_says_whether_this_mac_started() {
-        let b = Blocked { now: json!({}), confirmed: Some(true) };
+        let b = NoLists { now: json!({}), confirmed: Some(true) };
         let r = call(&b, "play", &json!({ "name": "Bonobo Radio" })).await.unwrap();
         assert_eq!(r["status"], "playing");
         assert_eq!(r["started"]["uri"], "spotify:playlist:37i9dQZF1E4yLltmVk3nyb");
         assert_eq!(r["track"]["name"], "Cycles");
-        let b = Blocked { now: json!({}), confirmed: Some(false) };
+        let b = NoLists { now: json!({}), confirmed: Some(false) };
         let r = call(&b, "play", &json!({ "name": "Bonobo Radio" })).await.unwrap();
         assert_eq!(r["status"], "requested");
         assert!(r["note"].as_str().unwrap().contains("hasn't started within 5 s"), "{r}");
         assert!(r.get("started").is_none());
-        let b = Blocked { now: json!({}), confirmed: None };
+        let b = NoLists { now: json!({}), confirmed: None };
         assert_eq!(call(&b, "play", &json!({ "uri": "spotify:album:5pZ8vcpdqmJ1RvNcEuaNfs" })).await.unwrap()["status"], "requested");
     }
 }

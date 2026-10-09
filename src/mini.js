@@ -1,6 +1,6 @@
 // The menu-bar mini player (Rust tray.rs). A view only: the main window sends what it shows
 // (mini-state, src/lib/mini.js miniPayload); every button goes back to it as mini_command, so
-// routing, spinners and quota guards are the main window's own.
+// routing and spinners are the main window's own.
 import { ICONS } from "./lib/icons.js";
 import { miniProgress, volumeIcon } from "./lib/mini.js";
 import { stepVolume } from "./lib/transport.js";
@@ -33,7 +33,7 @@ function render() {
   $("mini").classList.toggle("is-playing", st.playing);
   $("mini").classList.toggle("is-loading", st.loading || Boolean(st.skipping));
 
-  setText($("miniTitle"), song ? st.title : st.status || "Nothing playing");
+  setText($("miniTitle"), song ? st.title : st.loading ? "" : st.status || "Nothing playing");
   setText($("miniArtist"), song ? st.artist || "" : "");
   $("miniArtist").hidden = !song;
   $("miniDevice").hidden = !st.device;

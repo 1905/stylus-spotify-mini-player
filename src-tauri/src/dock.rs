@@ -44,7 +44,7 @@ async fn show(app: &AppHandle, url: &str) -> Result<(), String> {
     if !art_url_ok(url) {
         return Err(format!("BAD_ARGS: not a Spotify image url: {url}"));
     }
-    let resp = crate::auth::http().get(url).send().await.map_err(|e| format!("download failed: {e}"))?;
+    let resp = crate::paths::http().get(url).send().await.map_err(|e| format!("download failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("download failed: HTTP {}", resp.status()));
     }

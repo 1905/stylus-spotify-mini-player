@@ -70,9 +70,9 @@ All tools return short JSON. Errors are plain sentences. A track is `{uri, name,
 | `like`, `unlike` | optional `uri` (default: the current song) | Liked Songs. |
 | `open_link` | `link`, optional `save`, `play`, `device` | Looks up a Spotify share link or uri. `save: true` adds it to Stylus's library; `play: true` plays it. |
 
-### Devices and the Web API
+### Devices
 
-"This Mac" is Stylus's own speaker. Commands for it go straight to the player in Stylus. Commands for other devices use Spotify's Web API. When Spotify rate-limits Stylus's Web API, the tools for other devices fail with a sentence that says so, and This Mac keeps working. Library lists, search and the mixes come from Spotify's internal API first, so they also keep working.
+"This Mac" is Stylus's own speaker. Commands for it go straight to the player in Stylus. Stylus lists your other Spotify Connect devices. Play, pause, skip, seek, shuffle, repeat, volume and `transfer` work on them through Spotify Connect. Adding to the queue of another device is not available; that command fails with a sentence that starts with "Not available for other devices". Library lists, search and the mixes come from Spotify's internal API, through the player's own session.
 
 ## Security
 

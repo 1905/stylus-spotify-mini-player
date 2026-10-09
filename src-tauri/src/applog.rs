@@ -49,7 +49,7 @@ static LOGGER: std::sync::OnceLock<FileLog> = std::sync::OnceLock::new();
 
 /// Start logging to the file. Called once, first thing in `run()`.
 pub fn init() {
-    let dir = crate::auth::app_dir().join("logs");
+    let dir = crate::paths::app_dir().join("logs");
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("stylus.log");
     let logger = LOGGER.get_or_init(|| FileLog { file: Mutex::new(FileLog::open(&path)), path });
@@ -57,7 +57,7 @@ pub fn init() {
         log::set_max_level(log::LevelFilter::Info);
     }
     log::info!(target: "stylus", "--- start v{}", env!("CARGO_PKG_VERSION"));
-    if let Some((level, note)) = crate::auth::app_dir_note() {
+    if let Some((level, note)) = crate::paths::app_dir_note() {
         log::log!(target: "stylus", *level, "app folder: {note}");
     }
 }
@@ -71,7 +71,7 @@ pub fn app_log(level: String, msg: String) {
 
 /// Local time is not worth a dependency: UTC seconds with millis.
 fn stamp() -> String {
-    let ms = crate::auth::now_ms();
+    let ms = crate::paths::now_ms();
     let s = ms / 1000;
     format!("{:02}:{:02}:{:02}.{:03}Z", s / 3600 % 24, s / 60 % 60, s % 60, ms % 1000)
 }

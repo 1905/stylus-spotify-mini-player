@@ -97,6 +97,10 @@ pub struct Saved {
     /// Unix time, ms.
     #[serde(default)]
     pub saved_at: u64,
+    /// The source played to its end: it is kept on its first track (`track_uri` None for a
+    /// context), at 0 ms. False again once something plays.
+    #[serde(default)]
+    pub finished: bool,
 }
 
 fn default_volume() -> u16 {
@@ -119,6 +123,7 @@ impl Saved {
             "shuffle": self.shuffle,
             "repeat": self.repeat.as_str(),
             "volume": self.volume,
+            "finished": self.finished,
         })
     }
 }
@@ -158,13 +163,35 @@ fn read_for(path: &Path, account: &str) -> Option<Saved> {
 fn write(path: &Path, saved: &Saved) {
     let result = serde_json::to_string(saved)
         .map_err(|e| e.to_string())
-        .and_then(|json| crate::auth::write_private(path, &json).map_err(|e| e.to_string()));
+        .and_then(|json| crate::paths::write_private(path, &json).map_err(|e| e.to_string()));
     if let Err(e) = result {
         log::warn!(target: LOG, "could not save session.json: {e}");
     }
 }
 
 // ---- pure rules ------------------------------------------------------------
+
+/// Most uris of the Liked Songs list a default load takes (`local_load`'s limit).
+pub const DEFAULT_LIST_MAX: usize = 200;
+
+/// What the launch restore loads when the account has no saved session: Liked Songs, in
+/// the order to try. First the context `spotify:user:<username>:collection`, then a list of
+/// the first 200 liked uris (when the context doesn't load). `liked` None: unknown (the
+/// fetch failed). Empty Liked Songs: nothing.
+pub fn default_sources(username: &str, liked: Option<Vec<String>>) -> Vec<Source> {
+    if liked.as_ref().is_some_and(Vec::is_empty) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if !username.is_empty() {
+        out.push(Source::Context { context_uri: format!("spotify:user:{username}:collection") });
+    }
+    if let Some(mut uris) = liked {
+        uris.truncate(DEFAULT_LIST_MAX);
+        out.push(Source::Uris { uris });
+    }
+    out
+}
 
 /// The source after `track` starts. A context is kept: its tracks aren't known here (a
 /// context loaded elsewhere arrives through the cluster update). A list is kept while the
@@ -224,6 +251,10 @@ struct Live {
     /// A track event came in since Spirc (re)connected. Spirc announces its fresh
     /// shuffle/repeat (off) on connect; those are not the user's and are ignored.
     has_track: bool,
+    /// The last player event (position ticks aside) was `EndOfTrack`.
+    ended: bool,
+    /// The source played to its end (`Saved::finished`).
+    finished: bool,
     clock: WriteClock,
     /// Set by the exit save: nothing is written after it.
     closed: bool,
@@ -241,6 +272,8 @@ impl Live {
             repeat: Repeat::Off,
             volume: DEFAULT_VOLUME,
             has_track: false,
+            ended: false,
+            finished: false,
             clock: WriteClock { dirty: false, volume_changed_at: None, last_write: now, playing: false },
             closed: false,
         }
@@ -277,7 +310,8 @@ impl Live {
             shuffle: self.shuffle,
             repeat: self.repeat,
             volume: self.volume,
-            saved_at: crate::auth::now_ms(),
+            saved_at: crate::paths::now_ms(),
+            finished: self.finished,
         })
     }
 
@@ -296,9 +330,27 @@ impl Live {
         self.snapshot(now)
     }
 
-    fn on_event(&mut self, event: &PlayerEvent, now: Instant) {
+    /// The source played to its end (librespot: `EndOfTrack`, no next track, so Spirc stops
+    /// the player: `Stopped`). Keep it on its first track at 0 ms, written at once.
+    fn finish(&mut self, now: Instant) {
+        self.track_uri = match &self.source {
+            Some(Source::Uris { uris }) => uris.first().cloned(),
+            _ => None,
+        };
+        self.set_position(0, Some(false), now);
+        self.finished = true;
+        self.clock.dirty = true;
+        log::info!(target: LOG, "the source played to its end: kept on its first track");
+    }
+
+    /// Applies a player event. True when it finished the source (see `finish`).
+    fn on_event(&mut self, event: &PlayerEvent, now: Instant) -> bool {
         let uri = |id: &librespot_core::SpotifyUri| id.to_uri().unwrap_or_default();
         log_event(event);
+        let after_end = self.ended;
+        if !matches!(event, PlayerEvent::PositionCorrection { .. } | PlayerEvent::PositionChanged { .. }) {
+            self.ended = matches!(event, PlayerEvent::EndOfTrack { .. });
+        }
         match event {
             PlayerEvent::SessionConnected { .. } => {
                 self.has_track = false;
@@ -312,6 +364,10 @@ impl Live {
             PlayerEvent::Playing { track_id, position_ms, .. } => {
                 self.set_track(&uri(track_id));
                 self.set_position(*position_ms, Some(true), now);
+                if self.finished {
+                    self.finished = false;
+                    self.clock.dirty = true;
+                }
             }
             PlayerEvent::Paused { track_id, position_ms, .. } => {
                 self.set_track(&uri(track_id));
@@ -324,6 +380,12 @@ impl Live {
             }
             PlayerEvent::PositionCorrection { position_ms, .. } | PlayerEvent::PositionChanged { position_ms, .. } => {
                 self.set_position(*position_ms, None, now)
+            }
+            PlayerEvent::Stopped { .. } if after_end && self.source.is_some() => {
+                // a reload that ends again before anything played (all unavailable): no new reload
+                let again = self.finished;
+                self.finish(now);
+                return !again;
             }
             PlayerEvent::Stopped { .. } => self.set_position(self.position_at(now), Some(false), now),
             PlayerEvent::VolumeChanged { volume } if *volume != self.volume => {
@@ -343,6 +405,7 @@ impl Live {
             }
             _ => {}
         }
+        false
     }
 }
 
@@ -384,6 +447,7 @@ impl Tracker {
             fresh.shuffle = s.shuffle;
             fresh.repeat = s.repeat;
             fresh.volume = s.volume;
+            fresh.finished = s.finished;
         }
         fresh.closed = live.closed;
         *live = fresh;
@@ -415,6 +479,7 @@ impl Tracker {
         live.set_position(position_ms, Some(false), now);
         live.shuffle = shuffle;
         live.repeat = repeat;
+        live.finished = false;
         live.clock.dirty = true;
     }
 
@@ -444,8 +509,9 @@ impl Tracker {
         live.clock.dirty = true;
     }
 
-    pub fn on_event(&self, event: &PlayerEvent) {
-        self.live().on_event(event, Instant::now());
+    /// Applies a player event. True when it finished the source: the caller loads it back.
+    pub fn on_event(&self, event: &PlayerEvent) -> bool {
+        self.live().on_event(event, Instant::now())
     }
 
     /// The session as it stands, None until the account is known or with nothing loaded.
@@ -485,31 +551,48 @@ impl Tracker {
             log::info!(target: LOG, "saved at exit: {} at {} ms", saved.track_uri.as_deref().unwrap_or("-"), saved.position_ms);
         }
     }
+
+    /// At logout: forgets the live session and removes its file. Nothing is written until
+    /// the next account (`use_account`). A missing file is Ok.
+    pub fn forget(&self) -> Result<(), String> {
+        let _writing = lock(&self.writing);
+        {
+            let mut live = self.live();
+            let closed = live.closed;
+            *live = Live::new(Instant::now());
+            live.closed = closed;
+        }
+        crate::paths::remove_if_exists(&self.path).map(drop).map_err(|e| format!("could not remove {}: {e}", self.path.display()))
+    }
 }
 
 /// Feeds librespot's player events into `tracker` and writes when due (off the async thread,
-/// only then), until the player goes away (its channel closes).
-pub async fn listen(tracker: std::sync::Arc<Tracker>, mut events: PlayerEventChannel) {
+/// only then), until the player goes away (its channel closes). `on_finished` runs after
+/// the write of a source that played to its end.
+pub async fn listen(tracker: std::sync::Arc<Tracker>, mut events: PlayerEventChannel, on_finished: impl Fn() + Send + 'static) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        tokio::select! {
+        let finished = tokio::select! {
             event = events.recv() => match event {
                 Some(event) => tracker.on_event(&event),
                 None => break,
             },
-            _ = tick.tick() => {}
-        }
+            _ = tick.tick() => false,
+        };
         if tracker.is_due() {
             let t = tracker.clone();
             let _ = tokio::task::spawn_blocking(move || t.save_if_due()).await;
+        }
+        if finished {
+            on_finished();
         }
     }
 }
 
 /// `<app dir>/session.json`.
 pub fn default_path() -> PathBuf {
-    crate::auth::app_dir().join("session.json")
+    crate::paths::app_dir().join("session.json")
 }
 
 /// Log line for a restore.
@@ -545,7 +628,7 @@ mod tests {
     use super::*;
 
     fn temp_file(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), crate::auth::now_ms()));
+        let dir = std::env::temp_dir().join(format!("stylus-session-{}-{name}-{}", std::process::id(), crate::paths::now_ms()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join("session.json")
     }
@@ -560,6 +643,7 @@ mod tests {
             repeat: Repeat::Context,
             volume: 40_000,
             saved_at: 1,
+            finished: false,
         }
     }
 
@@ -582,7 +666,7 @@ mod tests {
         assert_eq!(
             sample().payload(),
             json!({"contextUri": null, "uris": ["spotify:track:a", "spotify:track:b"], "trackUri": "spotify:track:b",
-                   "positionMs": 61000, "shuffle": true, "repeat": "context", "volume": 40000})
+                   "positionMs": 61000, "shuffle": true, "repeat": "context", "volume": 40000, "finished": false})
         );
     }
 
@@ -652,6 +736,25 @@ mod tests {
     }
 
     #[test]
+    fn forget_drops_the_session_and_its_file() {
+        let path = temp_file("forget");
+        let t = Tracker::new(path.clone());
+        t.use_account("alice");
+        t.loaded(Source::Uris { uris: vec!["spotify:track:a".into()] }, None, 500, false, Repeat::Off);
+        t.save_if_due();
+        assert!(path.exists());
+        t.forget().unwrap();
+        assert!(!path.exists());
+        assert!(t.current().is_none());
+        assert_eq!(t.account(), None);
+        // no account: nothing is written until the next one
+        t.loaded(Source::Uris { uris: vec!["spotify:track:b".into()] }, None, 0, false, Repeat::Off);
+        t.save_if_due();
+        assert!(!path.exists());
+        t.forget().unwrap();
+    }
+
+    #[test]
     fn write_timing() {
         let t0 = Instant::now();
         let s = Duration::from_secs;
@@ -710,6 +813,130 @@ mod tests {
         live.has_track = true;
         live.on_event(&PlayerEvent::ShuffleChanged { shuffle: false }, Instant::now());
         assert!(!live.shuffle && live.clock.dirty);
+    }
+
+    fn track_event(kind: &str, track: &str, position_ms: u32) -> PlayerEvent {
+        let track_id = librespot_core::SpotifyUri::from_uri(track).unwrap();
+        match kind {
+            "playing" => PlayerEvent::Playing { play_request_id: 1, track_id, position_ms },
+            "end" => PlayerEvent::EndOfTrack { play_request_id: 1, track_id },
+            "stopped" => PlayerEvent::Stopped { play_request_id: 1, track_id },
+            _ => unreachable!("{kind}"),
+        }
+    }
+
+    const T1: &str = "spotify:track:4uLU6hMCjMI75M1A2tKUQC";
+    const T2: &str = "spotify:track:6rqhFgbbKwnb9MLmUQDhG6";
+
+    /// A tracker for `alice` playing `source` on T2 at 200 s, its file at `path`.
+    fn playing_last(path: &Path, source: Source) -> Tracker {
+        let t = Tracker::new(path.to_path_buf());
+        t.use_account("alice");
+        t.loaded(source, Some(T2.into()), 0, false, Repeat::Off);
+        assert!(!t.on_event(&track_event("playing", T2, 200_000)));
+        t.save_if_due();
+        t
+    }
+
+    #[test]
+    fn end_of_a_context_keeps_it_on_its_first_track() {
+        let path = temp_file("finished-ctx");
+        let ctx = Source::Context { context_uri: "spotify:playlist:p".into() };
+        let t = playing_last(&path, ctx.clone());
+        assert!(!t.on_event(&track_event("end", T2, 0)));
+        assert!(t.on_event(&track_event("stopped", T2, 0)), "EndOfTrack then Stopped: the context finished");
+        // written at once
+        assert!(t.is_due());
+        t.save_if_due();
+        let saved = read(&path).unwrap();
+        assert_eq!((saved.source, saved.track_uri, saved.position_ms, saved.finished), (Some(ctx), None, 0, true));
+        // the reload's first track, then play: no longer finished
+        assert!(!t.on_event(&PlayerEvent::Loading { play_request_id: 2, track_id: librespot_core::SpotifyUri::from_uri(T1).unwrap(), position_ms: 0 }));
+        assert_eq!(t.current().unwrap().track_uri.as_deref(), Some(T1));
+        assert!(t.current().unwrap().finished);
+        t.on_event(&track_event("playing", T1, 0));
+        assert!(!t.current().unwrap().finished);
+    }
+
+    #[test]
+    fn end_of_a_list_keeps_it_on_its_first_uri() {
+        let path = temp_file("finished-list");
+        let list = Source::Uris { uris: vec![T1.into(), T2.into()] };
+        let t = playing_last(&path, list.clone());
+        t.on_event(&track_event("end", T2, 0));
+        assert!(t.on_event(&track_event("stopped", T2, 0)));
+        t.save_if_due();
+        let saved = read(&path).unwrap();
+        assert_eq!((saved.source, saved.track_uri.as_deref(), saved.position_ms, saved.finished), (Some(list), Some(T1), 0, true));
+        // the reload ends again before anything played (unavailable tracks): no second reload
+        t.on_event(&track_event("end", T1, 0));
+        assert!(!t.on_event(&track_event("stopped", T1, 0)));
+        assert!(t.current().unwrap().finished);
+    }
+
+    #[test]
+    fn a_stop_without_end_of_track_keeps_the_position() {
+        let path = temp_file("user-stop");
+        let ctx = Source::Context { context_uri: "spotify:playlist:p".into() };
+        let t = playing_last(&path, ctx.clone());
+        assert!(!t.on_event(&track_event("stopped", T2, 0)), "a stop or a dropped engine is not a finished context");
+        let cur = t.current().unwrap();
+        assert_eq!((cur.source, cur.track_uri.as_deref(), cur.finished), (Some(ctx), Some(T2), false));
+        assert!(cur.position_ms >= 200_000);
+        // an end of track followed by the next track (not a stop) is not a finish either
+        t.on_event(&track_event("end", T2, 0));
+        t.on_event(&track_event("playing", T1, 0));
+        assert!(!t.on_event(&track_event("stopped", T1, 0)));
+        assert!(!t.current().unwrap().finished);
+    }
+
+    #[test]
+    fn end_with_nothing_loaded_is_not_a_finish() {
+        let t = Tracker::new(temp_file("finished-none"));
+        t.on_event(&track_event("end", T2, 0));
+        // a track event makes a one-track list: drop it to test "no source"
+        t.live().source = None;
+        assert!(!t.on_event(&track_event("stopped", T2, 0)));
+    }
+
+    #[test]
+    fn old_files_without_finished_parse() {
+        let s = parse(r#"{"account":"a","source":{"context_uri":"spotify:playlist:p"},"track_uri":"spotify:track:x","position_ms":291695}"#).unwrap();
+        assert!(!s.finished);
+        assert_eq!(s.position_ms, 291_695);
+    }
+
+    #[test]
+    fn finished_survives_a_relaunch_and_forget_resets_it() {
+        let path = temp_file("finished-relaunch");
+        let t = playing_last(&path, Source::Context { context_uri: "spotify:playlist:p".into() });
+        t.on_event(&track_event("end", T2, 0));
+        t.on_event(&track_event("stopped", T2, 0));
+        t.save_if_due();
+        let again = Tracker::new(path.clone());
+        again.use_account("alice");
+        let cur = again.current().unwrap();
+        assert!(cur.finished);
+        assert_eq!((cur.track_uri, cur.position_ms), (None, 0));
+        again.forget().unwrap();
+        let live = again.live();
+        assert!(!live.finished && !live.ended);
+    }
+
+    #[test]
+    fn liked_songs_is_the_default_source() {
+        let ctx = Source::Context { context_uri: "spotify:user:alice:collection".into() };
+        let many: Vec<String> = (0..250).map(|i| format!("spotify:track:{i}")).collect();
+        // the context first, the list of the first 200 when the context doesn't load
+        let got = default_sources("alice", Some(many.clone()));
+        assert_eq!(got, vec![ctx.clone(), Source::Uris { uris: many[..200].to_vec() }]);
+        // Liked Songs unknown (the fetch failed): the context only
+        assert_eq!(default_sources("alice", None), vec![ctx]);
+        // empty Liked Songs: nothing to load
+        assert_eq!(default_sources("alice", Some(vec![])), vec![]);
+        // no username: the list only
+        assert_eq!(default_sources("", Some(many[..3].to_vec())), vec![Source::Uris { uris: many[..3].to_vec() }]);
+        assert_eq!(default_sources("", None), vec![]);
     }
 
     #[test]

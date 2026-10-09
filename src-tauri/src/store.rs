@@ -9,7 +9,7 @@ use std::sync::Mutex;
 static STATE: Mutex<Option<Map<String, Value>>> = Mutex::new(None);
 
 fn path() -> std::path::PathBuf {
-    crate::auth::app_dir().join("state.json")
+    crate::paths::app_dir().join("state.json")
 }
 
 /// The map in `json`, or None when it isn't a JSON object.
@@ -39,7 +39,7 @@ fn with_state<T>(f: impl FnOnce(&mut Map<String, Value>) -> T) -> T {
 
 fn save(state: &Map<String, Value>) -> Result<(), String> {
     let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
-    crate::auth::write_private(&path(), &json).map_err(|e| {
+    crate::paths::write_private(&path(), &json).map_err(|e| {
         log::warn!(target: "stylus::store", "could not save state.json: {e}");
         format!("could not save state: {e}")
     })
@@ -51,7 +51,7 @@ pub fn store_all() -> Value {
     with_state(|s| Value::Object(s.clone()))
 }
 
-/// The value stored under key, for Rust's own keys (`apiBlockedUntil`).
+/// The value stored under key, for Rust's own reads.
 pub fn get(key: &str) -> Option<Value> {
     with_state(|s| s.get(key).cloned())
 }
@@ -78,16 +78,32 @@ pub fn update<T>(key: &str, f: impl FnOnce(Option<&Value>) -> (Option<Value>, T)
 /// Store value under key (null removes it). Written to disk before it returns.
 #[tauri::command]
 pub fn store_set(key: String, value: Value) -> Result<(), String> {
+    if value.is_null() {
+        return remove(&[&key]);
+    }
     with_state(|s| {
-        if (value.is_null() && !s.contains_key(&key)) || s.get(&key) == Some(&value) {
+        if s.get(&key) == Some(&value) {
             return Ok(());
         }
         // a changed copy is written first, then kept: a failed save leaves memory as on disk
         let mut changed = s.clone();
-        if value.is_null() {
-            changed.remove(&key);
-        } else {
-            changed.insert(key, value);
+        changed.insert(key, value);
+        save(&changed)?;
+        *s = changed;
+        Ok(())
+    })
+}
+
+/// Removes `keys` (absent keys are skipped), written to disk before it returns.
+pub fn remove(keys: &[&str]) -> Result<(), String> {
+    with_state(|s| {
+        if !keys.iter().any(|k| s.contains_key(*k)) {
+            return Ok(());
+        }
+        // a changed copy is written first, then kept: a failed save leaves memory as on disk
+        let mut changed = s.clone();
+        for k in keys {
+            changed.remove(*k);
         }
         save(&changed)?;
         *s = changed;

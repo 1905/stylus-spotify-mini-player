@@ -7,7 +7,7 @@ export const MINI_DRIFT_MS = 3000;
 
 /**
  * The mini_push payload. now: the track on screen (a pending play's preview counts), status: the
- * main window's headline when no song shows ("Nothing playing", "Loading…"). sentAt: Date.now(),
+ * main window's headline when no song shows ("Nothing playing", or "" while loading). sentAt: Date.now(),
  * so the popover runs the bar on from there. volume null = no volume control; heart null = none.
  */
 export function miniPayload({ mode, now, status, isPlaying, pending, skipping, loading, positionMs, volume, heart, device }) {

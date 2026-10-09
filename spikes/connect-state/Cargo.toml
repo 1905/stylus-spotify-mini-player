@@ -1,0 +1,26 @@
+[package]
+name = "connect-state-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# P1 spike (plans/2026-10-09-drop-web-api): which connect-state player commands does a Spirc
+# device obey when another session of the same account sends them? Standalone, not in a workspace.
+[workspace]
+
+[dependencies]
+librespot-core = "0.8.0"
+librespot-connect = "0.8.0"
+librespot-playback = { version = "0.8.0", default-features = false, features = ["native-tls"] }
+librespot-metadata = "0.8.0"
+librespot-protocol = "0.8.0"
+futures-util = "0.3"
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+env_logger = "0.11"
+
+# same vendored librespot-core as the app (2 patches, see src-tauri/Cargo.toml)
+[patch.crates-io]
+librespot-core = { path = "../../src-tauri/vendor/librespot-core" }

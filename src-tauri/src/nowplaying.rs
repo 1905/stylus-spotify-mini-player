@@ -1,9 +1,9 @@
-//! What plays on "This Mac", straight from librespot: no Web API request. Rust emits
+//! What plays on "This Mac", straight from librespot. Rust emits
 //! `player-state` on every player event that changes what the UI shows (track, play/pause,
 //! seek, position correction, volume, shuffle/repeat, end of track, stop, the device going
-//! active or inactive), with the shape `playback_state` gives the UI (spotify.rs
-//! `simplify_state`) plus `engine_active` and `queue`. Track names, artists and covers come
-//! from librespot's metadata (the player's own session), cached per uri. The up-next list
+//! active or inactive), with the shape `playback_state` gives the UI (spotify.rs) plus
+//! `engine_active` and `queue`. Track names, artists and covers come from librespot's
+//! metadata (the player's own session), cached per uri. The up-next list
 //! comes from Spotify Connect cluster updates (`player_state.next_tracks` of this device).
 
 use std::collections::{HashMap, HashSet};
@@ -70,7 +70,7 @@ pub struct TrackInfo {
 
 impl TrackInfo {
     /// The UI's `Track`: `{id, uri, name, artists, artist_list:[{id,name}], album, cover, duration_ms}`,
-    /// the shape spotify.rs `simplify_track` gives.
+    /// the shape of every track list in the app.
     pub fn payload(&self) -> Value {
         let names: Vec<&str> = self.artists.iter().map(|(_, n)| n.as_str()).collect();
         let list: Vec<Value> = self.artists.iter().map(|(id, name)| json!({ "id": id, "name": name })).collect();
@@ -285,12 +285,20 @@ pub struct NowPlaying {
     fetching: Mutex<HashSet<String>>,
     session: Mutex<Option<Session>>,
     /// The latest Connect cluster (all devices, the active one's player state), for
-    /// `list_devices` / `get_queue` without the Web API. None until the first update of a session.
+    /// `list_devices` / `get_queue`. None until the first update of a session.
     cluster: Mutex<Option<Arc<Cluster>>>,
+    /// When the current session's dealer got its connection id (Connect is up): how long it
+    /// has gone without a cluster. None until then.
+    session_since: Mutex<Option<Instant>>,
     app: OnceLock<AppHandle>,
     tracker: Arc<Tracker>,
     /// An event was seen: before that, `local_state` is null.
     seen: Mutex<bool>,
+}
+
+/// The time from `start` to `now`; None with no start (no connection id yet).
+fn since(start: Option<Instant>, now: Instant) -> Option<std::time::Duration> {
+    start.map(|t| now.saturating_duration_since(t))
 }
 
 /// A mutex's guard, poisoned or not: a panic elsewhere must not take the state down with it.
@@ -307,6 +315,7 @@ impl NowPlaying {
             fetching: Mutex::new(HashSet::new()),
             session: Mutex::new(None),
             cluster: Mutex::new(None),
+            session_since: Mutex::new(None),
             app: OnceLock::new(),
             tracker,
             seen: Mutex::new(false),
@@ -321,6 +330,23 @@ impl NowPlaying {
     pub fn set_session(&self, session: Session) {
         *lock(&self.session) = Some(session);
         *lock(&self.cluster) = None;
+        *lock(&self.session_since) = None;
+    }
+
+    /// The dealer of the current session got its connection id: Spirc's first connect-state
+    /// PUT goes now. The first call per session starts the quiet clock; true then.
+    pub fn connect_up(&self) -> bool {
+        let mut since = lock(&self.session_since);
+        let first = since.is_none();
+        if first {
+            *since = Some(Instant::now());
+        }
+        first
+    }
+
+    /// The time since Connect came up (`connect_up`). None before that.
+    pub fn since_session(&self) -> Option<std::time::Duration> {
+        since(*lock(&self.session_since), Instant::now())
     }
 
     /// The latest Connect cluster of the current session.
@@ -452,7 +478,11 @@ impl NowPlaying {
     /// A Connect cluster update. While this Mac is the active device: its context and up-next.
     pub fn on_cluster(self: &Arc<Self>, update: &ClusterUpdate, device_id: &str) {
         let cluster = &update.cluster;
-        *lock(&self.cluster) = Some(Arc::new(cluster.clone().unwrap_or_default()));
+        let first = lock(&self.cluster).replace(Arc::new(cluster.clone().unwrap_or_default())).is_none();
+        if first {
+            let active = if cluster.active_device_id.is_empty() { "none" } else { cluster.active_device_id.as_str() };
+            log::info!(target: LOG, "first Connect cluster: {} devices, active device {active}", cluster.device.len());
+        }
         if cluster.active_device_id != device_id {
             return;
         }
@@ -482,7 +512,7 @@ impl NowPlaying {
         self.fetch_missing(next);
     }
 
-    /// Fetches the metadata of the uris not cached yet (librespot, not the Web API), then emits.
+    /// Fetches the metadata of the uris not cached yet (librespot), then emits.
     fn fetch_missing(self: &Arc<Self>, uris: Vec<String>) {
         let Some(session) = lock(&self.session).clone() else { return };
         let missing: Vec<String> = {
@@ -561,6 +591,15 @@ pub async fn listen(np: Arc<NowPlaying>, mut events: PlayerEventChannel) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn quiet_clock_starts_with_the_connection_id() {
+        let t0 = std::time::Instant::now();
+        assert_eq!(super::since(None, t0), None, "no connection id yet: no clock");
+        let later = t0 + std::time::Duration::from_secs(4);
+        assert_eq!(super::since(Some(t0), later), Some(std::time::Duration::from_secs(4)));
+        assert_eq!(super::since(Some(later), t0), Some(std::time::Duration::ZERO), "never negative");
+    }
+
     use super::*;
     use std::time::Duration;
 
@@ -583,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn track_payload_matches_simplify_track() {
+    fn track_payload_shape() {
         assert_eq!(
             info().payload(),
             json!({

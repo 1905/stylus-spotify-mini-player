@@ -30,7 +30,7 @@ futures-util = "0.3"
 librespot-core = "0.8.0"
 librespot-playback = { version = "0.8.0", features = ["rodio-backend"] }
 librespot-connect = "0.8.0"
-# track names, artists and covers for the in-app player's now-playing (nowplaying.rs): no Web API
+# track names, artists and covers for the in-app player's now-playing (nowplaying.rs)
 librespot-metadata = "0.8.0"
 # only for AuthenticationType: the session hands back its reusable login as raw fields
 librespot-protocol = "0.8.0"
@@ -77,8 +77,9 @@ codegen-units = 1
 # panic = "unwind" (default): librespot's audio output panics when no output device exists; abort would take the whole app down
 strip = true
 
-# librespot-core 0.8.0, vendored with 2 patches (re-apply when upgrading librespot):
+# librespot-core 0.8.0, vendored with 3 patches (re-apply when upgrading librespot):
 # 1. session.rs check_catalogue: no exit(1) on a non-Premium account (would kill the app)
 # 2. dealer/mod.rs: a failed dealer-URL/token fetch retries instead of ending the worker
+# 3. login5.rs Login5Manager::invalidate: drops a cached token that got HTTP 401 (internal.rs Api::send)
 [patch.crates-io]
 librespot-core = { path = "vendor/librespot-core" }

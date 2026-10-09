@@ -1,213 +1,25 @@
-//! Spotify Authorization Code + PKCE flow, token storage, and the local
+//! Spotify Authorization Code + PKCE flow for the player login, and the local
 //! loopback callback server that catches the redirect.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::Rng;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-pub const CLIENT_ID: &str = "9b2bc32ee90c4ef6aa0a25ccc1b076c7";
-/// The app login's redirect is `http://127.0.0.1:1420/callback`.
-const CALLBACK_PORT: u16 = 1420;
-const CALLBACK_PATH: &str = "/callback";
-/// Scopes requested at login: every standard Spotify scope, so a new feature
-/// never needs another login (user, 2026-10-02). Partner-only scopes are left
-/// out: Spotify rejects the whole login if an app asks for one.
-/// A stored grant missing any of them → "reconnect".
-const REQUIRED_SCOPES: &[&str] = &[
-    "user-read-private",
-    "user-read-email",
-    "playlist-read-private",
-    "playlist-read-collaborative",
-    "playlist-modify-private",
-    "playlist-modify-public",
-    "user-read-playback-state",
-    "user-modify-playback-state",
-    "user-read-currently-playing",
-    "user-read-recently-played",
-    "user-read-playback-position",
-    "user-library-read",
-    "user-library-modify",
-    "user-top-read",
-    "user-follow-read",
-    "user-follow-modify",
-    "ugc-image-upload",
-    "app-remote-control",
-    "streaming",
-];
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct Tokens {
-    pub access_token: String,
-    pub refresh_token: String,
-    /// Unix seconds when access_token expires.
-    pub expires_at: u64,
-    /// Space-separated scopes granted by Spotify. Empty in pre-scope files.
-    #[serde(default)]
-    pub scope: String,
-}
+use crate::paths::{http, urlencode};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct TokenResponse {
     pub(crate) access_token: String,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    expires_in: u64,
-    #[serde(default)]
-    scope: Option<String>,
 }
 
-/// True when `granted` (space-separated) contains every required scope.
-pub fn has_required_scopes(granted: &str) -> bool {
-    let have: Vec<&str> = granted.split_whitespace().collect();
-    REQUIRED_SCOPES.iter().all(|s| have.contains(s))
-}
-
-fn status_for(tokens: Option<&Tokens>) -> &'static str {
-    match tokens {
-        Some(t) if !t.refresh_token.is_empty() => {
-            if has_required_scopes(&t.scope) {
-                "ok"
-            } else {
-                "reconnect"
-            }
-        }
-        _ => "login",
-    }
-}
-
-/// "login" (no usable tokens), "reconnect" (scopes missing) or "ok".
+/// The login screen's question: `{"status": "ok" | "login" | "not_premium"}`, from the player
+/// engine's state (`Engine::auth_status`).
 #[tauri::command]
-pub fn auth_status() -> &'static str {
-    status_for(load_tokens().as_ref())
-}
-
-/// A refresh failure the user can only fix by logging in again.
-fn is_terminal_refresh_failure(status: u16, body: &str) -> bool {
-    status == 401 || (status == 400 && body.contains("invalid_grant"))
-}
-
-/// Unix time, seconds.
-pub(crate) fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
-/// Unix time, ms.
-pub(crate) fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
-// ---- token persistence -----------------------------------------------------
-
-fn token_path() -> std::path::PathBuf {
-    app_dir().join("tokens.json")
-}
-
-pub fn load_tokens() -> Option<Tokens> {
-    let data = std::fs::read_to_string(token_path()).ok()?;
-    serde_json::from_str(&data).ok()
-}
-
-fn save_tokens(t: &Tokens) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(t).map_err(|e| e.to_string())?;
-    write_private(&token_path(), &json).map_err(|e| format!("could not save login to {}: {e}", token_path().display()))
-}
-
-/// The app's data folder name under `~/Library/Application Support`.
-const APP_DIR_NAME: &str = "stylus";
-/// Older folder names, newest first: the app was Needle, and rust-spotify before that.
-const OLD_APP_DIR_NAMES: [&str; 2] = ["needle", "rust-spotify"];
-
-static APP_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-/// What the one-time folder migration did, for the log (the logger starts after it).
-static APP_DIR_NOTE: std::sync::OnceLock<(log::Level, String)> = std::sync::OnceLock::new();
-
-/// The app's data folder (`~/Library/Application Support/stylus`), created if missing.
-/// The first call moves an old `needle` or `rust-spotify` folder there (see `resolve_app_dir`).
-pub(crate) fn app_dir() -> std::path::PathBuf {
-    let dir = APP_DIR.get_or_init(|| {
-        // tests never touch the real folder
-        let base = if cfg!(test) {
-            std::env::temp_dir().join(format!("stylus-test-appdir-{}", std::process::id()))
-        } else {
-            dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
-        };
-        resolve_app_dir(&base)
-    });
-    let _ = std::fs::create_dir_all(dir);
-    dir.clone()
-}
-
-/// The migration's log line, if it did anything. Taken once by `applog::init`.
-pub(crate) fn app_dir_note() -> Option<&'static (log::Level, String)> {
-    APP_DIR_NOTE.get()
-}
-
-#[derive(Debug, PartialEq)]
-enum DirAction {
-    /// Use the new folder (it exists, or there is nothing to move).
-    UseNew,
-    /// Move the old folder at this index of `OLD_APP_DIR_NAMES` to the new name.
-    Migrate(usize),
-}
-
-/// Move only when the new folder doesn't exist: never merge, never overwrite.
-/// The newest old folder that exists wins (`needle` before `rust-spotify`).
-fn dir_action(new_exists: bool, old_exists: &[bool]) -> DirAction {
-    if new_exists {
-        return DirAction::UseNew;
-    }
-    match old_exists.iter().position(|&e| e) {
-        Some(i) => DirAction::Migrate(i),
-        None => DirAction::UseNew,
-    }
-}
-
-/// The data folder under `base`. Moves `needle` (or, failing that, `rust-spotify`) to `stylus`
-/// once (one atomic rename: tokens, player login, device id, cache, settings and logs move
-/// together). A failed move keeps the old folder in use, so nothing is lost.
-fn resolve_app_dir(base: &std::path::Path) -> std::path::PathBuf {
-    let new = base.join(APP_DIR_NAME);
-    let olds: Vec<std::path::PathBuf> = OLD_APP_DIR_NAMES.iter().map(|n| base.join(n)).collect();
-    let old_exists: Vec<bool> = olds.iter().map(|o| o.is_dir()).collect();
-    match dir_action(new.exists(), &old_exists) {
-        DirAction::UseNew => new,
-        DirAction::Migrate(i) => {
-            let old = &olds[i];
-            match std::fs::rename(old, &new) {
-                Ok(()) => {
-                    let _ = APP_DIR_NOTE.set((log::Level::Info, format!("moved {} to {}", old.display(), new.display())));
-                    new
-                }
-                Err(e) => {
-                    let note = format!("could not move {} to {}: {e}; using the old folder", old.display(), new.display());
-                    let _ = APP_DIR_NOTE.set((log::Level::Warn, note));
-                    old.clone()
-                }
-            }
-        }
-    }
-}
-
-/// Writes a secret file readable by this user only (0600), replacing it atomically.
-pub(crate) fn write_private(path: &std::path::Path, data: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let tmp = path.with_extension("tmp");
-    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-    f.write_all(data.as_bytes())?;
-    f.sync_all()?;
-    std::fs::rename(&tmp, path)
-}
-
-/// Moves tokens.json aside to tokens.json.invalid (overwriting) so the next
-/// auth_status() reports "login". The file is kept for inspection.
-fn invalidate_tokens() {
-    let path = token_path();
-    let _ = std::fs::rename(&path, path.with_extension("json.invalid"));
+pub fn auth_status() -> serde_json::Value {
+    let status = crate::internal::engine().map_or("login", |e| e.auth_status());
+    serde_json::json!({ "status": status })
 }
 
 // ---- PKCE helpers ----------------------------------------------------------
@@ -230,24 +42,6 @@ fn gen_state() -> String {
 
 // ---- the flow --------------------------------------------------------------
 
-/// Runs the full interactive login: opens the browser, waits for the callback,
-/// exchanges the code for tokens, and persists them.
-#[tauri::command]
-pub async fn login() -> Result<(), String> {
-    let tr = oauth_login(CLIENT_ID, CALLBACK_PORT, CALLBACK_PATH, REQUIRED_SCOPES, LOGIN_TIMEOUT).await?;
-    let tokens = Tokens {
-        expires_at: expires_at(&tr),
-        access_token: tr.access_token,
-        refresh_token: tr.refresh_token.unwrap_or_default(),
-        scope: tr.scope.unwrap_or_default(),
-    };
-    // under the lock: a refresh still in flight must not overwrite or invalidate these
-    let mut cached = TOKENS.lock().await;
-    save_tokens(&tokens)?;
-    *cached = Some(tokens);
-    Ok(())
-}
-
 /// The browser URL that starts a PKCE login.
 fn authorize_url(client_id: &str, scopes: &[&str], redirect_uri: &str, state: &str, verifier: &str) -> String {
     format!(
@@ -262,7 +56,7 @@ fn authorize_url(client_id: &str, scopes: &[&str], redirect_uri: &str, state: &s
 
 /// One interactive Authorization Code + PKCE login for `client_id`: opens the browser,
 /// waits up to `timeout` for the redirect to `http://127.0.0.1:{port}{redirect_path}`, and
-/// exchanges the code. The app login and the player login (player.rs) both use it.
+/// exchanges the code. The player login (player.rs) uses it.
 /// A port in use → Err naming the port.
 pub(crate) async fn oauth_login(
     client_id: &str,
@@ -302,13 +96,15 @@ pub(crate) async fn oauth_login(
     .map_err(|(_, body)| format!("token exchange failed: {body}"))
 }
 
-const LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// The longest request line the callback server reads.
+const MAX_REQUEST_LINE: usize = 8192;
 
-/// Accepts connections until one hits `callback_path`, parses its `code`/`state`,
-/// writes a friendly HTML page back, and returns the code.
-/// Gives up after `timeout`, so a closed browser tab doesn't leave the app
-/// waiting forever with the port held.
+/// Accepts connections until one hits `callback_path` with `expected_state`, writes a
+/// friendly HTML page back, and returns its `code` (or Err for its `error`).
+/// A request with a wrong or missing state gets "Waiting…" and the server keeps listening.
+/// Gives up at `timeout`, also while a connection is open, so a closed browser tab doesn't
+/// leave the app waiting forever with the port held.
 fn wait_for_code(
     listener: TcpListener,
     callback_path: &str,
@@ -318,54 +114,44 @@ fn wait_for_code(
     let deadline = std::time::Instant::now() + timeout;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     loop {
+        let Some(left) = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) else {
+            return Err("no answer from Spotify in 3 minutes, try again".into());
+        };
         let mut stream = match listener.accept() {
             Ok((s, _)) => s,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    return Err("no answer from Spotify in 3 minutes, try again".into());
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(left.min(std::time::Duration::from_millis(100)));
                 continue;
             }
             Err(_) => continue,
         };
         // the accepted socket may inherit non-blocking mode; reads need a bounded block
         let _ = stream.set_nonblocking(false);
-        let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-        let mut buf = [0u8; 2048];
         // a browser preconnect may never send a request: skip it, keep listening
-        let Ok(n) = stream.read(&mut buf) else { continue };
-        let req = String::from_utf8_lossy(&buf[..n]);
+        let Some(line) = read_request_line(&mut stream, deadline) else { continue };
 
-        // First line: "GET /callback?code=...&state=... HTTP/1.1"
-        let path = req.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("");
-        if path.split('?').next() != Some(callback_path) {
-            // Ignore favicon etc., keep listening.
-            let _ = stream.write_all(http_page("Waiting…").as_bytes());
-            continue;
-        }
-
-        let query = path.splitn(2, '?').nth(1).unwrap_or("");
+        // "GET /callback?code=...&state=... HTTP/1.1"
+        let path = line.split_whitespace().nth(1).unwrap_or("");
+        let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let mut code = None;
         let mut got_state = None;
         let mut error = None;
         for pair in query.split('&') {
-            let mut it = pair.splitn(2, '=');
-            match (it.next(), it.next()) {
-                (Some("code"), Some(v)) => code = Some(url_decode(v)),
-                (Some("state"), Some(v)) => got_state = Some(url_decode(v)),
-                (Some("error"), Some(v)) => error = Some(url_decode(v)),
+            match pair.split_once('=') {
+                Some(("code", v)) => code = Some(url_decode(v)),
+                Some(("state", v)) => got_state = Some(url_decode(v)),
+                Some(("error", v)) => error = Some(url_decode(v)),
                 _ => {}
             }
         }
-
+        // favicon, another path, a wrong or missing state: not our redirect, keep listening
+        if route != callback_path || got_state.as_deref() != Some(expected_state) {
+            let _ = stream.write_all(http_page("Waiting…").as_bytes());
+            continue;
+        }
         if let Some(e) = error {
             let _ = stream.write_all(http_page(&format!("Login cancelled: {e}")).as_bytes());
             return Err(format!("authorization denied: {e}"));
-        }
-        if got_state.as_deref() != Some(expected_state) {
-            let _ = stream.write_all(http_page("State mismatch — aborted.").as_bytes());
-            return Err("state mismatch (possible CSRF) — try again".into());
         }
         match code {
             Some(c) => {
@@ -380,6 +166,26 @@ fn wait_for_code(
                 return Err("no authorization code in callback".into());
             }
         }
+    }
+}
+
+/// Reads the request line (up to `\r\n`, max `MAX_REQUEST_LINE` bytes) before `deadline`.
+/// None when the client sends nothing, closes early or is too slow.
+fn read_request_line(stream: &mut std::net::TcpStream, deadline: std::time::Instant) -> Option<String> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    loop {
+        if let Some(end) = buf.windows(2).position(|w| w == b"\r\n") {
+            return Some(String::from_utf8_lossy(&buf[..end]).into_owned());
+        }
+        if buf.len() >= MAX_REQUEST_LINE {
+            return Some(String::from_utf8_lossy(&buf[..MAX_REQUEST_LINE]).into_owned());
+        }
+        let left = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero())?;
+        stream.set_read_timeout(Some(left.min(READ_TIMEOUT))).ok()?;
+        let n = stream.read(&mut chunk).ok().filter(|&n| n > 0)?;
+        let room = MAX_REQUEST_LINE - buf.len();
+        buf.extend_from_slice(&chunk[..n.min(room)]);
     }
 }
 
@@ -398,77 +204,26 @@ async fn token_request(params: &[(&str, &str)]) -> Result<TokenResponse, (u16, S
     resp.json().await.map_err(|e| (status, e.to_string()))
 }
 
-fn expires_at(tr: &TokenResponse) -> u64 {
-    now() + tr.expires_in.saturating_sub(60)
-}
-
-/// One HTTP client for every Spotify call. Finite deadlines: a stalled request
-/// must fail, or it would hold the TOKENS lock and freeze every command behind it.
-pub fn http() -> reqwest::Client {
-    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                .connect_timeout(std::time::Duration::from_secs(5))
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .expect("reqwest client")
-        })
-        .clone()
-}
-
-/// The tokens in memory, loaded from disk on first use. The mutex also
-/// serializes refreshes: Spotify rotates the refresh token, so two concurrent
-/// refreshes with the same old token can get `invalid_grant` and log the user out.
-static TOKENS: tokio::sync::Mutex<Option<Tokens>> = tokio::sync::Mutex::const_new(None);
-
-/// Returns a valid access token, refreshing if expired. Errors if not logged in.
-pub async fn valid_access_token() -> Result<String, String> {
-    let mut cached = TOKENS.lock().await;
-    if cached.is_none() {
-        *cached = load_tokens();
-    }
-    let tokens = cached.as_mut().ok_or("AUTH_EXPIRED: not logged in")?;
-    if now() < tokens.expires_at && !tokens.access_token.is_empty() {
-        return Ok(tokens.access_token.clone());
-    }
-    if tokens.refresh_token.is_empty() {
-        return Err("AUTH_EXPIRED: no refresh token, log in again".into());
-    }
-    let refresh_token = tokens.refresh_token.clone();
-    let tr = match token_request(&[
-        ("grant_type", "refresh_token"),
-        ("refresh_token", &refresh_token),
-        ("client_id", CLIENT_ID),
-    ])
-    .await
-    {
-        Ok(tr) => tr,
-        Err((status, body)) if is_terminal_refresh_failure(status, &body) => {
-            invalidate_tokens();
-            *cached = None;
-            return Err(format!("AUTH_EXPIRED: token refresh rejected: {body}"));
-        }
-        Err((status, body)) => return Err(format!("token refresh failed ({status}): {body}")),
-    };
-    tokens.expires_at = expires_at(&tr);
-    tokens.access_token = tr.access_token;
-    // Keep the stored scope when the refresh response omits it.
-    if let Some(scope) = tr.scope {
-        tokens.scope = scope;
-    }
-    // Spotify may rotate the refresh token.
-    if let Some(rt) = tr.refresh_token {
-        tokens.refresh_token = rt;
-    }
-    // best effort: the fresh token is in memory, so this session keeps working if the disk write fails
-    let _ = save_tokens(tokens);
-    Ok(tokens.access_token.clone())
-}
-
 // ---- small utilities -------------------------------------------------------
 
+/// `s` with the HTML special characters replaced by entities.
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn http_page(msg: &str) -> String {
+    let msg = html_escape(msg);
     let body = format!(
         "<!doctype html><html><head><meta charset=utf-8><title>Stylus</title>\
          <style>body{{background:#121212;color:#fff;font-family:system-ui;\
@@ -483,18 +238,6 @@ fn http_page(msg: &str) -> String {
     )
 }
 
-pub(crate) fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
 
 fn url_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -573,6 +316,64 @@ mod tests {
     }
 
     #[test]
+    fn wait_for_code_ignores_a_request_with_a_wrong_state() {
+        use std::io::{Read, Write};
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            // a forged error with a wrong state must not end the login
+            for req in ["GET /login?error=x&state=bad", "GET /login?error=y", "GET /login?code=ok&state=s"] {
+                let mut s = std::net::TcpStream::connect(addr).unwrap();
+                s.write_all(format!("{req} HTTP/1.1\r\n\r\n").as_bytes()).unwrap();
+                let mut out = String::new();
+                let _ = s.read_to_string(&mut out);
+            }
+        });
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2));
+        client.join().unwrap();
+        assert_eq!(r.unwrap(), "ok");
+    }
+
+    #[test]
+    fn wait_for_code_reads_a_request_line_sent_in_two_parts() {
+        use std::io::{Read, Write};
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(b"GET /login?code=ab").unwrap();
+            s.flush().unwrap();
+            // longer than the 100 ms accept poll, so the server reads the first part alone
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            s.write_all(b"c&state=s HTTP/1.1\r\n\r\n").unwrap();
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+        });
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2));
+        client.join().unwrap();
+        assert_eq!(r.unwrap(), "abc");
+    }
+
+    #[test]
+    fn wait_for_code_keeps_its_deadline_with_a_silent_open_connection() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        // connects, sends nothing and stays open until the end of the test
+        let _silent = std::net::TcpStream::connect(addr).unwrap();
+        let start = std::time::Instant::now();
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_millis(300));
+        assert!(r.is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    }
+
+    #[test]
+    fn http_page_escapes_its_text() {
+        let p = http_page("<script>&\"'");
+        assert!(p.contains("&lt;script&gt;&amp;&quot;&#39;"));
+        assert!(!p.contains("<script>"));
+    }
+
+    #[test]
     fn authorize_url_carries_client_scopes_and_redirect() {
         let u = authorize_url("cid", &["streaming", "user-read-email"], "http://127.0.0.1:5588/login", "st", "v");
         assert!(u.contains("client_id=cid&"));
@@ -581,146 +382,4 @@ mod tests {
         assert!(u.contains(&format!("code_challenge={}", challenge("v"))));
     }
     use super::*;
-
-    /// A grant holding exactly the scopes the app asks for.
-    fn all() -> String {
-        REQUIRED_SCOPES.join(" ")
-    }
-
-    #[test]
-    fn scopes_cover_every_standard_scope() {
-        assert_eq!(REQUIRED_SCOPES.len(), 19);
-        for s in ["playlist-modify-private", "user-follow-modify", "user-read-currently-playing", "ugc-image-upload"] {
-            assert!(REQUIRED_SCOPES.contains(&s), "missing {s}");
-        }
-    }
-
-    #[test]
-    fn scopes_missing_library_is_reconnect() {
-        let s = all().replace(" user-library-read", "");
-        assert!(!has_required_scopes(&s));
-    }
-
-    #[test]
-    fn scopes_all_present() {
-        assert!(has_required_scopes(&all()));
-    }
-
-    #[test]
-    fn scopes_missing_recently_played() {
-        let s = all().replace(" user-read-recently-played", "");
-        assert!(!has_required_scopes(&s));
-    }
-
-    #[test]
-    fn scopes_empty() {
-        assert!(!has_required_scopes(""));
-    }
-
-    #[test]
-    fn scopes_extra_unknown() {
-        assert!(has_required_scopes(&format!("{} something-new", all())));
-    }
-
-    #[test]
-    fn status_for_cases() {
-        let ok = Tokens { refresh_token: "r".into(), scope: all(), ..Default::default() };
-        let no_rt = Tokens { scope: all(), ..Default::default() };
-        let old = Tokens { refresh_token: "r".into(), ..Default::default() };
-        assert_eq!(status_for(None), "login");
-        assert_eq!(status_for(Some(&no_rt)), "login");
-        assert_eq!(status_for(Some(&old)), "reconnect");
-        assert_eq!(status_for(Some(&ok)), "ok");
-    }
-
-    #[test]
-    fn old_token_file_loads_without_scope() {
-        let t: Tokens = serde_json::from_str(
-            r#"{"access_token":"a","refresh_token":"r","expires_at":1}"#,
-        )
-        .unwrap();
-        assert_eq!(t.scope, "");
-    }
-
-    #[test]
-    fn terminal_refresh_failures() {
-        assert!(is_terminal_refresh_failure(400, r#"{"error":"invalid_grant"}"#));
-        assert!(is_terminal_refresh_failure(401, ""));
-        assert!(!is_terminal_refresh_failure(400, r#"{"error":"invalid_request"}"#));
-        assert!(!is_terminal_refresh_failure(500, "invalid_grant"));
-        assert!(!is_terminal_refresh_failure(429, ""));
-    }
-
-    #[test]
-    fn app_dir_moves_only_into_a_free_name() {
-        use super::{dir_action, DirAction};
-        // [needle, rust-spotify]
-        assert_eq!(dir_action(false, &[true, false]), DirAction::Migrate(0));
-        assert_eq!(dir_action(false, &[false, true]), DirAction::Migrate(1));
-        assert_eq!(dir_action(false, &[true, true]), DirAction::Migrate(0));
-        assert_eq!(dir_action(false, &[false, false]), DirAction::UseNew);
-        assert_eq!(dir_action(true, &[true, true]), DirAction::UseNew);
-        assert_eq!(dir_action(true, &[true, false]), DirAction::UseNew);
-        assert_eq!(dir_action(true, &[false, false]), DirAction::UseNew);
-    }
-
-    fn migrate_base(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("stylus-migrate-{name}-{}-{}", std::process::id(), super::now()))
-    }
-
-    fn fill(dir: &std::path::Path) {
-        std::fs::create_dir_all(dir.join("cache")).unwrap();
-        std::fs::create_dir_all(dir.join("logs")).unwrap();
-        for f in ["tokens.json", "player-credentials.json", "session.json", "settings.json", "state.json"] {
-            std::fs::write(dir.join(f), f).unwrap();
-        }
-        std::fs::write(dir.join("player-device-id"), "dev-1").unwrap();
-        std::fs::write(dir.join("cache").join("x"), "c").unwrap();
-        std::fs::write(dir.join("logs").join("needle.log"), "l").unwrap();
-    }
-
-    fn assert_filled(dir: &std::path::Path) {
-        for f in ["tokens.json", "player-credentials.json", "session.json", "settings.json", "state.json"] {
-            assert_eq!(std::fs::read_to_string(dir.join(f)).unwrap(), f);
-        }
-        assert_eq!(std::fs::read_to_string(dir.join("player-device-id")).unwrap(), "dev-1");
-        assert_eq!(std::fs::read_to_string(dir.join("cache").join("x")).unwrap(), "c");
-        assert_eq!(std::fs::read_to_string(dir.join("logs").join("needle.log")).unwrap(), "l");
-    }
-
-    #[test]
-    fn app_dir_migrates_needle_and_leaves_rust_spotify() {
-        let base = migrate_base("needle");
-        let needle = base.join("needle");
-        let older = base.join("rust-spotify");
-        fill(&needle);
-        std::fs::create_dir_all(&older).unwrap();
-        let dir = super::resolve_app_dir(&base);
-        assert_eq!(dir, base.join("stylus"));
-        assert!(!needle.exists());
-        assert!(older.exists());
-        assert_filled(&dir);
-        // stylus exists now: it wins, the leftovers are left alone
-        std::fs::create_dir_all(&needle).unwrap();
-        assert_eq!(super::resolve_app_dir(&base), base.join("stylus"));
-        assert!(needle.exists());
-    }
-
-    #[test]
-    fn app_dir_migrates_rust_spotify_when_needle_is_missing() {
-        let base = migrate_base("rust-spotify");
-        let older = base.join("rust-spotify");
-        fill(&older);
-        let dir = super::resolve_app_dir(&base);
-        assert_eq!(dir, base.join("stylus"));
-        assert!(!older.exists());
-        assert_filled(&dir);
-    }
-
-    #[test]
-    fn app_dir_without_old_folders_is_the_new_one() {
-        let base = migrate_base("fresh");
-        std::fs::create_dir_all(&base).unwrap();
-        assert_eq!(super::resolve_app_dir(&base), base.join("stylus"));
-    }
 }

@@ -15,9 +15,9 @@ pub mod mcp_tools;
 mod media;
 mod nowplaying;
 mod parse;
+mod paths;
 mod pb;
 mod player;
-mod quota;
 mod session;
 mod settings;
 mod spotify;
@@ -30,6 +30,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     applog::init();
+    paths::remove_legacy_files();
     let engine = player::Engine::new(Arc::new(player::FileStore));
     internal::attach(engine.clone());
     let app = tauri::Builder::default()
@@ -45,8 +46,10 @@ pub fn run() {
             let engine = app.state::<player::Engine>().inner().clone();
             engine.attach(app.handle().clone());
             tauri::async_runtime::spawn(async move { engine.restart(None).await });
-            // one Web API usage line every 10 minutes (quota.rs)
-            tauri::async_runtime::spawn(quota::summaries());
+            // "Log Out" in the app menu (and the handler for the tray menu's one)
+            if let Err(e) = tray::init_app_menu(app.handle()) {
+                log::warn!("app menu: {e}");
+            }
             // the menu-bar icon and its mini player (tray.rs); the app runs fine without them
             if let Err(e) = tray::init(app.handle()) {
                 log::warn!("menu bar: {e}");
@@ -59,10 +62,9 @@ pub fn run() {
             store::store_all,
             store::store_set,
             auth::auth_status,
-            auth::login,
             player::engine_status,
             player::engine_login,
-            player::engine_restart,
+            player::logout,
             player::engine_get_quality,
             player::engine_set_quality,
             dock::set_dock_art,
@@ -109,13 +111,13 @@ pub fn run() {
             player::local_shuffle,
             player::local_repeat,
             player::local_state,
-            quota::api_status,
             spotify::mix_info,
             spotify::get_top,
             spotify::get_artist,
             spotify::get_artist_albums,
             spotify::get_followed_artists,
             spotify::add_to_queue,
+            control::control_transfer,
             library::mixes_list,
             library::links_list,
             library::link_resolve,

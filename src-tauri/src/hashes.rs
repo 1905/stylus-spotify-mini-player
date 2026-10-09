@@ -77,7 +77,7 @@ pub fn load_from(dir: &std::path::Path) -> HashMap<String, String> {
 /// The hash of `op` for this run (the override file is read once).
 pub fn get(op: &str) -> Option<String> {
     static ALL: OnceLock<HashMap<String, String>> = OnceLock::new();
-    ALL.get_or_init(|| load_from(&crate::auth::app_dir())).get(op).cloned()
+    ALL.get_or_init(|| load_from(&crate::paths::app_dir())).get(op).cloned()
 }
 
 #[cfg(test)]

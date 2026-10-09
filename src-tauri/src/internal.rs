@@ -1,14 +1,18 @@
 //! Spotify's internal endpoints, reached with the in-app player's own librespot Session
-//! (login5 Bearer token + client-token), so the app's rate-limited Web API client id is not used.
+//! (login5 Bearer token + client-token). The app has no other data source.
 //! See spikes/internal-api/REPORT.md for what was probed.
 
+use std::future::Future;
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use librespot_core::Session;
 use serde_json::{json, Value};
 
 pub const PATHFINDER: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
 const LOG: &str = "stylus::internal";
+/// One request (tokens included) may take this long, like `paths::http()`'s timeout.
+const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
 static ENGINE: OnceLock<crate::player::Engine> = OnceLock::new();
 
@@ -31,7 +35,7 @@ pub fn not_ready(why: &str) -> String {
 
 impl Api {
     pub fn new(session: Session) -> Api {
-        Api { session, http: crate::auth::http() }
+        Api { session, http: crate::paths::http() }
     }
 
     /// The engine's live session, or `ENGINE_NOT_READY`.
@@ -45,8 +49,19 @@ impl Api {
     }
 
     /// One request with the session's tokens. Ok = the body of a 2xx answer; Err names the
-    /// HTTP status and the start of the body. Tokens are never logged.
+    /// HTTP status and the start of the body. Tokens are never logged. Each try has
+    /// `SEND_TIMEOUT` (`transport: timeout`); an HTTP 401 drops the login5 token and tries once more.
     pub async fn send(&self, method: reqwest::Method, url: &str, ctype: Option<&str>, accept: Option<&str>, body: Option<Vec<u8>>) -> Result<Vec<u8>, String> {
+        send_retrying(
+            || self.attempt(method.clone(), url, ctype, accept, body.clone()),
+            |token| self.session.login5().invalidate(token),
+            SEND_TIMEOUT,
+        )
+        .await
+    }
+
+    /// One try: the token it used, the HTTP status and the body.
+    async fn attempt(&self, method: reqwest::Method, url: &str, ctype: Option<&str>, accept: Option<&str>, body: Option<Vec<u8>>) -> Result<(String, u16, Vec<u8>), String> {
         let token = self.session.login5().auth_token().await.map_err(|e| format!("login5 token: {e}"))?;
         let mut rb = self
             .http
@@ -69,12 +84,9 @@ impl Api {
             None => rb.header("content-length", "0"),
         };
         let resp = rb.send().await.map_err(|e| format!("transport: {e}"))?;
-        let status = resp.status();
+        let status = resp.status().as_u16();
         let bytes = resp.bytes().await.map_err(|e| format!("transport: {e}"))?.to_vec();
-        if !status.is_success() {
-            return Err(http_error(status.as_u16(), &bytes));
-        }
-        Ok(bytes)
+        Ok((token.access_token, status, bytes))
     }
 
     /// GET/POST on the session's spclient host (`path` starts with `/`).
@@ -93,6 +105,30 @@ impl Api {
         let v: Value = serde_json::from_slice(&bytes).map_err(|e| format!("pathfinder {op}: bad JSON: {e}"))?;
         graphql_data(v).map_err(|e| format!("pathfinder {op}: {e}"))
     }
+}
+
+/// `fut`, or `transport: timeout` when it takes longer than `limit`.
+async fn with_deadline<T>(limit: Duration, fut: impl Future<Output = Result<T, String>>) -> Result<T, String> {
+    tokio::time::timeout(limit, fut).await.unwrap_or_else(|_| Err("transport: timeout".into()))
+}
+
+/// `Api::send`'s rules around one try (`attempt`: token, status, body): each try within `limit`;
+/// on HTTP 401 `invalidate` the token and try once more. Ok = a 2xx body; else `http_error`.
+async fn send_retrying<F, Fut>(attempt: F, invalidate: impl FnOnce(&str), limit: Duration) -> Result<Vec<u8>, String>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<(String, u16, Vec<u8>), String>>,
+{
+    let (token, mut status, mut bytes) = with_deadline(limit, attempt()).await?;
+    if status == 401 {
+        log::info!(target: LOG, "HTTP 401: a new login5 token, one more try");
+        invalidate(&token);
+        (_, status, bytes) = with_deadline(limit, attempt()).await?;
+    }
+    if !(200..300).contains(&status) {
+        return Err(http_error(status, &bytes));
+    }
+    Ok(bytes)
 }
 
 pub fn pathfinder_body(op: &str, hash: &str, variables: Value) -> Value {
@@ -133,8 +169,6 @@ pub enum Source {
     Primary,
     /// The internal protobuf path (spclient / extended metadata), or another internal fallback.
     Fallback,
-    /// The public Web API (spotify.rs), quota-guarded.
-    Web,
 }
 
 impl std::fmt::Display for Source {
@@ -142,7 +176,6 @@ impl std::fmt::Display for Source {
         f.write_str(match self {
             Source::Primary => "internal",
             Source::Fallback => "internal fallback",
-            Source::Web => "Web API",
         })
     }
 }
@@ -150,16 +183,11 @@ impl std::fmt::Display for Source {
 /// One step of a chain: a source and its (lazy) request.
 pub type Attempt<'a, T> = (Source, futures_util::future::BoxFuture<'a, Result<T, String>>);
 
-/// The error a failed chain returns. The Web API's error, unless it only says the app is
-/// rate-limited while an internal source failed for a real reason: then that reason, which says
-/// more. With no Web API step, the first real internal error.
+/// The error a failed chain returns: the first error that is not `ENGINE_NOT_READY`, else the
+/// first error, else "no source".
 pub fn final_error(errs: &[(Source, String)]) -> String {
-    let real_internal = errs.iter().find(|(s, e)| *s != Source::Web && !e.starts_with("ENGINE_NOT_READY")).map(|(_, e)| e);
-    match errs.iter().rev().find(|(s, _)| *s == Source::Web) {
-        Some((_, w)) if w.starts_with("RATE_LIMITED") => real_internal.unwrap_or(w).clone(),
-        Some((_, w)) => w.clone(),
-        None => real_internal.or(errs.first().map(|(_, e)| e)).cloned().unwrap_or_else(|| "no source".into()),
-    }
+    let real = errs.iter().find(|(_, e)| !e.starts_with("ENGINE_NOT_READY"));
+    real.or(errs.first()).map(|(_, e)| e.clone()).unwrap_or_else(|| "no source".into())
 }
 
 /// Lets one warning per key through per window (`WARN_EVERY` by default).
@@ -196,7 +224,7 @@ impl WarnGate {
 fn warn_failure(op: &str, src: Source, err: &str) {
     static GATE: std::sync::Mutex<Option<WarnGate>> = std::sync::Mutex::new(None);
     // the player not being up yet is normal at launch: no warning
-    if src == Source::Web || err.starts_with("ENGINE_NOT_READY") {
+    if err.starts_with("ENGINE_NOT_READY") {
         log::debug!(target: LOG, "{op}: {src} failed: {err}");
         return;
     }
@@ -225,6 +253,15 @@ pub async fn serve<T>(op: &str, steps: Vec<Attempt<'_, T>>) -> Result<T, String>
     Err(final_error(&errs))
 }
 
+/// `serve` with one step: `f` with the engine's live session (`with_api`, Primary).
+pub async fn serve_one<T, F, Fut>(op: &str, f: F) -> Result<T, String>
+where
+    F: FnOnce(Api) -> Fut + Send,
+    Fut: std::future::Future<Output = Result<T, String>> + Send,
+{
+    serve(op, vec![with_api(Source::Primary, f)]).await
+}
+
 /// A step that runs `f` with the engine's live session, or fails with ENGINE_NOT_READY.
 pub fn with_api<'a, T, F, Fut>(src: Source, f: F) -> Attempt<'a, T>
 where
@@ -236,18 +273,40 @@ where
     (src, async move { f(Api::current()?).await }.boxed())
 }
 
-/// A Web API step.
-pub fn web<'a, T, Fut>(fut: Fut) -> Attempt<'a, T>
-where
-    Fut: std::future::Future<Output = Result<T, String>> + Send + 'a,
-{
-    use futures_util::FutureExt;
-    (Source::Web, fut.boxed())
-}
-
 // ---- operations ----------------------------------------------------------------------------
 
-use crate::spotify::PAGE_CONCURRENCY;
+/// How many page requests a list fetch keeps in flight.
+pub(crate) const PAGE_CONCURRENCY: usize = 4;
+
+/// The offsets still to fetch after the first page (offset 0) of an offset-paged
+/// list holding `total` items, up to `max_items`.
+fn page_offsets(total: usize, page_size: usize, max_items: usize) -> Vec<usize> {
+    (page_size..total.min(max_items)).step_by(page_size.max(1)).collect()
+}
+
+/// Up to `max_items` items of an offset-paged list: `first` is the page at offset 0 (`{total,
+/// items}`), `fetch(offset)` returns the page at that offset. The remaining pages are fetched
+/// `concurrency` at a time; items come back in offset order whatever order the pages complete in.
+/// Any failed page fails the whole call.
+pub(crate) async fn pages_with<F, Fut>(first: Value, page_size: usize, max_items: usize, concurrency: usize, fetch: F) -> Result<Vec<Value>, String>
+where
+    F: Fn(usize) -> Fut,
+    Fut: std::future::Future<Output = Result<Value, String>>,
+{
+    use futures_util::stream::{self, StreamExt, TryStreamExt};
+    let total = first["total"].as_u64().unwrap_or(0) as usize;
+    let mut all: Vec<Value> = first["items"].as_array().cloned().unwrap_or_default();
+    let pages: Vec<Value> = stream::iter(page_offsets(total, page_size, max_items))
+        .map(fetch)
+        .buffered(concurrency.max(1))
+        .try_collect()
+        .await?;
+    for page in pages {
+        all.extend(page["items"].as_array().into_iter().flatten().cloned());
+    }
+    all.truncate(max_items);
+    Ok(all)
+}
 /// Tracks per extended-metadata request.
 const META_BATCH: usize = 100;
 const COLLECTION_CT: &str = "application/vnd.collection-v2.spotify.proto";
@@ -267,7 +326,7 @@ fn search_vars(query: &str, offset: u32, limit: u32) -> Value {
            "includeArtistHasConcertsField": false, "includePreReleases": false, "includeLocalConcertsField": false, "includeAuthors": false})
 }
 
-/// `{total, items}` for spotify.rs's offset pager.
+/// `{total, items}` for the offset pager (`pages_with`).
 fn page_value(items: Vec<Value>, total: u64) -> Value {
     json!({ "total": total, "items": items })
 }
@@ -280,7 +339,7 @@ where
 {
     let first = fetch(0).await?;
     let total = first["total"].as_u64().unwrap_or(0);
-    let items = crate::spotify::pages_with(first, page, max, PAGE_CONCURRENCY, fetch).await?;
+    let items = pages_with(first, page, max, PAGE_CONCURRENCY, fetch).await?;
     Ok((items, total))
 }
 
@@ -320,7 +379,7 @@ impl Api {
 
     /// Fallback: `context-resolve` of a search uri gives its top tracks (no albums).
     pub async fn search_context(&self, query: &str) -> Result<Value, String> {
-        let ctx = self.session.spclient().get_context(&format!("spotify:search:{}", crate::auth::urlencode(query))).await.map_err(|e| format!("context-resolve: {e}"))?;
+        let ctx = self.session.spclient().get_context(&format!("spotify:search:{}", crate::paths::urlencode(query))).await.map_err(|e| format!("context-resolve: {e}"))?;
         let uris: Vec<String> = ctx.pages.iter().flat_map(|p| p.tracks.iter()).map(|t| t.uri().to_string()).filter(|u| u.starts_with("spotify:track:")).take(SEARCH_PAGE as usize).collect();
         Ok(json!({ "tracks": self.tracks(&uris).await?, "albums": [] }))
     }
@@ -348,7 +407,7 @@ impl Api {
 
     pub async fn rootlist(&self) -> Result<Vec<crate::pb::RootEntry>, String> {
         let user = self.username();
-        let path = format!("/playlist/v2/user/{}/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=0&length=1000", crate::auth::urlencode(&user));
+        let path = format!("/playlist/v2/user/{}/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=0&length=1000", crate::paths::urlencode(&user));
         crate::pb::rootlist(&self.spclient(reqwest::Method::GET, &path, None, None, None).await?)
     }
 
@@ -390,7 +449,7 @@ impl Api {
 
     /// The rest of a playlist after its first page.
     pub async fn playlist_rest(&self, playlist_id: &str, first: Value, page: usize) -> Result<Vec<Value>, String> {
-        crate::spotify::pages_with(first, page, usize::MAX, PAGE_CONCURRENCY, |offset| async move { Ok(self.playlist_page(playlist_id, offset, page).await?.0) }).await
+        pages_with(first, page, usize::MAX, PAGE_CONCURRENCY, |offset| async move { Ok(self.playlist_page(playlist_id, offset, page).await?.0) }).await
     }
 
     /// A playlist's details (`parse::playlist_meta`): a pasted link, a mix's name and cover.
@@ -413,7 +472,7 @@ impl Api {
 
     /// One `playlist/v2` page (protobuf).
     async fn playlist_pb_page(&self, playlist_id: &str, from: usize, length: usize) -> Result<crate::pb::PlaylistPage, String> {
-        let path = format!("/playlist/v2/playlist/{}?from={from}&length={length}", crate::auth::urlencode(playlist_id));
+        let path = format!("/playlist/v2/playlist/{}?from={from}&length={length}", crate::paths::urlencode(playlist_id));
         crate::pb::playlist(&self.spclient(reqwest::Method::GET, &path, None, None, None).await?)
     }
 
@@ -433,7 +492,7 @@ impl Api {
         let snapshot = first.snapshot_id.clone();
         let total = first.length.max(0) as u64;
         let first = page_value(first.uris.into_iter().map(Value::from).collect(), total);
-        let uris: Vec<String> = crate::spotify::pages_with(first, PAGE, usize::MAX, PAGE_CONCURRENCY, |from| async move {
+        let uris: Vec<String> = pages_with(first, PAGE, usize::MAX, PAGE_CONCURRENCY, |from| async move {
             let p = self.playlist_pb_page(playlist_id, from, PAGE).await?;
             Ok(page_value(p.uris.into_iter().map(Value::from).collect(), total))
         })
@@ -500,7 +559,7 @@ impl Api {
 
     /// Adds (`saved`) or removes a track from Liked Songs. Changes real data.
     pub async fn set_saved(&self, track_id: &str, saved: bool) -> Result<(), String> {
-        let item = crate::pb::CollectionItem { uri: format!("spotify:track:{track_id}"), added_at: if saved { crate::auth::now() as i64 } else { 0 }, is_removed: !saved };
+        let item = crate::pb::CollectionItem { uri: format!("spotify:track:{track_id}"), added_at: if saved { crate::paths::now() as i64 } else { 0 }, is_removed: !saved };
         let update_id = format!("{:016x}", rand::random::<u64>());
         self.post_pb("/collection/v2/write", crate::pb::write_request(&self.username(), "collection", &[item], &update_id)).await.map(|_| ())
     }
@@ -611,7 +670,7 @@ impl Api {
     /// The last played track of each recent context, newest first: `[{track, played_at, context_uri}]`.
     /// Track details from pathfinder's lookup; extended metadata when that fails.
     pub async fn recently_played(&self) -> Result<Vec<Value>, String> {
-        let path = format!("/recently-played/v3/user/{}/recently-played?format=json&offset=0&limit=50&filter=default,collection-new-episodes", crate::auth::urlencode(&self.username()));
+        let path = format!("/recently-played/v3/user/{}/recently-played?format=json&offset=0&limit=50&filter=default,collection-new-episodes", crate::paths::urlencode(&self.username()));
         let body = self.spclient(reqwest::Method::GET, &path, None, Some("application/json"), None).await?;
         let v: Value = serde_json::from_slice(&body).map_err(|e| format!("recently-played: {e}"))?;
         let contexts = crate::parse::recent_contexts(&v);
@@ -656,7 +715,7 @@ pub fn merge_playlists(lib: Vec<Value>, root: &[crate::pb::RootEntry]) -> Vec<Va
 // ---- Spotify Connect (the player's cluster) --------------------------------------------------
 
 /// The engine's view of Connect: (cluster, this Mac's device id, its volume %), when ready.
-fn connect() -> Result<(std::sync::Arc<librespot_protocol::connect::Cluster>, String, u8), String> {
+pub(crate) fn connect() -> Result<(std::sync::Arc<librespot_protocol::connect::Cluster>, String, u8), String> {
     let engine = ENGINE.get().ok_or_else(|| not_ready("no engine"))?;
     engine.connect_view().ok_or_else(|| not_ready("no Connect cluster yet"))
 }
@@ -670,7 +729,67 @@ pub fn engine() -> Option<crate::player::Engine> {
 /// device is active. Err without a cluster (the player isn't up).
 pub fn cluster_state() -> Result<Option<Value>, String> {
     let (cluster, _, _) = connect()?;
-    Ok(crate::pb::cluster_state(&cluster, crate::auth::now_ms() as i64))
+    Ok(crate::pb::cluster_state(&cluster, crate::paths::now_ms() as i64))
+}
+
+/// The UI's playback state from the Connect cluster: `{active:false}` when no device is active,
+/// else `{active, is_playing, progress_ms, device_id, device_name, track, shuffle, repeat,
+/// volume_percent, supports_volume, context_uri}`. Track names come from the internal API (just the
+/// uri when that fails), the device name and volume from the device list.
+pub async fn playback_snapshot() -> Result<Value, String> {
+    match cluster_state()? {
+        Some(c) => Ok(playback_snapshot_from(&c).await),
+        None => Ok(json!({ "active": false })),
+    }
+}
+
+/// `playback_snapshot` from a `cluster_state` the caller already has.
+pub async fn playback_snapshot_from(c: &Value) -> Value {
+    let track = match c["track_uri"].as_str() {
+        Some(uri) => track_meta(uri).await,
+        None => Value::Null,
+    };
+    snapshot_shape(c, track, &devices().unwrap_or_default())
+}
+
+/// The metadata of track `uri` (just the uri when the fetch fails). The last answer is kept:
+/// the UI polls the same track many times, so it is fetched once per track change.
+async fn track_meta(uri: &str) -> Value {
+    static LAST: std::sync::Mutex<Option<(String, Value)>> = std::sync::Mutex::new(None);
+    let hit = crate::nowplaying::lock(&LAST).as_ref().filter(|(u, _)| u == uri).map(|(_, t)| t.clone());
+    if let Some(t) = hit {
+        return t;
+    }
+    let fetched = match Api::current() {
+        Ok(api) => api.tracks(&[uri.to_string()]).await.ok().and_then(|t| t.into_iter().next()),
+        Err(_) => None,
+    };
+    match fetched {
+        Some(t) => {
+            *crate::nowplaying::lock(&LAST) = Some((uri.to_string(), t.clone()));
+            t
+        }
+        None => json!({ "uri": uri }),
+    }
+}
+
+/// `playback_snapshot`'s shape from a `cluster_state`, its track and the device list.
+fn snapshot_shape(c: &Value, track: Value, devices: &Value) -> Value {
+    let none = Value::Null;
+    let dev = devices.as_array().into_iter().flatten().find(|d| d["id"] == c["device_id"]).unwrap_or(&none);
+    json!({
+        "active": true,
+        "is_playing": c["is_playing"].as_bool().unwrap_or(false),
+        "progress_ms": c["position_ms"],
+        "device_id": c["device_id"],
+        "device_name": dev["name"],
+        "track": track,
+        "shuffle": c["shuffle"].as_bool().unwrap_or(false),
+        "repeat": c["repeat"].as_str().unwrap_or("off"),
+        "volume_percent": dev["volume_percent"],
+        "supports_volume": dev["supports_volume"].as_bool().unwrap_or(false),
+        "context_uri": c["context_uri"],
+    })
 }
 
 /// This Mac's id while the engine is ready.
@@ -713,7 +832,7 @@ pub async fn queue() -> Result<Value, String> {
 }
 
 /// Queues `uri` on this Mac through Spotify Connect (a player command from this device to itself;
-/// Spirc handles `add_to_queue`). Other devices: Err, the Web API does those.
+/// Spirc handles `add_to_queue`). Other devices: Err.
 pub async fn add_to_queue(device_id: &str, uri: &str) -> Result<(), String> {
     let own = own_device_id().ok_or_else(|| not_ready("the player isn't connected"))?;
     if device_id != own {
@@ -730,23 +849,327 @@ pub fn queue_command(uri: &str) -> Value {
     json!({"command": {"endpoint": "add_to_queue", "track": {"uri": uri, "metadata": {"is_queued": "true"}, "provider": "queue"}}})
 }
 
+// ---- remote control: connect-state commands to another device -------------------------------
+// The bodies are the ones that passed the P1 probe (plans/2026-10-09-drop-web-api/spike-connect-state.md).
+
+pub use crate::session::Repeat as RepeatMode;
+
+/// A command for another Connect device.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemoteCmd {
+    Pause,
+    Resume,
+    Next,
+    Previous,
+    Seek(u64),
+    Shuffle(bool),
+    Repeat(RepeatMode),
+    /// Percent, 0–100.
+    Volume(u8),
+    /// A context (from `track` when given) or a track list (from `track`, else the first).
+    Play { context: Option<String>, uris: Vec<String>, track: Option<String>, position_ms: u64 },
+}
+
+impl RemoteCmd {
+    /// The command's name in a `NOT_AVAILABLE_REMOTE` error.
+    pub fn action(&self) -> &'static str {
+        match self {
+            RemoteCmd::Pause => "pause",
+            RemoteCmd::Resume => "resume",
+            RemoteCmd::Next => "next",
+            RemoteCmd::Previous => "previous",
+            RemoteCmd::Seek(_) => "seek",
+            RemoteCmd::Shuffle(_) => "shuffle",
+            RemoteCmd::Repeat(_) => "repeat",
+            RemoteCmd::Volume(_) => "volume",
+            RemoteCmd::Play { .. } => "play",
+        }
+    }
+}
+
+/// A player command body: `{"command": {"endpoint": ..., <fields>}}`.
+fn player_command(endpoint: &str, fields: Value) -> (reqwest::Method, String, Value) {
+    let mut cmd = json!({ "endpoint": endpoint });
+    if let (Some(c), Value::Object(f)) = (cmd.as_object_mut(), fields) {
+        c.extend(f);
+    }
+    (reqwest::Method::POST, "player/command".into(), json!({ "command": cmd }))
+}
+
+/// The requests (method, path kind under `/connect-state/v1/`, body) that send `cmd`, in order.
+/// Repeat takes two (context flag, track flag). Empty = not sendable.
+pub fn command_bodies(cmd: &RemoteCmd) -> Vec<(reqwest::Method, String, Value)> {
+    let flag = |endpoint: &str, on: bool| player_command(endpoint, json!({ "value": on }));
+    match cmd {
+        RemoteCmd::Pause => vec![player_command("pause", json!({}))],
+        RemoteCmd::Resume => vec![player_command("resume", json!({}))],
+        RemoteCmd::Next => vec![player_command("skip_next", json!({}))],
+        RemoteCmd::Previous => vec![player_command("skip_prev", json!({}))],
+        RemoteCmd::Seek(ms) => vec![player_command("seek_to", json!({ "value": ms }))],
+        RemoteCmd::Shuffle(on) => vec![flag("set_shuffling_context", *on)],
+        // track off before context off, context on before track on: no step shows a mode nobody asked for
+        RemoteCmd::Repeat(RepeatMode::Off) => vec![flag("set_repeating_track", false), flag("set_repeating_context", false)],
+        RemoteCmd::Repeat(RepeatMode::Context) => vec![flag("set_repeating_context", true), flag("set_repeating_track", false)],
+        RemoteCmd::Repeat(RepeatMode::Track) => vec![flag("set_repeating_context", true), flag("set_repeating_track", true)],
+        RemoteCmd::Volume(p) => vec![(reqwest::Method::PUT, "connect/volume".into(), json!({ "volume": crate::nowplaying::volume_from_percent(*p) }))],
+        RemoteCmd::Play { context, uris, track, position_ms } => {
+            let (ctx, skip_to) = match context {
+                Some(c) => (json!({ "uri": c, "url": format!("context://{c}") }), track.as_ref().map(|t| json!({ "track_uri": t }))),
+                None => {
+                    if uris.is_empty() {
+                        return vec![];
+                    }
+                    let index = track.as_ref().and_then(|t| uris.iter().position(|u| u == t)).unwrap_or(0);
+                    let tracks: Vec<Value> = uris.iter().map(|u| json!({ "uri": u })).collect();
+                    (json!({ "pages": [{ "tracks": tracks }] }), Some(json!({ "track_index": index })))
+                }
+            };
+            let mut options = json!({});
+            if let Some(s) = skip_to {
+                options["skip_to"] = s;
+            }
+            // not probed in P1: librespot's PlayOptions reads it (dealer/protocol/request.rs)
+            if *position_ms > 0 {
+                options["seek_to"] = json!(position_ms);
+            }
+            let mut fields = json!({ "context": ctx });
+            if options.as_object().is_some_and(|o| !o.is_empty()) {
+                fields["options"] = options;
+            }
+            vec![player_command("play", fields)]
+        }
+    }
+}
+
+/// A failed remote request as the caller sees it: a 4xx "refused" answer (400, 403, 404, 405, 501)
+/// is `NOT_AVAILABLE_REMOTE`; other failures (transport, 5xx, 429) keep their text.
+pub fn remote_error(action: &str, err: String) -> String {
+    match err.strip_prefix("HTTP ").and_then(|r| r.get(..3)) {
+        Some("400" | "403" | "404" | "405" | "501") => crate::control::not_available_remote(action),
+        _ => err,
+    }
+}
+
+/// This Mac's id and the API, for a request from This Mac to another device.
+fn remote_caller() -> Result<(String, Api), String> {
+    let own = own_device_id().ok_or_else(|| not_ready("the player isn't connected"))?;
+    Ok((own, Api::current()?))
+}
+
+/// One connect-state request from This Mac to `target`; a refusal is logged with its HTTP text.
+async fn remote_send(api: &Api, own: &str, target: &str, action: &str, (method, kind, body): (reqwest::Method, String, Value)) -> Result<(), String> {
+    let path = format!("/connect-state/v1/{kind}/from/{own}/to/{target}");
+    let res = api.spclient(method, &path, Some("application/json"), None, Some(body.to_string().into_bytes())).await;
+    res.map(drop).map_err(|e| {
+        log::warn!(target: LOG, "remote {action} to {target}: {e}");
+        remote_error(action, e)
+    })
+}
+
+/// Sends `cmd` to the Connect device `target`. Ok = Spotify took it (HTTP 200 + ack_id); the
+/// device decides later, and the UI's poll shows what it did.
+pub async fn remote_command(target: &str, cmd: RemoteCmd) -> Result<(), String> {
+    let action = cmd.action();
+    let reqs = command_bodies(&cmd);
+    if reqs.is_empty() {
+        return Err(crate::control::not_available_remote(action));
+    }
+    let (own, api) = remote_caller()?;
+    for req in reqs {
+        remote_send(&api, &own, target, action, req).await?;
+    }
+    Ok(())
+}
+
+/// The transfer body: the target restores the play/pause state of the device it takes over.
+pub fn transfer_body() -> Value {
+    json!({ "transfer_options": { "restore_paused": "restore" } })
+}
+
+/// Moves playback from the active device to `target` (the `SpClient::transfer` endpoint, sent
+/// with the same headers as the other commands so a refusal reads the same).
+pub async fn remote_transfer(target: &str) -> Result<(), String> {
+    let (own, api) = remote_caller()?;
+    remote_send(&api, &own, target, "transfer", (reqwest::Method::POST, "connect/transfer".into(), transfer_body())).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// `send_retrying` over canned answers (token, status, body), one per try.
+    async fn tries(answers: Vec<Result<(String, u16, Vec<u8>), String>>) -> (Result<Vec<u8>, String>, usize, Vec<String>) {
+        let answers = std::sync::Mutex::new(answers.into_iter());
+        let count = std::sync::atomic::AtomicUsize::new(0);
+        let mut dropped = Vec::new();
+        let r = send_retrying(
+            || {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let next = answers.lock().unwrap().next().expect("no more answers");
+                async move { next }
+            },
+            |t| dropped.push(t.to_string()),
+            SEND_TIMEOUT,
+        )
+        .await;
+        (r, count.into_inner(), dropped)
+    }
+
+    fn ok(token: &str, status: u16, body: &str) -> Result<(String, u16, Vec<u8>), String> {
+        Ok((token.into(), status, body.as_bytes().to_vec()))
+    }
+
+    #[tokio::test]
+    async fn a_rejected_token_is_dropped_and_tried_once_more() {
+        assert_eq!(tries(vec![ok("t1", 200, "a")]).await, (Ok(b"a".to_vec()), 1, vec![]));
+        assert_eq!(tries(vec![ok("t1", 401, "no"), ok("t2", 200, "b")]).await, (Ok(b"b".to_vec()), 2, vec!["t1".to_string()]));
+        // a second 401 is the answer: no loop
+        assert_eq!(tries(vec![ok("t1", 401, "no"), ok("t2", 401, "still no")]).await, (Err("HTTP 401: still no".into()), 2, vec!["t1".to_string()]));
+        // other errors: no retry
+        assert_eq!(tries(vec![ok("t1", 403, "forbidden")]).await, (Err("HTTP 403: forbidden".into()), 1, vec![]));
+        assert_eq!(tries(vec![Err("login5 token: x".into())]).await, (Err("login5 token: x".into()), 1, vec![]));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_request_times_out() {
+        let started = std::time::Instant::now();
+        let r = with_deadline(Duration::from_millis(100), std::future::pending::<Result<(), String>>()).await;
+        assert_eq!(r, Err("transport: timeout".into()));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        // a stalled try inside send_retrying times out the same way
+        let r = send_retrying(|| std::future::pending::<Result<(String, u16, Vec<u8>), String>>(), |_| {}, Duration::from_millis(100)).await;
+        assert_eq!(r, Err("transport: timeout".into()));
+    }
+
     #[test]
     fn final_error_rules() {
         let e = |s: Source, m: &str| (s, m.to_string());
-        // the Web API's own error wins (AUTH_EXPIRED etc. keep their meaning)
-        assert_eq!(final_error(&[e(Source::Primary, "HTTP 500: x"), e(Source::Web, "AUTH_EXPIRED: 401")]), "AUTH_EXPIRED: 401");
-        // rate-limited Web API: the real internal reason says more
-        assert_eq!(final_error(&[e(Source::Primary, "GraphQL: PersistedQueryNotFound"), e(Source::Fallback, "HTTP 404: y"), e(Source::Web, "RATE_LIMITED:9: z")]), "GraphQL: PersistedQueryNotFound");
-        // …but a player that isn't up is no reason: the rate limit is the news
-        assert_eq!(final_error(&[e(Source::Primary, "ENGINE_NOT_READY: x"), e(Source::Web, "RATE_LIMITED:9: z")]), "RATE_LIMITED:9: z");
-        // no Web API step: the first real internal error, else the first
+        // the first error that is not ENGINE_NOT_READY, else the first, else "no source"
         assert_eq!(final_error(&[e(Source::Primary, "ENGINE_NOT_READY: x"), e(Source::Fallback, "HTTP 403")]), "HTTP 403");
         assert_eq!(final_error(&[e(Source::Primary, "ENGINE_NOT_READY: x")]), "ENGINE_NOT_READY: x");
         assert_eq!(final_error(&[]), "no source");
+        assert_eq!(final_error(&[e(Source::Primary, "GraphQL: PersistedQueryNotFound"), e(Source::Fallback, "HTTP 404: y")]), "GraphQL: PersistedQueryNotFound");
+    }
+
+    #[test]
+    fn playback_snapshot_shape_full() {
+        let c = json!({ "device_id": "d1", "track_uri": "spotify:track:1", "context_uri": "spotify:playlist:p1",
+            "is_playing": true, "position_ms": 42, "duration_ms": 1000, "shuffle": true, "repeat": "context" });
+        let devices = json!([{ "id": "d0", "name": "Phone" }, { "id": "d1", "name": "Mac", "volume_percent": 55, "supports_volume": true }]);
+        let track = json!({ "id": "1", "uri": "spotify:track:1" });
+        let s = snapshot_shape(&c, track, &devices);
+        assert_eq!(
+            s,
+            json!({ "active": true, "is_playing": true, "progress_ms": 42, "device_id": "d1", "device_name": "Mac",
+                "track": { "id": "1", "uri": "spotify:track:1" }, "shuffle": true, "repeat": "context",
+                "volume_percent": 55, "supports_volume": true, "context_uri": "spotify:playlist:p1" })
+        );
+    }
+
+    #[test]
+    fn playback_snapshot_shape_sparse() {
+        let c = json!({ "device_id": "d2", "track_uri": null, "context_uri": null, "is_playing": false, "position_ms": 0,
+            "shuffle": false, "repeat": "track" });
+        let s = snapshot_shape(&c, Value::Null, &json!([{ "id": "d2", "name": "Amp", "volume_percent": null }]));
+        assert!(s["track"].is_null());
+        assert_eq!(s["shuffle"], false);
+        assert_eq!(s["repeat"], "track");
+        assert!(s["volume_percent"].is_null());
+        assert_eq!(s["supports_volume"], false);
+        assert!(s["context_uri"].is_null());
+        // missing fields entirely, and a device that isn't listed
+        let s = snapshot_shape(&json!({ "device_id": "gone" }), Value::Null, &Value::Null);
+        assert_eq!(s["active"], true);
+        assert_eq!(s["is_playing"], false);
+        assert_eq!(s["shuffle"], false);
+        assert_eq!(s["repeat"], "off");
+        assert_eq!(s["supports_volume"], false);
+        assert!(s["device_name"].is_null());
+    }
+
+    #[test]
+    fn page_offsets_from_total() {
+        assert_eq!(page_offsets(759, 50, usize::MAX).len(), 15);
+        assert_eq!(page_offsets(759, 50, usize::MAX)[..3], [50, 100, 150]);
+        assert_eq!(*page_offsets(759, 50, usize::MAX).last().unwrap(), 750);
+        assert_eq!(page_offsets(100, 50, usize::MAX), vec![50]);
+        assert_eq!(page_offsets(50, 50, usize::MAX), Vec::<usize>::new());
+        assert_eq!(page_offsets(0, 50, usize::MAX), Vec::<usize>::new());
+        // capped: Liked Songs stops at 1000
+        assert_eq!(*page_offsets(5000, 50, 1000).last().unwrap(), 950);
+        assert_eq!(page_offsets(5000, 50, 1000).len(), 19);
+    }
+
+    /// A page of `n` numbered items starting at `offset`.
+    fn page_at(offset: usize, n: usize) -> Value {
+        json!({ "items": (offset..offset + n).collect::<Vec<_>>() })
+    }
+
+    #[tokio::test]
+    async fn pages_keep_offset_order_when_completing_out_of_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        let total = 230;
+        let first = json!({ "total": total, "items": (0..50).collect::<Vec<_>>() });
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let (in_flight, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let fetch = |offset: usize| {
+            let (asked, in_flight, peak) = (asked.clone(), in_flight.clone(), peak.clone());
+            async move {
+                asked.lock().unwrap().push(offset);
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                // later offsets finish first
+                tokio::time::sleep(std::time::Duration::from_millis(60 - offset as u64 / 5)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(page_at(offset, (total - offset).min(50)))
+            }
+        };
+        let items = pages_with(first, 50, usize::MAX, 4, fetch).await.unwrap();
+        assert_eq!(items, (0..total).map(|i| json!(i)).collect::<Vec<_>>());
+        let mut asked = asked.lock().unwrap().clone();
+        asked.sort();
+        assert_eq!(asked, vec![50, 100, 150, 200]);
+        assert!(peak.load(Ordering::SeqCst) <= 4);
+        assert!(peak.load(Ordering::SeqCst) > 1, "pages run in parallel");
+    }
+
+    #[tokio::test]
+    async fn pages_concurrency_is_capped() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let (in_flight, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let fetch = |offset: usize| {
+            let (in_flight, peak) = (in_flight.clone(), peak.clone());
+            async move {
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                Ok(page_at(offset, 50))
+            }
+        };
+        let first = json!({ "total": 1000, "items": (0..50).collect::<Vec<_>>() });
+        let items = pages_with(first, 50, 1000, 4, fetch).await.unwrap();
+        assert_eq!(items.len(), 1000);
+        assert_eq!(peak.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn pages_cap_and_error() {
+        let first = json!({ "total": 500, "items": (0..50).collect::<Vec<_>>() });
+        let items = pages_with(first.clone(), 50, 120, 4, |o| async move { Ok(page_at(o, 50)) }).await.unwrap();
+        assert_eq!(items.len(), 120);
+        assert_eq!(items[119], 119);
+        let err = pages_with(first, 50, usize::MAX, 4, |o| async move {
+            if o == 200 { Err("HTTP 500: boom".to_string()) } else { Ok(page_at(o, 50)) }
+        })
+        .await;
+        assert_eq!(err, Err("HTTP 500: boom".to_string()));
+        // total ≤ one page: no requests
+        let one = json!({ "total": 3, "items": [0, 1, 2] });
+        let items = pages_with(one, 50, usize::MAX, 4, |_| async { Err::<Value, _>("no".to_string()) }).await.unwrap();
+        assert_eq!(items.len(), 3);
     }
 
     #[tokio::test]
@@ -762,11 +1185,11 @@ mod tests {
             }
             .boxed())
         };
-        let got = serve("t", vec![step(Source::Primary, Err("HTTP 500".into())), step(Source::Fallback, Ok(2)), step(Source::Web, Ok(3))]).await;
+        let got = serve("t", vec![step(Source::Primary, Err("HTTP 500".into())), step(Source::Fallback, Ok(2)), step(Source::Fallback, Ok(3))]).await;
         assert_eq!(got, Ok(2));
-        assert_eq!(ran.load(Ordering::SeqCst), 2, "the Web API step never ran");
-        let got = serve("t", vec![step(Source::Primary, Err("ENGINE_NOT_READY: x".into())), step(Source::Web, Err("RATE_LIMITED:5: y".into()))]).await;
-        assert_eq!(got, Err("RATE_LIMITED:5: y".into()));
+        assert_eq!(ran.load(Ordering::SeqCst), 2, "the third step never ran");
+        let got = serve("t", vec![step(Source::Primary, Err("ENGINE_NOT_READY: x".into())), step(Source::Fallback, Err("HTTP 404: y".into()))]).await;
+        assert_eq!(got, Err("HTTP 404: y".into()));
     }
 
     #[tokio::test]
@@ -827,6 +1250,90 @@ mod tests {
         let c = queue_command("spotify:track:x");
         assert_eq!(c["command"]["endpoint"], "add_to_queue");
         assert_eq!(c["command"]["track"]["uri"], "spotify:track:x");
+    }
+
+    /// The one request of `cmd` as (method, path kind, body).
+    fn one(cmd: RemoteCmd) -> (String, String, Value) {
+        let mut reqs = command_bodies(&cmd);
+        assert_eq!(reqs.len(), 1, "{cmd:?}");
+        let (m, k, b) = reqs.remove(0);
+        (m.to_string(), k, b)
+    }
+
+    fn cmd_json(s: &str) -> (String, String, Value) {
+        ("POST".into(), "player/command".into(), serde_json::from_str(s).unwrap())
+    }
+
+    // the bodies that passed the P1 probe (spike-connect-state.md, "Bodies")
+    #[test]
+    fn remote_transport_bodies_match_the_spike() {
+        assert_eq!(one(RemoteCmd::Pause), cmd_json(r#"{"command":{"endpoint":"pause"}}"#));
+        assert_eq!(one(RemoteCmd::Resume), cmd_json(r#"{"command":{"endpoint":"resume"}}"#));
+        assert_eq!(one(RemoteCmd::Next), cmd_json(r#"{"command":{"endpoint":"skip_next"}}"#));
+        assert_eq!(one(RemoteCmd::Previous), cmd_json(r#"{"command":{"endpoint":"skip_prev"}}"#));
+        assert_eq!(one(RemoteCmd::Seek(60000)), cmd_json(r#"{"command":{"endpoint":"seek_to","value":60000}}"#));
+        assert_eq!(one(RemoteCmd::Shuffle(true)), cmd_json(r#"{"command":{"endpoint":"set_shuffling_context","value":true}}"#));
+        assert_eq!(one(RemoteCmd::Shuffle(false)), cmd_json(r#"{"command":{"endpoint":"set_shuffling_context","value":false}}"#));
+    }
+
+    #[test]
+    fn remote_repeat_sends_both_flags() {
+        let bodies = |m: RepeatMode| command_bodies(&RemoteCmd::Repeat(m)).into_iter().map(|(_, _, b)| b).collect::<Vec<_>>();
+        let flag = |e: &str, on: bool| json!({"command": {"endpoint": e, "value": on}});
+        assert_eq!(bodies(RepeatMode::Off), vec![flag("set_repeating_track", false), flag("set_repeating_context", false)]);
+        assert_eq!(bodies(RepeatMode::Context), vec![flag("set_repeating_context", true), flag("set_repeating_track", false)]);
+        assert_eq!(bodies(RepeatMode::Track), vec![flag("set_repeating_context", true), flag("set_repeating_track", true)]);
+        assert!(command_bodies(&RemoteCmd::Repeat(RepeatMode::Track)).iter().all(|(m, k, _)| *m == reqwest::Method::POST && k == "player/command"));
+    }
+
+    #[test]
+    fn remote_volume_is_a_put_of_0_to_65535() {
+        assert_eq!(one(RemoteCmd::Volume(50)), ("PUT".into(), "connect/volume".into(), json!({"volume": 32768})));
+        assert_eq!(one(RemoteCmd::Volume(100)).2, json!({"volume": 65535}));
+        assert_eq!(one(RemoteCmd::Volume(0)).2, json!({"volume": 0}));
+        assert_eq!(one(RemoteCmd::Volume(250)).2, json!({"volume": 65535}), "capped at 100 %");
+    }
+
+    #[test]
+    fn remote_play_bodies_match_the_spike() {
+        let album = "spotify:album:6N9PS4QXF1D0OWPk0Sxtb4";
+        let ctx = RemoteCmd::Play { context: Some(album.into()), uris: vec![], track: Some("spotify:track:4uLU6hMCjMI75M1A2tKUQC".into()), position_ms: 0 };
+        assert_eq!(
+            one(ctx),
+            cmd_json(r#"{"command":{"context":{"uri":"spotify:album:6N9PS4QXF1D0OWPk0Sxtb4","url":"context://spotify:album:6N9PS4QXF1D0OWPk0Sxtb4"},"endpoint":"play","options":{"skip_to":{"track_uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC"}}}}"#)
+        );
+        let uris = vec!["spotify:track:4uLU6hMCjMI75M1A2tKUQC".to_string(), "spotify:track:6aiKIFjPwa3UvDCD5ecoJj".to_string()];
+        let list = RemoteCmd::Play { context: None, uris: uris.clone(), track: Some(uris[1].clone()), position_ms: 0 };
+        assert_eq!(
+            one(list),
+            cmd_json(r#"{"command":{"context":{"pages":[{"tracks":[{"uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC"},{"uri":"spotify:track:6aiKIFjPwa3UvDCD5ecoJj"}]}]},"endpoint":"play","options":{"skip_to":{"track_index":1}}}}"#)
+        );
+        // no track: the context from its top (no options); a list from its first
+        let top = one(RemoteCmd::Play { context: Some(album.into()), uris: vec![], track: None, position_ms: 0 }).2;
+        assert!(top["command"].get("options").is_none());
+        assert_eq!(one(RemoteCmd::Play { context: None, uris: uris.clone(), track: None, position_ms: 0 }).2["command"]["options"], json!({"skip_to": {"track_index": 0}}));
+        // a start position: options.seek_to
+        let at = one(RemoteCmd::Play { context: None, uris: uris.clone(), track: None, position_ms: 61_000 }).2;
+        assert_eq!(at["command"]["options"]["seek_to"], 61_000);
+        // nothing to play: no request
+        assert!(command_bodies(&RemoteCmd::Play { context: None, uris: vec![], track: None, position_ms: 0 }).is_empty());
+    }
+
+    #[test]
+    fn remote_transfer_body_matches_the_spike() {
+        assert_eq!(transfer_body(), json!({"transfer_options": {"restore_paused": "restore"}}));
+    }
+
+    #[test]
+    fn remote_refusals_are_not_available_remote() {
+        for s in [400, 403, 404, 405, 501] {
+            assert_eq!(remote_error("pause", http_error(s, b"no")), "NOT_AVAILABLE_REMOTE: pause on other devices", "{s}");
+        }
+        // other failures keep their own text
+        assert_eq!(remote_error("pause", http_error(500, b"boom")), "HTTP 500: boom");
+        assert_eq!(remote_error("pause", http_error(429, b"")), "HTTP 429: ");
+        assert_eq!(remote_error("pause", "transport: timed out".into()), "transport: timed out");
+        assert_eq!(remote_error("pause", "ENGINE_NOT_READY: x".into()), "ENGINE_NOT_READY: x");
     }
 
     #[test]
