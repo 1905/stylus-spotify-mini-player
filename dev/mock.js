@@ -542,11 +542,6 @@
       if (play) state.isPlaying = true;
       return null;
     },
-    // Rust control.rs: the move to This Mac, without a remote command
-    control_transfer: ({ device, play }) => {
-      handlers.transfer_playback({ deviceId: device, play });
-      return { device_id: device, path: "this_mac" };
-    },
     set_volume: ({ percent }) => {
       needDevice();
       const d = activeDevice();
@@ -749,9 +744,9 @@
   };
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|logout$|engine_|control_transfer$|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|links_list$|link_remove$)/;
+  const LOCAL = /^(auth_status|logout$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|links_list$|link_remove$)/;
   // commands that can change what the in-app player plays: a player-state follows them
-  const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|control_transfer$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
+  const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
   // `refused`: the remote commands and their action names in Rust's NOT_AVAILABLE_REMOTE (control.rs, internal.rs)
   const REMOTE_ACTION = {
     pause: "pause", resume: "resume", resume_at: "play", next_track: "next", previous_track: "previous", seek: "seek",
@@ -787,7 +782,9 @@
     const key = args.account && CACHE_KEYS[cmd] ? CACHE_KEYS[cmd](args) : null;
     const slot = key && `${args.account}/${key}`;
     if (slot && READS_CACHE.has(cmd) && cache.has(slot)) return clone(cache.get(slot));
-    if (scenario === "error" && !LOCAL.test(cmd)) return reject("network down");
+    // a transfer to This Mac is local (Rust control.rs transfer): it works offline
+    const toHere = cmd === "transfer_playback" && args.deviceId === RUN_ID;
+    if (scenario === "error" && !LOCAL.test(cmd) && !toHere) return reject("network down");
     // Spotify refuses the player login after the first poll: the engine says needs_login
     if (scenario === "ended" && cmd === "playback_state" && (ended = ended + 1) === 2) setTimeout(() => setEngine("needs_login"), 0);
     if (scenario === "slow" && SLOW.test(cmd)) await sleep(2000);

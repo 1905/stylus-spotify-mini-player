@@ -1335,25 +1335,21 @@ async function playSource(deviceId, src) {
 
 /**
  * A play the user started: loaders from the click until a poll shows it playing; once it lands it is
- * the last source (cover jumps, the panel). row: the clicked row; refused(e): true for an error the
- * caller handles itself (the play then counts as failed); members: the context's known track uris.
+ * the last source (cover jumps, the panel). row: the clicked row; members: the context's known track uris.
  */
-async function startPlay(src, { kind, row = null, refused = null, members = null } = {}) {
+async function startPlay(src, { kind, row = null, members = null } = {}) {
   preview = kind === "resume" ? null : previewOf(src);
   const token = startPending(kind, src.trackUri || null, row);
   applog("info", `play ${kind}: ${JSON.stringify({ ...src, uris: src.uris && src.uris.length })} on ${state.device ? devName(state.device.id) : "no device yet"}`);
-  let handled = false;
-  const sent = await changeTrack(async (id) => {
+  const ok = await changeTrack(async (id) => {
     const deviceId = await needDevice(id);
     try {
       await playSource(deviceId, src);
     } catch (e) {
       applog("warn", `play ${kind} failed: ${e}`);
-      if (!(refused && refused(e))) throw e;
-      handled = true; // withDevice would retry it on another device
+      throw e;
     }
   });
-  const ok = sent && !handled;
   settlePending(token, ok);
   if (ok) setLastSrc(src, members || (src.contextUri && knownRows.get(src.contextUri)) || null);
   kick();
@@ -1588,7 +1584,7 @@ async function resumeOrRestart(deviceId) {
     await invoke("resume", { deviceId });
   } catch (e) {
     const t = state.now;
-    if (!t || !t.uri || isLocalFile(t.uri) || !(/\b40[34]\b/.test(String(e)) || isCode(e, "NO_ACTIVE_DEVICE"))) throw e;
+    if (!t || !t.uri || isLocalFile(t.uri) || !isCode(e, "NO_ACTIVE_DEVICE")) throw e;
     await invoke("resume_at", { deviceId, contextUri: state.contextUri, uri: t.uri, positionMs: Math.round(progress()) });
   }
 }
@@ -2213,13 +2209,10 @@ async function pickDevice(d) {
   const sess = authSession;
   let failed = null;
   // the error is handled here, not by withDevice: rediscovering would retry a device that's gone
-  // This Mac: the local transfer (it loads what plays elsewhere); another device: transfer_playback
-  // (a connect-state transfer in Rust control.rs)
-  const move = isHere(d, engine)
-    ? () => invoke("control_transfer", { device: d.id, play: state.isPlaying })
-    : () => invoke("transfer_playback", { deviceId: d.id, play: state.isPlaying });
+  // transfer_playback: Rust control.rs transfer (This Mac loads what plays elsewhere; another device
+  // gets a connect-state transfer)
   await changeTrack(() =>
-    move().catch((e) => {
+    invoke("transfer_playback", { deviceId: d.id, play: state.isPlaying }).catch((e) => {
       failed = e;
     }),
   );
@@ -2234,7 +2227,7 @@ async function pickDevice(d) {
       intents.drop("device");
       renderChrome();
     }
-    if (isCode(failed, "NO_ACTIVE_DEVICE") || /\b404\b/.test(String(failed))) {
+    if (isCode(failed, "NO_ACTIVE_DEVICE")) {
       toast(`${d.name} isn't available any more`);
       refreshDevices();
     } else if (refusedText(failed, labelOf(d))) {
@@ -3371,7 +3364,6 @@ const MIXES_KEY = "knownMixes";
 const MIX_NOTE = "Spotify didn't share this mix's track list. Play still starts it.";
 let knownMixes = null; // [{id, seen}], newest first; null = not read from storage yet
 let notedContext = null; // the last playback context noted, so a poll doesn't note it every second
-const refusedMixes = new Set(); // mixes Spotify wouldn't start this session: history must not bring them back
 const mixInfo = new Map(); // playlist id → promise of {name, cover} or null
 let mixesFetched = []; // the last mixes_list answer
 let mixList = []; // the tiles on screen: {id, name, cover, source}
@@ -3385,7 +3377,7 @@ function mixes() {
   return knownMixes;
 }
 
-const ownIds = () => [...(playlists || []).map((p) => p.id), ...refusedMixes];
+const ownIds = () => (playlists || []).map((p) => p.id);
 
 /** Note playback contexts (newest first); a new mix is stored and shown. */
 function noteContexts(uris) {
@@ -3434,24 +3426,10 @@ function drawMixes() {
   renderShelf("mixes");
 }
 
-/** Spotify refuses some of its own mixes: 403, or a 404 that isn't about the device. */
-// Rust already tags a device 404 as NO_ACTIVE_DEVICE: any other 403/404 is the mix itself
-const mixRefused = (e) => /\b40[34]\b/.test(String(e)) && !isCode(e, "NO_ACTIVE_DEVICE");
-
 async function playMix(src) {
-  let refused = false;
-  const played = startPlay(
-    { contextUri: `spotify:playlist:${src.id}` },
-    { kind: "mix", refused: (e) => mixRefused(e) && (refused = true) },
-  );
+  const played = startPlay({ contextUri: `spotify:playlist:${src.id}` }, { kind: "mix" });
   closeOverlay(); // the main screen: the loader until the mix's first song shows
   await played;
-  if (refused) {
-    toast("Spotify won't start this mix from here");
-    refusedMixes.add(src.id);
-    noteContexts([]); // drops it from the stored list
-    renderMixes();
-  }
 }
 
 /** The next login may be another account: forget everything the Library loaded (not the stored mixes). */
@@ -3459,7 +3437,6 @@ function resetLibrary() {
   lib.clear();
   knownRows.clear();
   mixInfo.clear();
-  refusedMixes.clear();
   knownMixes = null;
   notedContext = null;
   libOpened = false;

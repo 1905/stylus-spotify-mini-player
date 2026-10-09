@@ -361,12 +361,6 @@ pub async fn transfer(device: String, play: bool) -> Result<Value, String> {
     Ok(out)
 }
 
-/// The UI's device pick (`transfer`).
-#[tauri::command]
-pub async fn control_transfer(device: String, play: bool) -> Result<Value, String> {
-    transfer(device, play).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
