@@ -97,11 +97,14 @@ pub(crate) async fn oauth_login(
 }
 
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// The longest request line the callback server reads.
+const MAX_REQUEST_LINE: usize = 8192;
 
-/// Accepts connections until one hits `callback_path`, parses its `code`/`state`,
-/// writes a friendly HTML page back, and returns the code.
-/// Gives up after `timeout`, so a closed browser tab doesn't leave the app
-/// waiting forever with the port held.
+/// Accepts connections until one hits `callback_path` with `expected_state`, writes a
+/// friendly HTML page back, and returns its `code` (or Err for its `error`).
+/// A request with a wrong or missing state gets "Waiting…" and the server keeps listening.
+/// Gives up at `timeout`, also while a connection is open, so a closed browser tab doesn't
+/// leave the app waiting forever with the port held.
 fn wait_for_code(
     listener: TcpListener,
     callback_path: &str,
@@ -111,54 +114,44 @@ fn wait_for_code(
     let deadline = std::time::Instant::now() + timeout;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     loop {
+        let Some(left) = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) else {
+            return Err("no answer from Spotify in 3 minutes, try again".into());
+        };
         let mut stream = match listener.accept() {
             Ok((s, _)) => s,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                if std::time::Instant::now() >= deadline {
-                    return Err("no answer from Spotify in 3 minutes, try again".into());
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(left.min(std::time::Duration::from_millis(100)));
                 continue;
             }
             Err(_) => continue,
         };
         // the accepted socket may inherit non-blocking mode; reads need a bounded block
         let _ = stream.set_nonblocking(false);
-        let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-        let mut buf = [0u8; 2048];
         // a browser preconnect may never send a request: skip it, keep listening
-        let Ok(n) = stream.read(&mut buf) else { continue };
-        let req = String::from_utf8_lossy(&buf[..n]);
+        let Some(line) = read_request_line(&mut stream, deadline) else { continue };
 
-        // First line: "GET /callback?code=...&state=... HTTP/1.1"
-        let path = req.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("");
-        if path.split('?').next() != Some(callback_path) {
-            // Ignore favicon etc., keep listening.
-            let _ = stream.write_all(http_page("Waiting…").as_bytes());
-            continue;
-        }
-
-        let query = path.splitn(2, '?').nth(1).unwrap_or("");
+        // "GET /callback?code=...&state=... HTTP/1.1"
+        let path = line.split_whitespace().nth(1).unwrap_or("");
+        let (route, query) = path.split_once('?').unwrap_or((path, ""));
         let mut code = None;
         let mut got_state = None;
         let mut error = None;
         for pair in query.split('&') {
-            let mut it = pair.splitn(2, '=');
-            match (it.next(), it.next()) {
-                (Some("code"), Some(v)) => code = Some(url_decode(v)),
-                (Some("state"), Some(v)) => got_state = Some(url_decode(v)),
-                (Some("error"), Some(v)) => error = Some(url_decode(v)),
+            match pair.split_once('=') {
+                Some(("code", v)) => code = Some(url_decode(v)),
+                Some(("state", v)) => got_state = Some(url_decode(v)),
+                Some(("error", v)) => error = Some(url_decode(v)),
                 _ => {}
             }
         }
-
+        // favicon, another path, a wrong or missing state: not our redirect, keep listening
+        if route != callback_path || got_state.as_deref() != Some(expected_state) {
+            let _ = stream.write_all(http_page("Waiting…").as_bytes());
+            continue;
+        }
         if let Some(e) = error {
             let _ = stream.write_all(http_page(&format!("Login cancelled: {e}")).as_bytes());
             return Err(format!("authorization denied: {e}"));
-        }
-        if got_state.as_deref() != Some(expected_state) {
-            let _ = stream.write_all(http_page("State mismatch — aborted.").as_bytes());
-            return Err("state mismatch (possible CSRF) — try again".into());
         }
         match code {
             Some(c) => {
@@ -173,6 +166,26 @@ fn wait_for_code(
                 return Err("no authorization code in callback".into());
             }
         }
+    }
+}
+
+/// Reads the request line (up to `\r\n`, max `MAX_REQUEST_LINE` bytes) before `deadline`.
+/// None when the client sends nothing, closes early or is too slow.
+fn read_request_line(stream: &mut std::net::TcpStream, deadline: std::time::Instant) -> Option<String> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    loop {
+        if let Some(end) = buf.windows(2).position(|w| w == b"\r\n") {
+            return Some(String::from_utf8_lossy(&buf[..end]).into_owned());
+        }
+        if buf.len() >= MAX_REQUEST_LINE {
+            return Some(String::from_utf8_lossy(&buf[..MAX_REQUEST_LINE]).into_owned());
+        }
+        let left = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero())?;
+        stream.set_read_timeout(Some(left.min(READ_TIMEOUT))).ok()?;
+        let n = stream.read(&mut chunk).ok().filter(|&n| n > 0)?;
+        let room = MAX_REQUEST_LINE - buf.len();
+        buf.extend_from_slice(&chunk[..n.min(room)]);
     }
 }
 
@@ -193,7 +206,24 @@ async fn token_request(params: &[(&str, &str)]) -> Result<TokenResponse, (u16, S
 
 // ---- small utilities -------------------------------------------------------
 
+/// `s` with the HTML special characters replaced by entities.
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn http_page(msg: &str) -> String {
+    let msg = html_escape(msg);
     let body = format!(
         "<!doctype html><html><head><meta charset=utf-8><title>Stylus</title>\
          <style>body{{background:#121212;color:#fff;font-family:system-ui;\
@@ -283,6 +313,64 @@ mod tests {
         let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(5));
         client.join().unwrap();
         assert_eq!(r.unwrap(), "player");
+    }
+
+    #[test]
+    fn wait_for_code_ignores_a_request_with_a_wrong_state() {
+        use std::io::{Read, Write};
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            // a forged error with a wrong state must not end the login
+            for req in ["GET /login?error=x&state=bad", "GET /login?error=y", "GET /login?code=ok&state=s"] {
+                let mut s = std::net::TcpStream::connect(addr).unwrap();
+                s.write_all(format!("{req} HTTP/1.1\r\n\r\n").as_bytes()).unwrap();
+                let mut out = String::new();
+                let _ = s.read_to_string(&mut out);
+            }
+        });
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2));
+        client.join().unwrap();
+        assert_eq!(r.unwrap(), "ok");
+    }
+
+    #[test]
+    fn wait_for_code_reads_a_request_line_sent_in_two_parts() {
+        use std::io::{Read, Write};
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(b"GET /login?code=ab").unwrap();
+            s.flush().unwrap();
+            // longer than the 100 ms accept poll, so the server reads the first part alone
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            s.write_all(b"c&state=s HTTP/1.1\r\n\r\n").unwrap();
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+        });
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2));
+        client.join().unwrap();
+        assert_eq!(r.unwrap(), "abc");
+    }
+
+    #[test]
+    fn wait_for_code_keeps_its_deadline_with_a_silent_open_connection() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        // connects, sends nothing and stays open until the end of the test
+        let _silent = std::net::TcpStream::connect(addr).unwrap();
+        let start = std::time::Instant::now();
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_millis(300));
+        assert!(r.is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    }
+
+    #[test]
+    fn http_page_escapes_its_text() {
+        let p = http_page("<script>&\"'");
+        assert!(p.contains("&lt;script&gt;&amp;&quot;&#39;"));
+        assert!(!p.contains("<script>"));
     }
 
     #[test]
