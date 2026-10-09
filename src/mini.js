@@ -4,6 +4,7 @@
 import { ICONS } from "./lib/icons.js";
 import { miniProgress, volumeIcon } from "./lib/mini.js";
 import { stepVolume } from "./lib/transport.js";
+import { coverSrc } from "./lib/cover.js";
 
 const $ = (id) => document.getElementById(id);
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
@@ -82,9 +83,10 @@ function renderCover(url) {
   const img = $("miniCover");
   img.hidden = !coverUrl;
   $("miniGlyph").hidden = Boolean(coverUrl);
-  if (coverUrl) img.src = coverUrl;
+  const src = coverUrl && coverSrc(coverUrl);
+  if (src) img.src = src;
   else img.removeAttribute("src");
-  $("miniBg").style.backgroundImage = coverUrl ? `url("${coverUrl.replace(/["\\]/g, "")}")` : "";
+  $("miniBg").style.backgroundImage = src ? `url("${src.replace(/["\\]/g, "")}")` : "";
 }
 
 function renderBar() {

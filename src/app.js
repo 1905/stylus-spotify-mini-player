@@ -19,6 +19,7 @@ import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 import { parseLink, looksLikeLink } from "./lib/links.js";
 import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
+import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
 
@@ -1192,7 +1193,8 @@ function setLayer(el, vars) {
 
 async function paint(url) {
   const token = ++colorToken;
-  const g = await extractGlow(url);
+  // the same cover:// src as the <img>s (crossorigin="anonymous"), so both share one loaded copy
+  const g = await extractGlow(coverSrc(url));
   if (token !== colorToken || !g) return; // keep previous colours on failure
   const vars = glowVars(g);
   const key = Object.values(vars).join("|");
@@ -2923,7 +2925,7 @@ function closeOverlay() {
 
 const artHtml = (url, name, attrs = 'loading="lazy"') =>
   url
-    ? `<img src="${esc(url)}" alt="" draggable="false" decoding="async" ${attrs} data-letter="${esc(letterOf(name))}" />`
+    ? `<img src="${esc(coverSrc(url))}" alt="" draggable="false" decoding="async" ${attrs} data-letter="${esc(letterOf(name))}" />`
     : letterTile({ name });
 
 /** Overlay covers that fail to load become the letter tile. */
