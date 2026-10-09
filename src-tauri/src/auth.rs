@@ -57,13 +57,15 @@ fn authorize_url(client_id: &str, scopes: &[&str], redirect_uri: &str, state: &s
 /// One interactive Authorization Code + PKCE login for `client_id`: opens the browser,
 /// waits up to `timeout` for the redirect to `http://127.0.0.1:{port}{redirect_path}`, and
 /// exchanges the code. The player login (player.rs) uses it.
-/// A port in use → Err naming the port.
+/// A port in use → Err naming the port. `cancelled()` true → Err(`LOGIN_CANCELLED`) and the
+/// port is free again within about 100 ms.
 pub(crate) async fn oauth_login(
     client_id: &str,
     port: u16,
     redirect_path: &str,
     scopes: &[&str],
     timeout: std::time::Duration,
+    cancelled: impl Fn() -> bool + Send + 'static,
 ) -> Result<TokenResponse, String> {
     let redirect_uri = format!("http://127.0.0.1:{port}{redirect_path}");
     let verifier = gen_verifier();
@@ -81,7 +83,7 @@ pub(crate) async fn oauth_login(
     // Block on the one incoming request. Spawn to a blocking thread so we
     // don't stall the async runtime.
     let path = redirect_path.to_string();
-    let code = tokio::task::spawn_blocking(move || wait_for_code(listener, &path, &state, timeout))
+    let code = tokio::task::spawn_blocking(move || wait_for_code(listener, &path, &state, timeout, cancelled))
         .await
         .map_err(|e| e.to_string())??;
 
@@ -96,7 +98,12 @@ pub(crate) async fn oauth_login(
     .map_err(|(_, body)| format!("token exchange failed: {body}"))
 }
 
+/// The error of a login that a logout cancelled while the browser was open.
+pub(crate) const LOGIN_CANCELLED: &str = "LOGIN_CANCELLED: logged out while the browser login was open";
+/// The longest time a connection can stay silent before the callback server drops it.
 const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// How often a blocked accept or read checks the deadline and `cancelled`.
+const POLL: std::time::Duration = std::time::Duration::from_millis(100);
 /// The longest request line the callback server reads.
 const MAX_REQUEST_LINE: usize = 8192;
 
@@ -105,22 +112,27 @@ const MAX_REQUEST_LINE: usize = 8192;
 /// A request with a wrong or missing state gets "Waiting…" and the server keeps listening.
 /// Gives up at `timeout`, also while a connection is open, so a closed browser tab doesn't
 /// leave the app waiting forever with the port held.
+/// `cancelled()` true → Err(`LOGIN_CANCELLED`) within about `POLL`, also while a connection is open.
 fn wait_for_code(
     listener: TcpListener,
     callback_path: &str,
     expected_state: &str,
     timeout: std::time::Duration,
+    cancelled: impl Fn() -> bool + Send + 'static,
 ) -> Result<String, String> {
     let deadline = std::time::Instant::now() + timeout;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     loop {
+        if cancelled() {
+            return Err(LOGIN_CANCELLED.into());
+        }
         let Some(left) = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) else {
             return Err("no answer from Spotify in 3 minutes, try again".into());
         };
         let mut stream = match listener.accept() {
             Ok((s, _)) => s,
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(left.min(std::time::Duration::from_millis(100)));
+                std::thread::sleep(left.min(POLL));
                 continue;
             }
             Err(_) => continue,
@@ -128,7 +140,7 @@ fn wait_for_code(
         // the accepted socket may inherit non-blocking mode; reads need a bounded block
         let _ = stream.set_nonblocking(false);
         // a browser preconnect may never send a request: skip it, keep listening
-        let Some(line) = read_request_line(&mut stream, deadline) else { continue };
+        let Some(line) = read_request_line(&mut stream, deadline, &cancelled) else { continue };
 
         // "GET /callback?code=...&state=... HTTP/1.1"
         let path = line.split_whitespace().nth(1).unwrap_or("");
@@ -170,10 +182,16 @@ fn wait_for_code(
 }
 
 /// Reads the request line (up to `\r\n`, max `MAX_REQUEST_LINE` bytes) before `deadline`.
-/// None when the client sends nothing, closes early or is too slow.
-fn read_request_line(stream: &mut std::net::TcpStream, deadline: std::time::Instant) -> Option<String> {
+/// None when the client sends nothing, closes early, is silent for `READ_TIMEOUT`, or
+/// `cancelled()` turns true.
+fn read_request_line(
+    stream: &mut std::net::TcpStream,
+    deadline: std::time::Instant,
+    cancelled: &dyn Fn() -> bool,
+) -> Option<String> {
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
+    let mut idle_until = std::time::Instant::now() + READ_TIMEOUT;
     loop {
         if let Some(end) = buf.windows(2).position(|w| w == b"\r\n") {
             return Some(String::from_utf8_lossy(&buf[..end]).into_owned());
@@ -181,11 +199,22 @@ fn read_request_line(stream: &mut std::net::TcpStream, deadline: std::time::Inst
         if buf.len() >= MAX_REQUEST_LINE {
             return Some(String::from_utf8_lossy(&buf[..MAX_REQUEST_LINE]).into_owned());
         }
-        let left = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero())?;
-        stream.set_read_timeout(Some(left.min(READ_TIMEOUT))).ok()?;
-        let n = stream.read(&mut chunk).ok().filter(|&n| n > 0)?;
-        let room = MAX_REQUEST_LINE - buf.len();
-        buf.extend_from_slice(&chunk[..n.min(room)]);
+        if cancelled() {
+            return None;
+        }
+        let left = deadline.min(idle_until).checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero())?;
+        // short read slices so a cancel is seen without waiting for the idle limit
+        stream.set_read_timeout(Some(left.min(POLL))).ok()?;
+        match stream.read(&mut chunk) {
+            Ok(0) => return None,
+            Ok(n) => {
+                let room = MAX_REQUEST_LINE - buf.len();
+                buf.extend_from_slice(&chunk[..n.min(room)]);
+                idle_until = std::time::Instant::now() + READ_TIMEOUT;
+            }
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => return None,
+        }
     }
 }
 
@@ -274,7 +303,7 @@ mod tests {
     #[test]
     fn wait_for_code_times_out_without_a_callback() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let r = wait_for_code(l, "/callback", "s", std::time::Duration::from_millis(200));
+        let r = wait_for_code(l, "/callback", "s", std::time::Duration::from_millis(200), || false);
         assert!(r.unwrap_err().contains("no answer"));
     }
 
@@ -291,7 +320,7 @@ mod tests {
             let mut out = String::new();
             let _ = s.read_to_string(&mut out);
         });
-        let r = wait_for_code(l, "/callback", "s", std::time::Duration::from_secs(5));
+        let r = wait_for_code(l, "/callback", "s", std::time::Duration::from_secs(5), || false);
         client.join().unwrap();
         assert_eq!(r.unwrap(), "abc");
     }
@@ -310,7 +339,7 @@ mod tests {
                 let _ = s.read_to_string(&mut out);
             }
         });
-        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(5));
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(5), || false);
         client.join().unwrap();
         assert_eq!(r.unwrap(), "player");
     }
@@ -329,7 +358,7 @@ mod tests {
                 let _ = s.read_to_string(&mut out);
             }
         });
-        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2));
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2), || false);
         client.join().unwrap();
         assert_eq!(r.unwrap(), "ok");
     }
@@ -349,7 +378,7 @@ mod tests {
             let mut out = String::new();
             let _ = s.read_to_string(&mut out);
         });
-        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2));
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(2), || false);
         client.join().unwrap();
         assert_eq!(r.unwrap(), "abc");
     }
@@ -361,8 +390,38 @@ mod tests {
         // connects, sends nothing and stays open until the end of the test
         let _silent = std::net::TcpStream::connect(addr).unwrap();
         let start = std::time::Instant::now();
-        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_millis(300));
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_millis(300), || false);
         assert!(r.is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    }
+
+    #[test]
+    fn wait_for_code_stops_when_cancelled() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        let setter = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            setter.store(true, Ordering::SeqCst);
+        });
+        let start = std::time::Instant::now();
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(60), move || flag.load(Ordering::SeqCst));
+        assert!(r.unwrap_err().starts_with("LOGIN_CANCELLED"));
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    }
+
+    #[test]
+    fn wait_for_code_stops_when_cancelled_during_a_silent_open_connection() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let _silent = std::net::TcpStream::connect(addr).unwrap();
+        let start = std::time::Instant::now();
+        let r = wait_for_code(l, "/login", "s", std::time::Duration::from_secs(60), move || {
+            start.elapsed() > std::time::Duration::from_millis(200)
+        });
+        assert!(r.unwrap_err().starts_with("LOGIN_CANCELLED"));
         assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
     }
 

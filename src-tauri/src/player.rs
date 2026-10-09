@@ -1201,10 +1201,13 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
     let gen = engine.0.login_gen.load(Ordering::SeqCst);
     let result = async {
         // the browser wait is outside the lock: an open browser login never blocks a logout
-        let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT).await?;
+        // a logout bumps login_gen: the browser wait stops at once and frees the port
+        let e = engine.inner().clone();
+        let cancelled = move || e.0.login_gen.load(Ordering::SeqCst) != gen;
+        let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT, cancelled).await?;
         let _op = engine.0.auth_op.lock().await;
         if engine.0.login_gen.load(Ordering::SeqCst) != gen {
-            return Err("LOGIN_CANCELLED: logged out while the browser login was open".to_string());
+            return Err(crate::auth::LOGIN_CANCELLED.to_string());
         }
         lock(&engine.0.save_error).take();
         engine.restart(Some(Credentials::with_access_token(token.access_token))).await;
