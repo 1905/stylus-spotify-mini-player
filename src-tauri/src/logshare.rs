@@ -297,7 +297,10 @@ pub fn anonymize(raw: &str, private: &[String], cap_bytes: usize) -> Anonymized 
         let shape = format!("{msg}\n{}", more.join("\n"));
         let key = format!("{} {} {}", e.level, e.target, DIGITS.replace_all(&shape, "N"));
         match open.get_mut(&key) {
-            Some((i, last)) if (0..=COLLAPSE_GAP_MS).contains(&last.until(e.stamp)) => {
+            // auth lines tell a sequence: they collapse only into the line right before them
+            Some((i, last))
+                if (0..=COLLAPSE_GAP_MS).contains(&last.until(e.stamp)) && (e.target != "stylus::auth" || *i + 1 == episodes.len()) =>
+            {
                 episodes[*i].count += 1;
                 episodes[*i].until = e.hms;
                 *last = e.stamp;
@@ -481,6 +484,21 @@ orphan before the first entry
         let a = run(raw);
         assert_eq!(a.kept, 3);
         assert_eq!(a.text, "2026-10-09 14:00:00.000Z WARN  librespot_core::dealer: peer does not respond (×3 until 14:04:59)\n");
+    }
+
+    #[test]
+    fn auth_lines_collapse_only_into_the_line_before() {
+        let raw = "\
+2026-10-09 16:47:52.000Z INFO  stylus::auth: engine: starting → ready (Connected)
+2026-10-09 16:49:42.000Z INFO  stylus::auth: logout: start
+2026-10-09 16:49:57.000Z INFO  stylus::auth: engine: starting → ready (Connected)
+2026-10-09 16:49:58.000Z INFO  stylus::auth: engine: starting → ready (Connected)
+";
+        let a = run(raw);
+        let lines: Vec<&str> = a.text.lines().collect();
+        assert_eq!(lines.len(), 3, "{}", a.text);
+        assert!(lines[1].ends_with("logout: start"));
+        assert!(lines[2].contains("16:49:57") && lines[2].ends_with("(×2 until 16:49:58)"), "{}", lines[2]);
     }
 
     #[test]
