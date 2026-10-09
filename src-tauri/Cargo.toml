@@ -49,6 +49,8 @@ axum = "0.8"
 subtle = "2"
 # the MCP server's stop signal (CancellationToken); already in the tree via tokio/rmcp
 tokio-util = "0.7"
+# the anonymized log (logshare.rs): mask patterns; already in the tree via librespot
+regex = "1"
 
 # Dock icon = album art (dock.rs); the objc2 versions tauri already pulls in
 [target.'cfg(target_os = "macos")'.dependencies]

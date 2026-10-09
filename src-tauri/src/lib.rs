@@ -9,6 +9,7 @@ mod hashes;
 mod internal;
 mod library;
 pub mod links;
+pub mod logshare;
 pub mod mcp;
 mod mcp_app;
 pub mod mcp_tools;
