@@ -48,9 +48,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const STABLE_AFTER: Duration = Duration::from_secs(60);
 /// No Connect cluster this long after connecting: the UI sees "nothing active" and This Mac
 /// alone, not an endless ENGINE_NOT_READY (`cluster_or_quiet`).
-const QUIET_VIEW_AFTER: Duration = Duration::from_secs(8);
+const QUIET_VIEW_AFTER: Duration = Duration::from_secs(4);
 /// No Connect cluster this long after connecting: the launch restore runs anyway (`restore_gate`).
-const QUIET_RESTORE_AFTER: Duration = Duration::from_secs(15);
+const QUIET_RESTORE_AFTER: Duration = Duration::from_secs(5);
 /// The scopes librespot's own binary asks for (librespot 0.8.0 src/main.rs `OAUTH_SCOPES`).
 const OAUTH_SCOPES: &[&str] = &[
     "app-remote-control",
