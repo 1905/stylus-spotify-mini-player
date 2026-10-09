@@ -62,7 +62,10 @@ impl Api {
 
     /// One try: the token it used, the HTTP status and the body.
     async fn attempt(&self, method: reqwest::Method, url: &str, ctype: Option<&str>, accept: Option<&str>, body: Option<Vec<u8>>) -> Result<(String, u16, Vec<u8>), String> {
-        let token = self.session.login5().auth_token().await.map_err(|e| format!("login5 token: {e}"))?;
+        let token = self.session.login5().auth_token().await.map_err(|e| {
+            log::warn!(target: crate::applog::AUTH, "login5 token failed: {e}");
+            format!("login5 token: {e}")
+        })?;
         let mut rb = self
             .http
             .request(method, url)
@@ -121,9 +124,12 @@ where
 {
     let (token, mut status, mut bytes) = with_deadline(limit, attempt()).await?;
     if status == 401 {
-        log::info!(target: LOG, "HTTP 401: a new login5 token, one more try");
+        log::info!(target: crate::applog::AUTH, "HTTP 401: a new login5 token, one more try");
         invalidate(&token);
         (_, status, bytes) = with_deadline(limit, attempt()).await?;
+        if !(200..300).contains(&status) {
+            log::warn!(target: crate::applog::AUTH, "401 retry failed: HTTP {status}");
+        }
     }
     if !(200..300).contains(&status) {
         return Err(http_error(status, &bytes));

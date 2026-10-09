@@ -158,6 +158,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 pub fn init_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         if event.id().as_ref() == LOGOUT {
+            log::info!(target: crate::applog::AUTH, "logout: requested from the menu");
             show_main(app);
             let _ = app.emit(LOGOUT_EVENT, ());
         }
