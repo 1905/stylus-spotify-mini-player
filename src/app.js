@@ -218,13 +218,15 @@ function showLogin(kind) {
   $("stage").hidden = true;
   $("login").hidden = false;
   syncMini(); // the mini player says to log in
+  applog("info", `login screen (${state.loginKind})`, "auth");
 }
 
 /** The player login. A login that works but can't be saved resolves too, with a toast: it lasts this launch. */
 function engineLogin() {
-  return invoke("engine_login").catch((e) => {
+  return invoke("engine_login").then(() => void applog("info", "login ok", "auth"), (e) => {
     const why = notSavedReason(e);
     if (why === null) throw e;
+    applog("warn", `login ok, not saved: ${why}`, "auth");
     toast(`Logged in, but Stylus couldn't save the login (${why}). You'll log in again at the next launch.`);
   });
 }
@@ -234,12 +236,14 @@ async function onLogin() {
   btn.disabled = true;
   btn.textContent = "Waiting for Spotify…";
   $("loginError").hidden = true;
+  applog("info", "login click", "auth");
   try {
     await engineLogin(); // resolved = logged in and the player is ready
     const { status } = await invoke("auth_status");
     if (status === "ok") return startStage();
     showLogin(status);
   } catch (e) {
+    applog("warn", `login failed: ${String(e)}`, "auth");
     const st = await invoke("auth_status").catch(() => null);
     if (st && st.status === "not_premium") return showLogin("not_premium");
     $("loginError").textContent = `Couldn't connect: ${reason(e)}`;
@@ -273,6 +277,7 @@ async function logout() {
 
 function expire() {
   if ($("stage").hidden || loggingOut) return; // on the login screen, or a logout ends the session: nothing to end
+  applog("info", "session ended (engine needs_login)", "auth");
   showLogin("ended");
   $("loginBtn").focus(); // the stage the user was in is gone: land on the way back
 }
@@ -2041,12 +2046,16 @@ function setBusy(busy) {
 async function playOnThisMac() {
   if (thisMacBusy) return;
   const sess = authSession;
+  const fail = (msg) => {
+    applog("warn", msg, "auth");
+    toast(msg);
+  };
   runMissingSince = 0; // a retry gets a fresh 20s before it says "not showing up" again
   setBusy("connecting");
   try {
     const st = await waitEngine(ENGINE_WAIT_MS);
     if (sess !== authSession) return;
-    if (!st) return void toast("This Mac is still connecting to Spotify. Try again in a moment.");
+    if (!st) return void fail("This Mac is still connecting to Spotify. Try again in a moment.");
     if (NEEDS_LOGIN.has(st.state)) {
       setBusy("login");
       await engineLogin(); // resolved = logged in and ready (no event to wait for)
@@ -2056,16 +2065,16 @@ async function playOnThisMac() {
       if (sess !== authSession) return;
       setBusy("connecting");
     } else if (st.state !== "ready") {
-      return void toast(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
+      return void fail(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
     }
     const run = await findTheRun(THE_RUN_WAIT_MS, sess);
     if (sess !== authSession) return;
     if (run) return void pickDevice(run);
-    toast("This Mac didn't show up in Spotify. Try again in a moment.");
+    fail("This Mac didn't show up in Spotify. Try again in a moment.");
   } catch (e) {
     if (sess !== authSession) return;
-    if (isCode(e, "LOGIN_IN_PROGRESS")) return void toast("Finish the player login in your browser");
-    toast(`Couldn't log in the player on this Mac: ${reason(e)}`);
+    if (isCode(e, "LOGIN_IN_PROGRESS")) return void fail("Finish the player login in your browser");
+    fail(`Couldn't log in the player on this Mac: ${reason(e)}`);
   } finally {
     if (sess === authSession) setBusy("");
   }
@@ -4456,6 +4465,8 @@ async function boot() {
   });
   listenEvent("media-command", onMediaCommand);
   listenEvent("logout-requested", logout);
+  // Rust's own messages for the user (e.g. a failed log export)
+  listenEvent("toast", (p) => toast(String(p || "")));
   listenEvent("mini-command", onMiniCommand);
   listenEvent("mini-visible", onMiniVisible);
   // this Mac's player: what plays, from librespot; the loop renders from it
@@ -4472,9 +4483,10 @@ async function boot() {
   let status = "login";
   try {
     status = (await invoke("auth_status")).status;
-  } catch {
-    /* treat as logged out */
+  } catch (e) {
+    applog("warn", `auth_status failed: ${String(e)}`, "auth"); // treated as logged out
   }
+  applog("info", `auth_status ${status} → ${status === "ok" ? "stage" : "login screen"}`, "auth");
   if (status === "ok") startStage();
   else showLogin(status);
 }
