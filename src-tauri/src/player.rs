@@ -499,6 +499,17 @@ impl Engine {
         }
     }
 
+    /// The live login's account, else the stored login's (no engine run needed). Non-empty only.
+    pub async fn stored_account(&self) -> Option<String> {
+        let live = lock(&self.0.live_creds).as_ref().and_then(|c| c.username.clone());
+        if let Some(a) = live.filter(|a| !a.is_empty()) {
+            return Some(a);
+        }
+        let store = self.0.store.clone();
+        let stored = tokio::task::spawn_blocking(move || store.load()).await.ok().flatten()?;
+        stored.username.filter(|a| !a.is_empty())
+    }
+
     /// `restart(None)` under `auth_op`: it can't run inside a logout and load the old account.
     pub async fn restart_stored(&self) {
         let _op = self.0.auth_op.lock().await;
@@ -1862,6 +1873,7 @@ mod tests {
         })
         .unwrap();
         let engine = Engine::new(Arc::new(FileStore));
+        assert_eq!(engine.stored_account().await.as_deref(), Some("alice"), "from the file, before the player connects");
         engine.0.session.use_account("alice");
         engine.0.session.loaded(Source::Uris { uris: vec!["spotify:track:a".into()] }, None, 0, false, Repeat::Off);
         engine.0.session.save_if_due();
@@ -1870,6 +1882,7 @@ mod tests {
         engine.0.reload_after_drop.store(true, Ordering::SeqCst);
         *lock(&engine.0.restore_pending) = Some(Restore::Launch);
         *lock(&engine.0.live_creds) = Some(creds.clone());
+        assert_eq!(engine.stored_account().await.as_deref(), Some("alice"));
 
         engine.logout().await.unwrap();
 
@@ -1886,6 +1899,7 @@ mod tests {
         assert!(!engine.0.reload_after_drop.load(Ordering::SeqCst), "no reload of the old session after a logout");
         assert!(lock(&engine.0.restore_pending).is_none(), "no late restore of the old account");
         assert!(lock(&engine.0.live_creds).is_none(), "no restart with the old account's login");
+        assert_eq!(engine.stored_account().await, None, "me_id has no account after a logout");
         // a second logout finds nothing to remove: still Ok
         engine.logout().await.unwrap();
     }

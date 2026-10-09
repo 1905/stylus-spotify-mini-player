@@ -187,7 +187,7 @@ pub fn tools() -> Vec<(&'static str, &'static str, Value)> {
         ),
         ("artist", "An artist: popular tracks, albums, and your liked songs by them.", obj(json!({ "artist": s("Artist uri, id, link or name") }), &["artist"])),
         ("devices", "Spotify Connect devices; the active one and This Mac (Stylus's own player) are marked.", none()),
-        ("transfer", "Move playback to another device.", obj(json!({ "device": s("Device name or id"), "play": { "type": "boolean", "description": "Start playing there (default true)" } }), &["device"])),
+        ("transfer", "Move playback to another device.", obj(json!({ "device": s("Device name or id"), "play": { "type": "boolean", "description": "This Mac: start playing there (default true). Another device keeps its play/pause state." } }), &["device"])),
         ("like", "Add a song to Liked Songs (default: the current song).", obj(json!({ "uri": s("Track uri or link") }), &[])),
         ("unlike", "Remove a song from Liked Songs (default: the current song).", obj(json!({ "uri": s("Track uri or link") }), &[])),
         (

@@ -161,7 +161,6 @@ function showLogin(kind) {
   thisMacBusy = "";
   engine = null; // the next stage reads it fresh: the player re-checks the account on restart
   accountP = null; // the next login may be another account: ask me_id again
-  accountNow = null;
   activeId = null;
   lastSrc = null;
   seenDevice = null;
@@ -256,6 +255,9 @@ let loggingOut = false;
 async function logout() {
   if (loggingOut) return;
   loggingOut = true;
+  // no poll or session-tagged reply may write the old account's keys back while Rust removes them
+  stopPolling();
+  authSession++;
   let failed = null;
   try {
     // not session-tagged: the logout outlives the session it ends
@@ -263,6 +265,7 @@ async function logout() {
   } catch (e) {
     failed = e;
   }
+  await loadStore(); // Rust removed account keys (mixes): the in-memory copy must not keep them
   loggingOut = false; // Rust logs the result
   showLogin("logged_out");
   if (failed) toast(`Logged out, but not everything was removed: ${reason(failed)}`);
@@ -1435,7 +1438,6 @@ function renderPending(render = true) {
 // ---------- the last source, and the session Rust restores at launch ----------
 
 let accountP = null; // promise of the /me id for this login session
-let accountNow = null; // that id once known, else null
 // what the last play started from: {contextUri, uris, trackUri}. uris: the list played, or with a
 // context its known members. From this run's plays, else Rust's saved session (session_get).
 let lastSrc = null;
@@ -1447,10 +1449,10 @@ const RESTORE_WAIT_MS = 20000; // the player connects and loads it; longer = it 
 function accountId() {
   if (!accountP) {
     const p = invoke("me_id").then(
-      (id) => (accountNow = id || null),
+      (id) => id || null,
       () => {
         if (accountP === p) accountP = null; // retry on the next ask
-        return (accountNow = null);
+        return null;
       },
     );
     accountP = p;
@@ -1478,18 +1480,27 @@ function noteRestored(p) {
   const s = restoredSource(p);
   if (!s) return;
   if (!lastSrc) setLastSrc(s);
-  if (state.now || playPending() || (restoring && restoring.trackUri === s.trackUri)) return;
+  if (state.now || playPending()) return;
+  if (restoring && restoring.trackUri === s.trackUri) {
+    if (!restoring.track) showRestoredTrack(s, p); // the account id may be known now: its disk cache too
+    return;
+  }
   const track = (s.trackUri && seenTracks.get(s.trackUri)) || null;
   restoring = { trackUri: s.trackUri, track, until: performance.now() + RESTORE_WAIT_MS };
   applog("info", `session: restoring ${s.trackUri || "the first track"} from ${s.contextUri || `${(s.uris || []).length} uris`}${track ? "" : " (track not known yet)"}`);
-  if (!track) restoredTrack(s, Boolean(p.shuffle)).then((t) => {
-    if (!t || !restoring || restoring.trackUri !== s.trackUri) return;
-    restoring.track = t;
-    if (!$("stage").hidden) renderPending();
-  });
+  if (!track) showRestoredTrack(s, p);
   clearTimeout(restoreTimer);
   restoreTimer = setTimeout(() => endRestoring("not loaded in time"), RESTORE_WAIT_MS);
   if (!$("stage").hidden) renderPending();
+}
+
+/** Look up the restored song in the disk cache; it shows once found (the restore still on). */
+function showRestoredTrack(s, p) {
+  restoredTrack(s, Boolean(p.shuffle)).then((t) => {
+    if (!t || !restoring || restoring.trackUri !== s.trackUri || restoring.track) return;
+    restoring.track = t;
+    if (!$("stage").hidden) renderPending();
+  });
 }
 
 let restoreTimer = null;
