@@ -7,6 +7,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use crate::applog::AUTH;
 use crate::paths::{http, urlencode};
 
 #[derive(Debug, Deserialize)]
@@ -73,12 +74,20 @@ pub(crate) async fn oauth_login(
     let auth_url = authorize_url(client_id, scopes, &redirect_uri, &state, &verifier);
 
     // Start the loopback listener BEFORE opening the browser.
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .map_err(|e| format!("cannot bind 127.0.0.1:{port}: {e}. Is another instance running?"))?;
+    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| {
+        log::warn!(target: AUTH, "oauth: bind failed: {e}");
+        format!("cannot bind 127.0.0.1:{port}: {e}. Is another instance running?")
+    })?;
+    log::info!(target: AUTH, "oauth: listening on 127.0.0.1:{port}");
 
     // Open the browser (does not block).
-    tauri_plugin_opener::open_url(&auth_url, None::<&str>)
-        .map_err(|e| format!("could not open browser: {e}"))?;
+    tauri_plugin_opener::open_url(&auth_url, None::<&str>).map_err(|e| {
+        // the error text may quote the URL, and the URL holds the state
+        let e = e.to_string().replace(&auth_url, "<authorize url>");
+        log::warn!(target: AUTH, "oauth: browser open failed: {e}");
+        format!("could not open browser: {e}")
+    })?;
+    log::info!(target: AUTH, "oauth: browser opened");
 
     // Block on the one incoming request. Spawn to a blocking thread so we
     // don't stall the async runtime.
@@ -87,7 +96,7 @@ pub(crate) async fn oauth_login(
         .await
         .map_err(|e| e.to_string())??;
 
-    token_request(&[
+    let token = token_request(&[
         ("grant_type", "authorization_code"),
         ("code", &code),
         ("redirect_uri", &redirect_uri),
@@ -95,7 +104,30 @@ pub(crate) async fn oauth_login(
         ("code_verifier", &verifier),
     ])
     .await
-    .map_err(|(_, body)| format!("token exchange failed: {body}"))
+    .map_err(|(status, body)| {
+        if status == 0 {
+            // no response: `body` is the transport error, not a Spotify body
+            log::warn!(target: AUTH, "oauth: token exchange failed: no response: {body}");
+        } else {
+            log::warn!(target: AUTH, "oauth: token exchange failed: HTTP {status}: {}", oauth_error_summary(&body));
+        }
+        format!("token exchange failed: {body}")
+    })?;
+    log::info!(target: AUTH, "oauth: token exchange ok");
+    Ok(token)
+}
+
+/// Only the `error` and `error_description` fields of a token-endpoint error body, at most
+/// 200 characters: the body of a success can hold tokens, so nothing else goes to the log.
+pub(crate) fn oauth_error_summary(body: &str) -> String {
+    let v: Option<serde_json::Value> = serde_json::from_str(body).ok();
+    let field = |k: &str| v.as_ref().and_then(|v| v.get(k)).and_then(|x| x.as_str()).map(str::to_owned);
+    let s = match (field("error"), field("error_description")) {
+        (Some(e), Some(d)) => format!("{e}: {d}"),
+        (Some(e), None) => e,
+        _ => format!("unparsable body ({} bytes)", body.len()),
+    };
+    s.chars().take(200).collect()
 }
 
 /// The error of a login that a logout cancelled while the browser was open.
@@ -122,11 +154,13 @@ fn wait_for_code(
 ) -> Result<String, String> {
     let deadline = std::time::Instant::now() + timeout;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let mut last_accept_error = String::new();
     loop {
         if cancelled() {
             return Err(LOGIN_CANCELLED.into());
         }
         let Some(left) = deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) else {
+            log::warn!(target: AUTH, "oauth: no callback after {} s", timeout.as_secs());
             return Err("no answer from Spotify in 3 minutes, try again".into());
         };
         let mut stream = match listener.accept() {
@@ -135,7 +169,16 @@ fn wait_for_code(
                 std::thread::sleep(left.min(POLL));
                 continue;
             }
-            Err(_) => continue,
+            Err(e) => {
+                // one line per new error text; the wait stops a tight loop on a broken listener
+                let e = e.to_string();
+                if e != last_accept_error {
+                    log::warn!(target: AUTH, "oauth: accept failed: {e}");
+                    last_accept_error = e;
+                }
+                std::thread::sleep(left.min(POLL));
+                continue;
+            }
         };
         // the accepted socket may inherit non-blocking mode; reads need a bounded block
         let _ = stream.set_nonblocking(false);
@@ -157,16 +200,21 @@ fn wait_for_code(
             }
         }
         // favicon, another path, a wrong or missing state: not our redirect, keep listening
-        if route != callback_path || got_state.as_deref() != Some(expected_state) {
+        let (path_ok, state_ok) = (route == callback_path, got_state.as_deref() == Some(expected_state));
+        if !path_ok || !state_ok {
+            log::info!(target: AUTH, "oauth: callback ignored (path ok: {path_ok}, state ok: {state_ok})");
             let _ = stream.write_all(http_page("Waiting…").as_bytes());
             continue;
         }
         if let Some(e) = error {
+            let shown: String = e.chars().filter(|c| c.is_ascii_lowercase() || *c == '_').take(40).collect();
+            log::warn!(target: AUTH, "oauth: Spotify returned error={shown}");
             let _ = stream.write_all(http_page(&format!("Login cancelled: {e}")).as_bytes());
             return Err(format!("authorization denied: {e}"));
         }
         match code {
             Some(c) => {
+                log::info!(target: AUTH, "oauth: code received");
                 let _ = stream.write_all(
                     http_page("✓ Logged in. You can close this tab and return to the app.")
                         .as_bytes(),
@@ -174,6 +222,7 @@ fn wait_for_code(
                 return Ok(c);
             }
             None => {
+                log::warn!(target: AUTH, "oauth: callback without code");
                 let _ = stream.write_all(http_page("No code returned.").as_bytes());
                 return Err("no authorization code in callback".into());
             }
@@ -423,6 +472,20 @@ mod tests {
         });
         assert!(r.unwrap_err().starts_with("LOGIN_CANCELLED"));
         assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    }
+
+    #[test]
+    fn oauth_error_summary_keeps_only_error_and_description() {
+        assert_eq!(
+            oauth_error_summary(r#"{"error":"invalid_grant","error_description":"Invalid authorization code"}"#),
+            "invalid_grant: Invalid authorization code"
+        );
+        let s = oauth_error_summary(r#"{"error":"x","access_token":"SECRET","refresh_token":"SECRET2"}"#);
+        assert_eq!(s, "x");
+        assert!(!s.contains("SECRET"));
+        assert_eq!(oauth_error_summary("not json"), "unparsable body (8 bytes)");
+        let long = format!(r#"{{"error":"e","error_description":"{}"}}"#, "d".repeat(500));
+        assert!(oauth_error_summary(&long).chars().count() <= 200);
     }
 
     #[test]
