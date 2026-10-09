@@ -757,7 +757,10 @@ impl SpircTask {
                             return Ok(());
                         }
                     }
-                    SpircPlayStatus::LoadingPlay { .. } | SpircPlayStatus::LoadingPause { .. } => {
+                    // Stylus patch: a Playing event while Paused is the player's truth. An older Paused event can
+                    // arrive after a newer play (unbiased select! + notify().await): without this, Spirc stays Paused
+                    // while the player plays and every pause is a no-op.
+                    SpircPlayStatus::LoadingPlay { .. } | SpircPlayStatus::LoadingPause { .. } | SpircPlayStatus::Paused { .. } => {
                         self.connect_state
                             .update_position(position_ms, self.now_ms());
                         self.play_status = SpircPlayStatus::Playing {
