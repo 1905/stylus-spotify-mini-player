@@ -460,7 +460,7 @@
     list_devices: () =>
       state.devices.map((d) => ({ ...clone(d), is_active: state.active && d.id === state.deviceId })),
 
-    app_log: ({ level, msg }) => { logs.push(`${level} ${msg}`); return null; },
+    app_log: ({ level, msg, area }) => { logs.push(`${level}${area ? ` [${area}]` : ""} ${msg}`); return null; },
     copy_text: ({ text }) => { copied.push(text); return null; },
     store_all: () => clone(store),
     store_set: ({ key, value }) => {

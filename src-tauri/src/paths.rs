@@ -138,8 +138,11 @@ const LEGACY_KEYS: [&str; 2] = ["apiBlockedUntil", "account"];
 pub(crate) fn remove_legacy_files() {
     let mut removed = remove_legacy_files_in(&app_dir());
     let present: Vec<&str> = LEGACY_KEYS.into_iter().filter(|k| crate::store::get(k).is_some()).collect();
-    if !present.is_empty() && crate::store::remove(&present).is_ok() {
-        removed.extend(present.iter().map(|k| format!("state key {k}")));
+    if !present.is_empty() {
+        match crate::store::remove(&present) {
+            Ok(_) => removed.extend(present.iter().map(|k| format!("state key {k}"))),
+            Err(e) => log::warn!(target: crate::applog::AUTH, "legacy file not removed: state keys {}: {e}", present.join(", ")),
+        }
     }
     if !removed.is_empty() {
         log::info!(target: "stylus::store", "removed the old Web API login data: {}", removed.join(", "));
@@ -148,7 +151,18 @@ pub(crate) fn remove_legacy_files() {
 
 /// Removes `LEGACY_FILES` in `dir`: the names it removed.
 fn remove_legacy_files_in(dir: &std::path::Path) -> Vec<String> {
-    LEGACY_FILES.iter().filter(|f| std::fs::remove_file(dir.join(f)).is_ok()).map(|f| f.to_string()).collect()
+    LEGACY_FILES
+        .iter()
+        .filter(|f| match std::fs::remove_file(dir.join(f)) {
+            Ok(()) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => {
+                log::warn!(target: crate::applog::AUTH, "legacy file not removed: {f}: {e}");
+                false
+            }
+        })
+        .map(|f| f.to_string())
+        .collect()
 }
 
 /// One HTTP client for every Spotify call. Finite deadlines: a stalled request must fail,

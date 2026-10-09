@@ -28,6 +28,8 @@ const TITLE_MAX: usize = 24;
 const ACTIONS: [&str; 6] = ["toggle", "next", "previous", "volume", "mute", "heart"];
 /// The "Log Out" item in the app menu and the tray menu; the main webview runs the logout.
 const LOGOUT: &str = "logout";
+/// File → Show Anonymized Logs in Finder (logshare.rs).
+const SHARE_LOGS: &str = "share_logs";
 pub const LOGOUT_EVENT: &str = "logout-requested";
 
 struct Tray {
@@ -156,18 +158,44 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 /// The macOS app menu with "Log Out" above Quit, and the one handler for every "Log Out" item
 /// (Tauri gives each menu event, the tray menu's too, to the app's menu handlers). Runs in `setup`.
 pub fn init_app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
-    app.on_menu_event(|app, event| {
-        if event.id().as_ref() == LOGOUT {
+    app.on_menu_event(|app, event| match event.id().as_ref() {
+        LOGOUT => {
+            log::info!(target: crate::applog::AUTH, "logout: requested from the menu");
             show_main(app);
             let _ = app.emit(LOGOUT_EVENT, ());
         }
+        SHARE_LOGS => {
+            let app = app.clone();
+            // reads and masks up to 4 MB of log: not on the main thread
+            std::thread::spawn(move || {
+                let shown = crate::logshare::export(&app)
+                    .and_then(|path| tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| e.to_string()));
+                if let Err(e) = shown {
+                    log::warn!(target: "stylus::logs", "anonymized log: {e}");
+                    let _ = app.emit("toast", format!("Couldn't save the anonymized log: {e}"));
+                }
+            });
+        }
+        _ => {}
     });
     let menu = Menu::default(app)?;
+    let submenus: Vec<_> = menu
+        .items()?
+        .into_iter()
+        .filter_map(|item| match item {
+            tauri::menu::MenuItemKind::Submenu(s) => Some(s),
+            _ => None,
+        })
+        .collect();
     // the first submenu is the app menu: About, Services, Hide…, then Quit last
-    if let Some(tauri::menu::MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+    if let Some(app_menu) = submenus.first() {
         let quit_at = app_menu.items()?.len().saturating_sub(1);
         let logout = MenuItem::with_id(app, LOGOUT, "Log Out", true, None::<&str>)?;
         app_menu.insert_items(&[&logout, &PredefinedMenuItem::separator(app)?], quit_at)?;
+    }
+    match submenus.iter().find(|s| s.text().is_ok_and(|t| t == "File")) {
+        Some(file) => file.append(&MenuItem::with_id(app, SHARE_LOGS, "Show Anonymized Logs in Finder", true, None::<&str>)?)?,
+        None => log::warn!(target: "stylus::logs", "no File menu: Show Anonymized Logs in Finder not added"),
     }
     app.set_menu(menu)?;
     Ok(())
