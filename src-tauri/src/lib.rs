@@ -4,6 +4,7 @@ mod auth;
 mod cache;
 mod clipboard;
 pub mod control;
+mod covers;
 mod dock;
 mod hashes;
 mod internal;
@@ -37,9 +38,15 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(engine.clone())
+        // cover images from disk (covers.rs); the answer comes from a spawned task
+        .register_asynchronous_uri_scheme_protocol("cover", |_ctx, request, responder| {
+            covers::handle(request.uri().path().to_string(), responder)
+        })
         .setup(|app| {
             // setup runs on the main thread: the media controls live there (see media.rs)
             media::init(app.handle());
+            // the 30-day cover TTL sweep, at most once a day, off the main thread
+            tauri::async_runtime::spawn_blocking(covers::sweep_at_launch);
             library::attach(app.handle().clone());
             // the local MCP server, when it's on in Settings
             tauri::async_runtime::spawn(mcp::start_if_enabled());
