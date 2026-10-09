@@ -1,5 +1,5 @@
 // Which path a player command takes: the in-app player ("Here") directly, or the remote path
-// (the playback commands in Rust, for another device).
+// (the playback commands in Rust: a connect-state command for another device).
 
 /** True when deviceId is the in-app player and it's ready (connected; maybe not active). */
 export const isEngineDevice = (engine, deviceId) =>
@@ -14,3 +14,25 @@ export const isLocal = (engine, deviceId, activeId) => isEngineDevice(engine, de
 
 /** Volume: how long a drag must pause before a send, and how long polls keep their hands off after. */
 export const volumeTiming = (local) => (local ? { quietMs: 30, lagMs: 1000 } : { quietMs: 200, lagMs: 2500 });
+
+/** The UI's name for each action in a `NOT_AVAILABLE_REMOTE: <action> on other devices` error (Rust control.rs, internal.rs). */
+const ACTIONS = {
+  pause: "Pause",
+  resume: "Play",
+  play: "Play",
+  next: "Next",
+  previous: "Previous",
+  seek: "Seek",
+  shuffle: "Shuffle",
+  repeat: "Repeat",
+  volume: "Volume",
+  transfer: "Moving playback",
+  queue: "Add to queue",
+};
+
+/** The toast for a command another device refused: "<Action> isn't available on <device>"; null for any other error. */
+export function refusedText(err, device) {
+  const m = /^NOT_AVAILABLE_REMOTE: (.+?) on other devices/.exec(String(err));
+  if (!m) return null;
+  return `${ACTIONS[m[1]] || m[1]} isn't available on ${device || "that device"}`;
+}

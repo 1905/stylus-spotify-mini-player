@@ -1,7 +1,7 @@
 //! The commands the UI calls for lists, search, library and Spotify Connect playback control.
 //! Library, search and detail commands use Spotify's internal endpoints (internal.rs, with the
 //! player's own session). Playback commands go through control.rs: This Mac over Spirc; other
-//! devices give `NOT_AVAILABLE_REMOTE` for now.
+//! devices over connect-state commands (`NOT_AVAILABLE_REMOTE` when the device refuses one).
 //!
 //! Errors starting with `ENGINE_NOT_READY`, `NOT_AVAILABLE_REMOTE` or `BAD_ARGS` are codes the
 //! frontend matches with `startsWith`.
@@ -93,6 +93,7 @@ pub async fn play_context(device_id: String, context_uri: String, track_uri: Opt
 }
 
 /// Append a track URI to the device's up-next queue: a Connect player command to This Mac.
+/// Other devices: `NOT_AVAILABLE_REMOTE` (a remote `add_to_queue` wasn't probed).
 #[tauri::command]
 pub async fn add_to_queue(device_id: String, uri: String) -> Result<(), String> {
     if internal::own_device_id().as_deref() != Some(device_id.as_str()) {
@@ -107,24 +108,28 @@ pub async fn play_on_device(device_id: String, uris: Vec<String>) -> Result<(), 
     control::play(control::Source { uris, ..control::Source::default() }, Some(device_id)).await.map(drop)
 }
 
+/// Resume on `device_id`. This Mac while it isn't the active device: `NO_ACTIVE_DEVICE` (an
+/// inactive Spirc ignores a resume), so the UI falls back to `resume_at`.
 #[tauri::command]
 pub async fn resume(device_id: String) -> Result<(), String> {
-    if internal::own_device_id().as_deref() != Some(device_id.as_str()) {
-        return Err(control::not_available_remote("resume"));
+    if internal::own_device_id().as_deref() == Some(device_id.as_str()) && !control::here_active() {
+        return Err("NO_ACTIVE_DEVICE: This Mac isn't the active device".into());
     }
-    control::transport(Cmd::Resume).await.map(drop)
+    control::transport_on(Cmd::Resume, Some(&device_id)).await.map(drop)
 }
 
 /// Start `uri` at `position_ms` on a device: the way back when a plain resume is refused.
 /// Inside its album/playlist context when there is one, so what plays next stays the same.
 #[tauri::command]
 pub async fn resume_at(device_id: String, context_uri: Option<String>, uri: String, position_ms: u64) -> Result<(), String> {
-    if internal::own_device_id().as_deref() != Some(device_id.as_str()) {
-        return Err(control::not_available_remote("resume"));
-    }
-    let engine = internal::engine().filter(|e| e.is_ready()).ok_or(control::NOT_READY)?;
     let offsettable = |c: &String| c.starts_with("spotify:playlist:") || c.starts_with("spotify:album:");
     let context_uri = context_uri.filter(offsettable);
+    if internal::own_device_id().as_deref() != Some(device_id.as_str()) {
+        let uris = if context_uri.is_none() { vec![uri.clone()] } else { vec![] };
+        let cmd = internal::RemoteCmd::Play { context: context_uri, uris, track: Some(uri), position_ms };
+        return internal::remote_command(&device_id, cmd).await;
+    }
+    let engine = internal::engine().filter(|e| e.is_ready()).ok_or(control::NOT_READY)?;
     let uris = context_uri.is_none().then(|| vec![uri.clone()]);
     let position_ms = position_ms.min(u64::from(u32::MAX)) as u32;
     engine.load(crate::player::LoadSpec { context_uri, uris, track_uri: Some(uri), position_ms, play: true, shuffle: None, repeat: None })

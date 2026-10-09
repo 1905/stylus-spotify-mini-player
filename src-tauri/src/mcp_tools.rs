@@ -292,7 +292,7 @@ fn links_of(links: &Value, tab: &str) -> Value {
 pub fn plain_error(e: &str) -> String {
     if let Some(rest) = e.strip_prefix("NOT_AVAILABLE_REMOTE: ") {
         let action = rest.strip_suffix(" on other devices").unwrap_or(rest);
-        return format!("Not available for other devices: Stylus can't send {action} to another device. It works on This Mac (device \"This Mac\").");
+        return format!("Not available for other devices: that device doesn't take {action} from Stylus. It works on This Mac (device \"This Mac\").");
     }
     if e.starts_with("ENGINE_NOT_READY") {
         return "Stylus's player isn't connected yet: try again in a moment.".into();
@@ -889,7 +889,7 @@ mod tests {
     fn errors_are_sentences() {
         assert_eq!(
             plain_error("NOT_AVAILABLE_REMOTE: pause on other devices"),
-            "Not available for other devices: Stylus can't send pause to another device. It works on This Mac (device \"This Mac\")."
+            "Not available for other devices: that device doesn't take pause from Stylus. It works on This Mac (device \"This Mac\")."
         );
         assert_eq!(plain_error("NO_ACTIVE_DEVICE: Spotify API 404"), crate::control::NO_DEVICE);
         assert_eq!(plain_error("BAD_ARGS: bad repeat mode: x"), "bad repeat mode: x");

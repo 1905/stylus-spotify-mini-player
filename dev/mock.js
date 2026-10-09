@@ -10,6 +10,8 @@
 // artist (The xx artist page open, with its Popular tracks), mix-detail (first Spotify mix open),
 // no-volume (the active device has no remote volume),
 // engine-down (the in-app player failed, picker open),
+// refused (another device plays and refuses every remote command: Rust's NOT_AVAILABLE_REMOTE; the UI toasts
+//   "<Action> isn't available on <device>"),
 // slow (list commands and plays take 2s more: skeletons, the play spinner, "Starting…"),
 // resume (the in-app player is ready, nothing plays, and a saved session exists: session_get returns it and
 //   "Rust" loads it back paused 2.5s after launch, then emits session-restored),
@@ -48,7 +50,7 @@
     "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-down",
-    "slow", "resume", "search-all", "library-all", "playlist", "here",
+    "slow", "resume", "search-all", "library-all", "playlist", "here", "refused",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -731,6 +733,12 @@
   const LOCAL = /^(auth_status|engine_|control_transfer$|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|links_list$|link_remove$)/;
   // commands that can change what the in-app player plays: a player-state follows them
   const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|control_transfer$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
+  // `refused`: the remote commands and their action names in Rust's NOT_AVAILABLE_REMOTE (control.rs, internal.rs)
+  const REMOTE_ACTION = {
+    pause: "pause", resume: "resume", resume_at: "play", next_track: "next", previous_track: "previous", seek: "seek",
+    set_shuffle: "shuffle", set_repeat: "repeat", set_volume: "volume", play_context: "play", play_on_device: "play",
+    transfer_playback: "transfer", add_to_queue: "queue",
+  };
   // `slow`: lists and plays take 2s more
   const SLOW = /^(get_playlists|get_playlist_tracks|get_album_tracks|get_album_info|get_saved_|get_followed_artists|get_top|get_artist|search|liked_count|play_on_device|play_context|local_load|resume|transfer_playback)/;
 
@@ -764,6 +772,9 @@
     // Spotify refuses the player login after the first poll: the engine says needs_login
     if (scenario === "ended" && cmd === "playback_state" && (ended = ended + 1) === 2) setTimeout(() => setEngine("needs_login"), 0);
     if (scenario === "slow" && SLOW.test(cmd)) await sleep(2000);
+    if (scenario === "refused" && REMOTE_ACTION[cmd] && (args.deviceId || state.deviceId) !== RUN_ID) {
+      return reject(`NOT_AVAILABLE_REMOTE: ${REMOTE_ACTION[cmd]} on other devices`);
+    }
     try {
       const out = await h(args);
       if (slot) cache.set(slot, clone(out));

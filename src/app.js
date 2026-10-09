@@ -10,7 +10,7 @@ import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
-import { isEngineDevice, isLocal, volumeTiming } from "./lib/route.js";
+import { isEngineDevice, isLocal, refusedText, volumeTiming } from "./lib/route.js";
 import { originUri, offsettable } from "./lib/source.js";
 import { rubberBand, rubberRaw, WHEEL_SCALE } from "./lib/pan.js";
 import { PENDING_MS, createPending } from "./lib/pending.js";
@@ -1204,7 +1204,7 @@ async function withDeviceNow(fn) {
     if (!isCode(e, "NO_ACTIVE_DEVICE")) {
       // This Mac refuses a next/previous that would only stop playback (Rust player.rs): its sentence as is
       if (/^Nothing (after|before) this track/.test(String(e))) toast(String(e));
-      else toast(`Spotify didn't respond: ${reason(e)}`);
+      else toast(refusedText(e, state.device && labelOf(state.device)) || `Spotify didn't respond: ${reason(e)}`);
       return false;
     }
   }
@@ -2182,6 +2182,7 @@ async function pickDevice(d) {
   let failed = null;
   // the error is handled here, not by withDevice: rediscovering would retry a device that's gone
   // This Mac: the local transfer (it loads what plays elsewhere); another device: transfer_playback
+  // (a connect-state transfer in Rust control.rs)
   const move = isHere(d, engine)
     ? () => invoke("control_transfer", { device: d.id, play: state.isPlaying })
     : () => invoke("transfer_playback", { deviceId: d.id, play: state.isPlaying });
@@ -2203,6 +2204,10 @@ async function pickDevice(d) {
     }
     if (isCode(failed, "NO_ACTIVE_DEVICE") || /\b404\b/.test(String(failed))) {
       toast(`${d.name} isn't available any more`);
+      refreshDevices();
+    } else if (refusedText(failed, labelOf(d))) {
+      // the device refused the transfer (a 4xx, Rust internal.rs remote_error): it may be gone
+      toast(refusedText(failed, labelOf(d)));
       refreshDevices();
     } else {
       toast(`Spotify didn't respond: ${reason(failed)}`);

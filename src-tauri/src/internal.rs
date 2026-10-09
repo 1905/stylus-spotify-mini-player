@@ -779,6 +779,153 @@ pub fn queue_command(uri: &str) -> Value {
     json!({"command": {"endpoint": "add_to_queue", "track": {"uri": uri, "metadata": {"is_queued": "true"}, "provider": "queue"}}})
 }
 
+// ---- remote control: connect-state commands to another device -------------------------------
+// The bodies are the ones that passed the P1 probe (plans/2026-10-09-drop-web-api/spike-connect-state.md).
+
+pub use crate::session::Repeat as RepeatMode;
+
+/// A command for another Connect device.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemoteCmd {
+    Pause,
+    Resume,
+    Next,
+    Previous,
+    Seek(u64),
+    Shuffle(bool),
+    Repeat(RepeatMode),
+    /// Percent, 0–100.
+    Volume(u8),
+    /// A context (from `track` when given) or a track list (from `track`, else the first).
+    Play { context: Option<String>, uris: Vec<String>, track: Option<String>, position_ms: u64 },
+}
+
+impl RemoteCmd {
+    /// The command's name in a `NOT_AVAILABLE_REMOTE` error.
+    pub fn action(&self) -> &'static str {
+        match self {
+            RemoteCmd::Pause => "pause",
+            RemoteCmd::Resume => "resume",
+            RemoteCmd::Next => "next",
+            RemoteCmd::Previous => "previous",
+            RemoteCmd::Seek(_) => "seek",
+            RemoteCmd::Shuffle(_) => "shuffle",
+            RemoteCmd::Repeat(_) => "repeat",
+            RemoteCmd::Volume(_) => "volume",
+            RemoteCmd::Play { .. } => "play",
+        }
+    }
+}
+
+/// A player command body: `{"command": {"endpoint": ..., <fields>}}`.
+fn player_command(endpoint: &str, fields: Value) -> (reqwest::Method, String, Value) {
+    let mut cmd = json!({ "endpoint": endpoint });
+    if let (Some(c), Value::Object(f)) = (cmd.as_object_mut(), fields) {
+        c.extend(f);
+    }
+    (reqwest::Method::POST, "player/command".into(), json!({ "command": cmd }))
+}
+
+/// The requests (method, path kind under `/connect-state/v1/`, body) that send `cmd`, in order.
+/// Repeat takes two (context flag, track flag). Empty = not sendable.
+pub fn command_bodies(cmd: &RemoteCmd) -> Vec<(reqwest::Method, String, Value)> {
+    let flag = |endpoint: &str, on: bool| player_command(endpoint, json!({ "value": on }));
+    match cmd {
+        RemoteCmd::Pause => vec![player_command("pause", json!({}))],
+        RemoteCmd::Resume => vec![player_command("resume", json!({}))],
+        RemoteCmd::Next => vec![player_command("skip_next", json!({}))],
+        RemoteCmd::Previous => vec![player_command("skip_prev", json!({}))],
+        RemoteCmd::Seek(ms) => vec![player_command("seek_to", json!({ "value": ms }))],
+        RemoteCmd::Shuffle(on) => vec![flag("set_shuffling_context", *on)],
+        // track off before context off, context on before track on: no step shows a mode nobody asked for
+        RemoteCmd::Repeat(RepeatMode::Off) => vec![flag("set_repeating_track", false), flag("set_repeating_context", false)],
+        RemoteCmd::Repeat(RepeatMode::Context) => vec![flag("set_repeating_context", true), flag("set_repeating_track", false)],
+        RemoteCmd::Repeat(RepeatMode::Track) => vec![flag("set_repeating_context", true), flag("set_repeating_track", true)],
+        RemoteCmd::Volume(p) => {
+            let level = (u32::from((*p).min(100)) * 65535 + 50) / 100;
+            vec![(reqwest::Method::PUT, "connect/volume".into(), json!({ "volume": level }))]
+        }
+        RemoteCmd::Play { context, uris, track, position_ms } => {
+            let (ctx, skip_to) = match context {
+                Some(c) => (json!({ "uri": c, "url": format!("context://{c}") }), track.as_ref().map(|t| json!({ "track_uri": t }))),
+                None => {
+                    if uris.is_empty() {
+                        return vec![];
+                    }
+                    let index = track.as_ref().and_then(|t| uris.iter().position(|u| u == t)).unwrap_or(0);
+                    let tracks: Vec<Value> = uris.iter().map(|u| json!({ "uri": u })).collect();
+                    (json!({ "pages": [{ "tracks": tracks }] }), Some(json!({ "track_index": index })))
+                }
+            };
+            let mut options = json!({});
+            if let Some(s) = skip_to {
+                options["skip_to"] = s;
+            }
+            // not probed in P1: librespot's PlayOptions reads it (dealer/protocol/request.rs)
+            if *position_ms > 0 {
+                options["seek_to"] = json!(position_ms);
+            }
+            let mut fields = json!({ "context": ctx });
+            if options.as_object().is_some_and(|o| !o.is_empty()) {
+                fields["options"] = options;
+            }
+            vec![player_command("play", fields)]
+        }
+    }
+}
+
+/// A failed remote request as the caller sees it: a 4xx "refused" answer (400, 403, 404, 405, 501)
+/// is `NOT_AVAILABLE_REMOTE`; other failures (transport, 5xx, 429) keep their text.
+pub fn remote_error(action: &str, err: String) -> String {
+    match err.strip_prefix("HTTP ").and_then(|r| r.get(..3)) {
+        Some("400" | "403" | "404" | "405" | "501") => crate::control::not_available_remote(action),
+        _ => err,
+    }
+}
+
+/// This Mac's id and the API, for a request from This Mac to another device.
+fn remote_caller() -> Result<(String, Api), String> {
+    let own = own_device_id().ok_or_else(|| not_ready("the player isn't connected"))?;
+    Ok((own, Api::current()?))
+}
+
+/// One connect-state request from This Mac to `target`; a refusal is logged with its HTTP text.
+async fn remote_send(api: &Api, own: &str, target: &str, action: &str, (method, kind, body): (reqwest::Method, String, Value)) -> Result<(), String> {
+    let path = format!("/connect-state/v1/{kind}/from/{own}/to/{target}");
+    let res = api.spclient(method, &path, Some("application/json"), None, Some(body.to_string().into_bytes())).await;
+    res.map(drop).map_err(|e| {
+        log::warn!(target: LOG, "remote {action} to {target}: {e}");
+        remote_error(action, e)
+    })
+}
+
+/// Sends `cmd` to the Connect device `target`. Ok = Spotify took it (HTTP 200 + ack_id); the
+/// device decides later, and the UI's poll shows what it did.
+pub async fn remote_command(target: &str, cmd: RemoteCmd) -> Result<(), String> {
+    let action = cmd.action();
+    let reqs = command_bodies(&cmd);
+    if reqs.is_empty() {
+        return Err(crate::control::not_available_remote(action));
+    }
+    let (own, api) = remote_caller()?;
+    for req in reqs {
+        remote_send(&api, &own, target, action, req).await?;
+    }
+    Ok(())
+}
+
+/// The transfer body: the target restores the play/pause state of the device it takes over.
+pub fn transfer_body() -> Value {
+    json!({ "transfer_options": { "restore_paused": "restore" } })
+}
+
+/// Moves playback from the active device to `target` (the `SpClient::transfer` endpoint, sent
+/// with the same headers as the other commands so a refusal reads the same).
+pub async fn remote_transfer(target: &str) -> Result<(), String> {
+    let (own, api) = remote_caller()?;
+    remote_send(&api, &own, target, "transfer", (reqwest::Method::POST, "connect/transfer".into(), transfer_body())).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -993,6 +1140,90 @@ mod tests {
         let c = queue_command("spotify:track:x");
         assert_eq!(c["command"]["endpoint"], "add_to_queue");
         assert_eq!(c["command"]["track"]["uri"], "spotify:track:x");
+    }
+
+    /// The one request of `cmd` as (method, path kind, body).
+    fn one(cmd: RemoteCmd) -> (String, String, Value) {
+        let mut reqs = command_bodies(&cmd);
+        assert_eq!(reqs.len(), 1, "{cmd:?}");
+        let (m, k, b) = reqs.remove(0);
+        (m.to_string(), k, b)
+    }
+
+    fn cmd_json(s: &str) -> (String, String, Value) {
+        ("POST".into(), "player/command".into(), serde_json::from_str(s).unwrap())
+    }
+
+    // the bodies that passed the P1 probe (spike-connect-state.md, "Bodies")
+    #[test]
+    fn remote_transport_bodies_match_the_spike() {
+        assert_eq!(one(RemoteCmd::Pause), cmd_json(r#"{"command":{"endpoint":"pause"}}"#));
+        assert_eq!(one(RemoteCmd::Resume), cmd_json(r#"{"command":{"endpoint":"resume"}}"#));
+        assert_eq!(one(RemoteCmd::Next), cmd_json(r#"{"command":{"endpoint":"skip_next"}}"#));
+        assert_eq!(one(RemoteCmd::Previous), cmd_json(r#"{"command":{"endpoint":"skip_prev"}}"#));
+        assert_eq!(one(RemoteCmd::Seek(60000)), cmd_json(r#"{"command":{"endpoint":"seek_to","value":60000}}"#));
+        assert_eq!(one(RemoteCmd::Shuffle(true)), cmd_json(r#"{"command":{"endpoint":"set_shuffling_context","value":true}}"#));
+        assert_eq!(one(RemoteCmd::Shuffle(false)), cmd_json(r#"{"command":{"endpoint":"set_shuffling_context","value":false}}"#));
+    }
+
+    #[test]
+    fn remote_repeat_sends_both_flags() {
+        let bodies = |m: RepeatMode| command_bodies(&RemoteCmd::Repeat(m)).into_iter().map(|(_, _, b)| b).collect::<Vec<_>>();
+        let flag = |e: &str, on: bool| json!({"command": {"endpoint": e, "value": on}});
+        assert_eq!(bodies(RepeatMode::Off), vec![flag("set_repeating_track", false), flag("set_repeating_context", false)]);
+        assert_eq!(bodies(RepeatMode::Context), vec![flag("set_repeating_context", true), flag("set_repeating_track", false)]);
+        assert_eq!(bodies(RepeatMode::Track), vec![flag("set_repeating_context", true), flag("set_repeating_track", true)]);
+        assert!(command_bodies(&RemoteCmd::Repeat(RepeatMode::Track)).iter().all(|(m, k, _)| *m == reqwest::Method::POST && k == "player/command"));
+    }
+
+    #[test]
+    fn remote_volume_is_a_put_of_0_to_65535() {
+        assert_eq!(one(RemoteCmd::Volume(50)), ("PUT".into(), "connect/volume".into(), json!({"volume": 32768})));
+        assert_eq!(one(RemoteCmd::Volume(100)).2, json!({"volume": 65535}));
+        assert_eq!(one(RemoteCmd::Volume(0)).2, json!({"volume": 0}));
+        assert_eq!(one(RemoteCmd::Volume(250)).2, json!({"volume": 65535}), "capped at 100 %");
+    }
+
+    #[test]
+    fn remote_play_bodies_match_the_spike() {
+        let album = "spotify:album:6N9PS4QXF1D0OWPk0Sxtb4";
+        let ctx = RemoteCmd::Play { context: Some(album.into()), uris: vec![], track: Some("spotify:track:4uLU6hMCjMI75M1A2tKUQC".into()), position_ms: 0 };
+        assert_eq!(
+            one(ctx),
+            cmd_json(r#"{"command":{"context":{"uri":"spotify:album:6N9PS4QXF1D0OWPk0Sxtb4","url":"context://spotify:album:6N9PS4QXF1D0OWPk0Sxtb4"},"endpoint":"play","options":{"skip_to":{"track_uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC"}}}}"#)
+        );
+        let uris = vec!["spotify:track:4uLU6hMCjMI75M1A2tKUQC".to_string(), "spotify:track:6aiKIFjPwa3UvDCD5ecoJj".to_string()];
+        let list = RemoteCmd::Play { context: None, uris: uris.clone(), track: Some(uris[1].clone()), position_ms: 0 };
+        assert_eq!(
+            one(list),
+            cmd_json(r#"{"command":{"context":{"pages":[{"tracks":[{"uri":"spotify:track:4uLU6hMCjMI75M1A2tKUQC"},{"uri":"spotify:track:6aiKIFjPwa3UvDCD5ecoJj"}]}]},"endpoint":"play","options":{"skip_to":{"track_index":1}}}}"#)
+        );
+        // no track: the context from its top (no options); a list from its first
+        let top = one(RemoteCmd::Play { context: Some(album.into()), uris: vec![], track: None, position_ms: 0 }).2;
+        assert!(top["command"].get("options").is_none());
+        assert_eq!(one(RemoteCmd::Play { context: None, uris: uris.clone(), track: None, position_ms: 0 }).2["command"]["options"], json!({"skip_to": {"track_index": 0}}));
+        // a start position: options.seek_to
+        let at = one(RemoteCmd::Play { context: None, uris: uris.clone(), track: None, position_ms: 61_000 }).2;
+        assert_eq!(at["command"]["options"]["seek_to"], 61_000);
+        // nothing to play: no request
+        assert!(command_bodies(&RemoteCmd::Play { context: None, uris: vec![], track: None, position_ms: 0 }).is_empty());
+    }
+
+    #[test]
+    fn remote_transfer_body_matches_the_spike() {
+        assert_eq!(transfer_body(), json!({"transfer_options": {"restore_paused": "restore"}}));
+    }
+
+    #[test]
+    fn remote_refusals_are_not_available_remote() {
+        for s in [400, 403, 404, 405, 501] {
+            assert_eq!(remote_error("pause", http_error(s, b"no")), "NOT_AVAILABLE_REMOTE: pause on other devices", "{s}");
+        }
+        // other failures keep their own text
+        assert_eq!(remote_error("pause", http_error(500, b"boom")), "HTTP 500: boom");
+        assert_eq!(remote_error("pause", http_error(429, b"")), "HTTP 429: ");
+        assert_eq!(remote_error("pause", "transport: timed out".into()), "transport: timed out");
+        assert_eq!(remote_error("pause", "ENGINE_NOT_READY: x".into()), "ENGINE_NOT_READY: x");
     }
 
     #[test]
