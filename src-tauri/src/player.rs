@@ -1723,8 +1723,8 @@ mod tests {
         let s = |secs: u64| Some(Duration::from_secs(secs));
         assert_eq!(restore_gate(None, "mac", s(0)), Gate::NoState, "no cluster yet: wait, never guess");
         assert_eq!(restore_gate(None, "mac", None), Gate::NoState, "no session yet");
-        assert_eq!(restore_gate(None, "mac", s(14)), Gate::NoState, "still waiting for a cluster");
-        assert_eq!(restore_gate(None, "mac", s(15)), Gate::Quiet, "no cluster for 15 s: nothing else is active");
+        assert_eq!(restore_gate(None, "mac", s(4)), Gate::NoState, "still waiting for a cluster");
+        assert_eq!(restore_gate(None, "mac", s(5)), Gate::Quiet, "no cluster for 5 s: nothing else is active");
         assert_eq!(restore_gate(Some(&cluster("phone", true, false)), "mac", s(30)), Gate::OtherDevicePlaying, "a cluster always wins");
         assert_eq!(restore_gate(Some(&cluster("", false, false)), "mac", s(1)), Gate::Load, "no active device");
         assert_eq!(restore_gate(Some(&cluster("mac", true, false)), "mac", s(1)), Gate::Load, "this Mac is the active one");
@@ -1738,8 +1738,8 @@ mod tests {
         use librespot_protocol::connect::Cluster;
         let s = |secs: u64| Some(Duration::from_secs(secs));
         assert!(cluster_or_quiet(None, None).is_none(), "no session");
-        assert!(cluster_or_quiet(None, s(7)).is_none(), "the first cluster may still come");
-        let quiet = cluster_or_quiet(None, s(8)).expect("an empty cluster after 8 s");
+        assert!(cluster_or_quiet(None, s(3)).is_none(), "the first cluster may still come");
+        let quiet = cluster_or_quiet(None, s(4)).expect("an empty cluster after 4 s");
         assert!(quiet.active_device_id.is_empty() && quiet.device.is_empty());
         assert_eq!(crate::pb::cluster_state(&quiet, 0), None, "nothing active");
         let own = crate::internal::with_own_device(crate::pb::devices(&quiet), "mac", &quiet.active_device_id, 50);
