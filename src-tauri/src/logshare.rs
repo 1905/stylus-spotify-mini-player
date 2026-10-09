@@ -351,7 +351,7 @@ pub fn export<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let h = Header {
         app: app.package_info().version.to_string(),
         macos: command_line("sw_vers", &["-productVersion"]).unwrap_or_else(|| "unknown".into()),
-        made_at: command_line("date", &["-u", "+%Y-%m-%d %H:%M:%SZ"]).unwrap_or_else(|| "unknown".into()),
+        made_at: crate::applog::stamp(),
     };
     let out_dir = dir.join("anonymized-logs");
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("create {}: {e}", out_dir.display()))?;

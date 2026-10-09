@@ -147,7 +147,7 @@ fn ui_target(area: Option<&str>) -> &'static str {
 }
 
 /// Local time is not worth a dependency: UTC date and time with millis.
-fn stamp() -> String {
+pub(crate) fn stamp() -> String {
     format_stamp(crate::paths::now_ms())
 }
 
