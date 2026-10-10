@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseLink, looksLikeLink } from "./links.js";
+import { parseLink, looksLikeLink, trackLink } from "./links.js";
 
 describe("parseLink", () => {
   it("reads share links", () => {
@@ -30,5 +30,18 @@ describe("parseLink", () => {
     expect(looksLikeLink("https://spotify.link/abc")).toBe(true);
     expect(looksLikeLink("https://open.spotify.com/show/x")).toBe(true);
     expect(looksLikeLink("bonobo radio")).toBe(false);
+  });
+});
+
+describe("trackLink", () => {
+  it("gives the open.spotify.com link of a track", () => {
+    expect(trackLink("spotify:track:7c378mlmubSu7NGkLFa4sN")).toBe("https://open.spotify.com/track/7c378mlmubSu7NGkLFa4sN");
+    expect(trackLink("https://open.spotify.com/track/7c378mlmubSu7NGkLFa4sN?si=a")).toBe("https://open.spotify.com/track/7c378mlmubSu7NGkLFa4sN");
+  });
+
+  it("gives null for anything else", () => {
+    for (const bad of ["spotify:local:Artist:Album:Song:180", "spotify:local:Artist:track:ABCDEFGHIJKLMNOPQRSTUV:180", "spotify:episode:7c378mlmubSu7NGkLFa4sN", "spotify:album:6dVIqQ8qmQ5GBnJ9shOYGE", "spotify:track:short", "", null, undefined]) {
+      expect(trackLink(bad), String(bad)).toBe(null);
+    }
   });
 });

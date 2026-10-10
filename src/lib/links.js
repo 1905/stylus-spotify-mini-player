@@ -26,5 +26,12 @@ export function parseLink(text) {
   return null;
 }
 
+/** The open.spotify.com link for a track uri, or null for anything else. */
+export function trackLink(uri) {
+  if (String(uri || "").trim().startsWith("spotify:local:")) return null; // a local file's fields can look like track:<id>
+  const p = parseLink(uri);
+  return p?.kind === "track" ? `https://open.spotify.com/track/${p.id}` : null;
+}
+
 /** Text that looks like an attempt at a Spotify link (so Search says it can't open it, not "no results"). */
 export const looksLikeLink = (text) => /^(https?:\/\/)?(open|play)\.spotify\.com\/|^spotify:|^https?:\/\/spotify\.link\//i.test(String(text || "").trim());
