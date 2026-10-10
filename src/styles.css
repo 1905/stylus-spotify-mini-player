@@ -875,7 +875,7 @@ body:has(.stage:not(.is-playing)) .bg {
 
 /* ---------- transport ---------- */
 
-/* the scrub bar runs gutter to gutter; the controls: playlist left, transport centred, heart and volume right */
+/* the scrub bar runs gutter to gutter; the controls: playlist and song link left, transport centred, heart and volume right */
 .transport {
   padding: 30px var(--gutter) 28px;
 }
@@ -959,10 +959,13 @@ body:has(.stage:not(.is-playing)) .bg {
   gap: 10px;
 }
 
-/* the playlist button: its icon, not its hit area, lines up with the scrub's start */
+/* playlist and song link sit at the left end of the control row */
 .controls-lead {
+  display: flex;
+  align-items: center;
   justify-self: start;
-  margin-left: -10px;
+  gap: 4px;
+  margin-left: -10px; /* the icon, not its hit area, lines up with the scrub's start */
 }
 
 .ctl {
