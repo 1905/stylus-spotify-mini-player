@@ -49,12 +49,12 @@ Or download **Stylus.dmg** from [the latest release](https://github.com/1905/sty
 <table>
   <tr>
     <td width="50%" valign="top">
-      <img src="media/focus.png" alt="Focus layout: one centred cover" /><br />
-      <b>Plays on your Mac.</b> A built-in Spotify Connect speaker, shown as "Here" in the app and "This Mac" in your other Spotify apps. Colours follow the album cover; choose a row of covers or a single centred one.
+      <img src="media/focus.png" alt="Focus layout: one centered cover" /><br />
+      <b>Plays on your Mac.</b> A built-in Spotify Connect speaker, shown as "Here" in the app and "This Mac" in your other Spotify apps. Colors follow the album cover. You can choose a row of covers or a single centered one.
     </td>
     <td width="50%" valign="top">
-      <img src="media/library.png" alt="The Library, Albums tab" /><br />
-      <b>Your library, fast.</b> Playlists, Liked Songs, albums, artists with their popular tracks, your top tracks, Made For You mixes, and search. Add any playlist by pasting its Spotify link.
+      <img src="media/library-search.png" alt="Library search: songs found in Liked Songs and an album" /><br />
+      <b>Your library, fast.</b> Playlists, Liked Songs, albums, artists with their popular tracks, your top tracks and Made For You mixes. Search the whole Library, songs inside your playlists included, or filter one list. The song that plays now is marked, and any row plays from the Library without closing it. Covers stay on disk, so the Library opens at once. To add any playlist, paste its Spotify link.
     </td>
   </tr>
   <tr>
@@ -102,11 +102,11 @@ Other clients (`mcpServers` in their config file):
 { "mcpServers": { "stylus": { "type": "http", "url": "http://127.0.0.1:5590/mcp", "headers": { "Authorization": "Bearer <key>" } } } }
 ```
 
-The copied text already contains your key. **Copy skill** gives a short instruction file for agents; save it as `~/.claude/skills/stylus/SKILL.md`.
+The copied text already contains your key. **Copy skill** gives a short instruction file for agents. Save it as `~/.claude/skills/stylus/SKILL.md`.
 
 **Tools (31):** `now_playing`, `search`, `play`, `pause`, `resume`, `next`, `previous`, `seek`, `set_volume`, `volume_step`, `mute`, `unmute`, `set_shuffle`, `set_repeat`, `queue_add`, `get_queue`, `list_playlists`, `list_mixes`, `playlist_tracks`, `list_albums`, `album_tracks`, `list_artists`, `liked_songs`, `recently_played`, `top`, `artist`, `devices`, `transfer`, `like`, `unlike`, `open_link`. Names such as a playlist or a mix are matched against your library first, then against Spotify search.
 
-**Security:** the server listens on `127.0.0.1` only and runs only while Stylus is open with the setting on. Every request must carry the key; requests without it get `401`. Requests from web pages (with a browser `Origin`) get `403`. **Reset key** in Settings makes a new key and disconnects old clients. Details: [docs/mcp.md](docs/mcp.md).
+**Security:** the server listens on `127.0.0.1` only and runs only while Stylus is open with the setting on. Every request must carry the key. Requests without it get `401`. Requests from web pages (with a browser `Origin`) get `403`. **Reset key** in Settings makes a new key and disconnects old clients. Details: [docs/mcp.md](docs/mcp.md).
 
 </details>
 
