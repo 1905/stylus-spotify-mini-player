@@ -39,6 +39,9 @@ jobs:
       - name: Frontend tests
         run: npx vitest run
 
+      - name: Release script tests
+        run: python3 -m unittest discover -s scripts
+
       - name: Backend tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 

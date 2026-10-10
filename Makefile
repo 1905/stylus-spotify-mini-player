@@ -14,7 +14,7 @@ BIN      := $(OUT)/$(BIN_NAME)
 OLD_APP_IDS   := com.kass.needle com.kass.rustspotify
 OLD_BIN_NAMES := Needle needle rust-spotify
 
-.PHONY: install run stop sync test dmg
+.PHONY: install run stop sync test dmg release
 
 ## sync: copy the source to the Air (no node_modules, no target, no git)
 sync:
@@ -53,6 +53,12 @@ dmg: sync
 	mkdir -p $(OUT)/dmg
 	rsync -a "$(AIR):/tmp/stylus-dmg/$(APP_NAME).dmg" $(OUT)/dmg/
 	shasum -a 256 $(OUT)/dmg/$(APP_NAME).dmg
+
+## release: version bump, tag, DMG, release notes and Homebrew cask in one run (scripts/release.py).
+## V=0.3.1 NOTES=<file of "- " highlight lines> [DMG=air: build the DMG on the Air, not in CI] [DRY=1: change nothing]
+release:
+	@test -n "$(V)" -a -n "$(NOTES)" || { echo 'usage: make release V=0.3.1 NOTES=/tmp/notes.md [DMG=air] [DRY=1]'; exit 2; }
+	python3 scripts/release.py $(V) --notes $(NOTES) --dmg $(or $(DMG),ci) $(if $(DRY),--dry-run)
 
 ## stop: quit every copy, installed (binary may be named Stylus) or dev, new name or old (two copies = two "This Mac" speakers with one device id)
 stop:
