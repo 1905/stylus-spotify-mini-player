@@ -230,6 +230,11 @@ button {
   color: var(--live);
 }
 
+.mini-share.is-done,
+.mini-share.is-done:hover:not(:disabled) {
+  color: var(--live);
+}
+
 /* ---------- progress ---------- */
 
 .mini-bar {

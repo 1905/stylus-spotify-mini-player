@@ -1,6 +1,7 @@
 // The menu-bar mini player (Rust tray.rs, src/mini.js): what the main window sends it, when, and
 // what the popover derives from it. The main window stays the only brain; this is its summary.
 import { drifted } from "./media.js";
+import { trackLink } from "./links.js";
 
 /** A position this far off the expected one is a jump (a seek, a restart): the popover needs it. */
 export const MINI_DRIFT_MS = 3000;
@@ -9,6 +10,7 @@ export const MINI_DRIFT_MS = 3000;
  * The mini_push payload. now: the track on screen (a pending play's preview counts), status: the
  * main window's headline when no song shows ("Nothing playing", or "" while loading). sentAt: Date.now(),
  * so the popover runs the bar on from there. volume null = no volume control; heart null = none.
+ * link: now's open.spotify.com link in mode "track", else null (also for a local file or an episode).
  */
 export function miniPayload({ mode, now, status, isPlaying, pending, skipping, loading, positionMs, volume, heart, device }) {
   const t = mode === "track" || loading ? now : null;
@@ -27,11 +29,12 @@ export function miniPayload({ mode, now, status, isPlaying, pending, skipping, l
     sentAt: Date.now(),
     volume: volume == null ? null : Math.round(volume),
     heart: heart == null ? null : heart,
+    link: (mode === "track" && t && trackLink(t.uri)) || null,
     device: device || null,
   };
 }
 
-const KEYS = ["mode", "title", "artist", "cover", "status", "playing", "pending", "skipping", "loading", "durationMs", "volume", "heart", "device"];
+const KEYS = ["mode", "title", "artist", "cover", "status", "playing", "pending", "skipping", "loading", "durationMs", "volume", "heart", "link", "device"];
 
 /** Should next replace prev? On any change but the position, and on a position jump. */
 export function miniChanged(prev, next) {

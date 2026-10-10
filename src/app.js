@@ -17,7 +17,7 @@ import { PENDING_MS, createPending } from "./lib/pending.js";
 import { skeletonRows, skeletonTiles } from "./lib/skeleton.js";
 import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
-import { parseLink, looksLikeLink } from "./lib/links.js";
+import { parseLink, looksLikeLink, trackLink } from "./lib/links.js";
 import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
 import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
@@ -1093,6 +1093,8 @@ function renderChrome() {
   const label = REPEAT_LABEL[state.repeat] || REPEAT_LABEL.off;
   repeat.setAttribute("aria-label", label);
   repeat.title = label;
+
+  $("shareBtn").hidden = !song || !trackLink(shownTrack()?.uri);
 
   const heart = $("heartBtn");
   const t = state.now;
@@ -2715,6 +2717,18 @@ async function copyMcp(kind) {
     // await above already used it up (NotAllowedError)
     await invoke("copy_text", { text });
     toast(`Copied: ${what}`);
+  } catch (e) {
+    toast(`Couldn't copy: ${reason(e)}`);
+  }
+}
+
+/** Copy the open.spotify.com link of the song on screen (a pending play's song, too). */
+async function copySongLink() {
+  const text = trackLink(shownTrack()?.uri);
+  if (!text) return;
+  try {
+    await invoke("copy_text", { text });
+    toast("Copied: song link");
   } catch (e) {
     toast(`Couldn't copy: ${reason(e)}`);
   }
@@ -4537,6 +4551,7 @@ async function boot() {
   $("scrub").addEventListener("keydown", seekKey);
   $("shuffleBtn").addEventListener("click", toggleShuffle);
   $("repeatBtn").addEventListener("click", cycleRepeat);
+  $("shareBtn").addEventListener("click", copySongLink);
   $("heartBtn").addEventListener("click", toggleSaved);
   $("volBtn").addEventListener("click", onVolBtn);
   $("volSlider").addEventListener("pointerdown", volumeDown);

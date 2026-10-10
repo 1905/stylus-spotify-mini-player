@@ -4,7 +4,8 @@
 // Scenario from ?s= : playing (default), paused, pending (a play starting), skipping (next on its way),
 // loading (a new play's preview), saved (heart on), remote (plays on "Kitchen"), long (long titles),
 // no-volume, ad, idle (nothing playing), login (logged out), nocover (the cover fails to load).
-// QA hook: window.__mini = { scenario, state, calls, push }: calls = every invoke ({cmd, args}).
+// QA hook: window.__mini = { scenario, state, calls, push, handlers }: calls = every invoke ({cmd, args});
+// replace a handlers entry to fake a result (e.g. a copy_text that throws).
 (function () {
   "use strict";
 
@@ -13,8 +14,8 @@
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
 
   const TRACKS = [
-    { name: "Do You Mind? - Bonus", artists: "The xx", cover: "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a", duration_ms: 217186 },
-    { name: "Intro", artists: "The xx", cover: "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a", duration_ms: 127880 },
+    { uri: "spotify:track:5g9gehXKpP3X9pbxZqrnYc", name: "Do You Mind? - Bonus", artists: "The xx", cover: "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a", duration_ms: 217186 },
+    { uri: "spotify:track:2usrT8QIbIk9y0NEtQwS4j", name: "Intro", artists: "The xx", cover: "https://i.scdn.co/image/ab67616d0000b273789657ec664daa222cab1e5a", duration_ms: 127880 },
   ];
   if (scenario === "long") {
     TRACKS[0] = { ...TRACKS[0], name: "Everything In Its Right Place (Live From The Basement, Remastered 2024)", artists: "Radiohead, Thom Yorke, Jonny Greenwood, Ed O'Brien" };
@@ -55,6 +56,7 @@
       sentAt: (state.sentAt = Date.now()),
       volume: state.volume,
       heart: state.heart,
+      link: state.mode === "track" ? `https://open.spotify.com/track/${TRACKS[at].uri.split(":")[2]}` : null,
       device: state.device,
     };
   }
@@ -97,6 +99,7 @@
     mini_get: () => payload(),
     mini_command: (args) => command(args),
     mini_hide: () => {},
+    copy_text: () => null,
   };
 
   window.__TAURI__ = {
@@ -104,7 +107,8 @@
       invoke(cmd, args) {
         calls.push({ cmd, args });
         const h = handlers[cmd];
-        return h ? Promise.resolve(h(args || {})) : Promise.reject(`mock: unknown command ${cmd}`);
+        // a throwing handler rejects, as a Rust Err does
+        return h ? new Promise((ok) => ok(h(args || {}))) : Promise.reject(`mock: unknown command ${cmd}`);
       },
     },
     event: {
@@ -114,5 +118,5 @@
       },
     },
   };
-  window.__mini = { scenario, state, calls, push };
+  window.__mini = { scenario, state, calls, push, handlers };
 })();
