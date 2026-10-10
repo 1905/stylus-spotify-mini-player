@@ -1541,6 +1541,107 @@ body:has(.stage:not(.is-playing)) .bg {
   text-align: right;
 }
 
+/* Library rows: the number cell holds the number, the "playing" bars and the hover play button, one at a time */
+.row-track.is-lib .row-num {
+  display: grid;
+  justify-items: end;
+  align-items: center;
+}
+
+.row-track.is-lib .row-num > * {
+  grid-area: 1 / 1;
+}
+
+.row-eq,
+.row-hplay {
+  display: none;
+}
+
+.row-track.is-playing {
+  background: rgba(246, 244, 248, 0.1);
+}
+
+.row-track.is-playing .row-title {
+  color: var(--live);
+}
+
+.row-track.is-playing .row-n {
+  visibility: hidden;
+}
+
+.row-track.is-playing .row-eq {
+  display: flex;
+}
+
+/* hover or keyboard focus: a play button in place of the number (not on the playing row: its bars stay) */
+.row-track.is-lib:not(.is-playing):is(:hover, :focus-within) .row-n {
+  visibility: hidden;
+}
+
+.row-track.is-lib:not(.is-playing):is(:hover, :focus-within) .row-hplay {
+  display: grid;
+}
+
+/* above the title button, which covers the row */
+.row-hplay {
+  position: relative;
+  z-index: 1;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: -5px;
+  border-radius: 50%;
+  color: var(--fg);
+}
+
+.row-hplay svg {
+  width: 14px;
+  height: 14px;
+}
+
+.row-hplay:hover {
+  background: rgba(246, 244, 248, 0.12);
+}
+
+/* the "playing" bars: small, in the accent; still while paused (and with reduced motion) */
+.row-eq {
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+
+.row-eq i {
+  width: 2.5px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--live);
+  transform-origin: bottom;
+  animation: eq 900ms ease-in-out infinite alternate;
+}
+
+.row-eq i:nth-child(1) {
+  transform: scaleY(0.55);
+  animation-delay: -300ms;
+}
+
+.row-eq i:nth-child(2) {
+  animation-delay: -650ms;
+}
+
+.row-eq i:nth-child(3) {
+  transform: scaleY(0.35);
+  animation-delay: -100ms;
+}
+
+#library.is-paused .row-eq i {
+  animation-play-state: paused;
+}
+
+@keyframes eq {
+  from { transform: scaleY(0.25); }
+  to { transform: scaleY(1); }
+}
+
 /* level 2 header */
 .detail-head {
   display: flex;
