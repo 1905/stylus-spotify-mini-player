@@ -2673,9 +2673,9 @@ body:has(.stage:not(.is-playing)) .bg {
 .lib-add {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
-  padding: 0 12px 12px;
+  padding: 4px 12px 12px;
 }
 
 .lib-add-form {
@@ -2698,6 +2698,28 @@ body:has(.stage:not(.is-playing)) .bg {
 
 .lib-add-input::placeholder {
   color: var(--fg-3);
+}
+
+/* like the Library search pill: focus brightens the fill; no outer ring (it doubled WebKit's own and
+   the list's scroll edge clipped it), a thin inset ring for keyboard focus only */
+.lib-add-input {
+  border: 0;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.lib-add-input:focus {
+  background: rgba(246, 244, 248, 0.12);
+  outline: none;
+}
+
+.lib-add-input:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--fg-3);
+}
+
+[data-input="pointer"] .lib-add-input:focus-visible {
+  box-shadow: none;
 }
 
 .lib-add-go {
