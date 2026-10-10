@@ -97,6 +97,9 @@ button {
   background-position: center;
   filter: blur(34px) saturate(1.5);
   opacity: 0.38;
+  /* its own compositing layer: the blur renders once. Uncomposited, each hover or progress repaint
+     re-blurred only its own rect and left hard-edged blocks of a different tint */
+  transform: translateZ(0);
   transition: background-image 400ms ease, opacity 400ms ease;
 }
 
