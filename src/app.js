@@ -3996,7 +3996,7 @@ function onLibResultsClick(e) {
     (i, row, opts) => {
       const { list } = libHits.songs[i];
       const src = list.source;
-      playFrom(list.tracks, libHits.songs[i].i, { row, name: src.name, origin: src.kind === "liked" ? null : { kind: src.kind, id: src.id }, ...opts });
+      playFrom(list.tracks, libHits.songs[i].i, { row, name: src.name, origin: src.kind === "liked" ? null : { kind: src.kind, id: src.id }, ...opts, stay: true });
     },
   );
 }
