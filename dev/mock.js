@@ -54,7 +54,7 @@
     "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-down",
-    "slow", "resume", "search-all", "library-all", "playlist", "here", "refused", "finished", "fresh",
+    "slow", "resume", "search-all", "library-all", "playlist", "here", "refused", "finished", "fresh", "library-search",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -129,7 +129,7 @@
     state.now.album = "A Deluxe Remastered Anniversary Edition With Bonus Tracks And Demos";
   }
   if (["nothing", "nodevice", "resume", "fresh"].includes(scenario)) state.queue = [];
-  if (scenario === "playlist" || hereLike) {
+  if (scenario === "playlist" || scenario === "library-search" || hereLike) {
     // the 5th song of the first captured playlist, played as that playlist (context)
     const [plId, rows] = Object.entries(fx.playlistTracks || {})[0] || [null, []];
     if (rows.length) {
@@ -839,6 +839,14 @@
     savedSession = restored;
     emit("session-restored", restored);
   }
+  // library-search: the disk cache holds every list of the fixture, as after a session that opened them all
+  if (scenario === "library-search") {
+    cache.set(`${ME}/playlists`, handlers.get_playlists());
+    for (const [id, rows] of Object.entries(fx.playlistTracks || {})) cache.set(`${ME}/playlist:${id}:snap_${id}`, clone(rows));
+    cache.set(`${ME}/liked`, handlers.get_saved_tracks());
+    cache.set(`${ME}/albums`, handlers.get_saved_albums());
+    for (const [id, rows] of Object.entries(fx.albumTracks || {})) cache.set(`${ME}/album:${id}`, clone(rows));
+  }
   if (hereLike) localSeen = true; // the player is up and playing: it has spoken
   window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, mini, calls, cache, store, logs, emit, setEngine, emitLocal };
 
@@ -902,12 +910,20 @@
       }
       if (scenario === "search-all") (await waitFor('#searchResults [data-see="track"]'))?.click();
     }
+    if (scenario === "library-search") {
+      (await waitFor("#libraryBtn"))?.click();
+      const input = await waitFor("#libSearchInput");
+      if (input) {
+        input.value = "toxic";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
     if (scenario === "library-all") {
       (await waitFor("#libraryBtn"))?.click();
       (await waitFor("#libTab-albums:not([hidden])"))?.click();
     }
   }
-  const DRIVEN = ["library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-down"];
+  const DRIVEN = ["library-search", "library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-down"];
   if (DRIVEN.includes(scenario)) {
     window.addEventListener("load", () => setTimeout(drive, 300));
   }

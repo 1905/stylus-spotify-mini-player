@@ -3066,3 +3066,23 @@ body:has(.stage:not(.is-playing)) .bg {
   max-width: 320px;
   margin: 0 12px 10px;
 }
+
+/* the Library search: in the bar at level 1; while it has text, its results replace the tabs and their groups */
+.lib-search {
+  flex: 0 1 360px;
+  min-width: 0;
+  margin-left: -12px;
+}
+
+.sheet.is-searching .lib-tabs,
+.sheet.is-searching #libLevel1 > :not(#libResults) {
+  display: none;
+}
+
+.row-art.is-round {
+  border-radius: 50%;
+}
+
+.row-from {
+  color: var(--fg-3);
+}
