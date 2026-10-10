@@ -58,7 +58,7 @@ dmg: sync
 ## V=0.3.1 NOTES=<file of "- " highlight lines> [DMG=air: build the DMG on the Air, not in CI] [DRY=1: change nothing]
 release:
 	@test -n "$(V)" -a -n "$(NOTES)" || { echo 'usage: make release V=0.3.1 NOTES=/tmp/notes.md [DMG=air] [DRY=1]'; exit 2; }
-	python3 scripts/release.py $(V) --notes $(NOTES) --dmg $(or $(DMG),ci) $(if $(DRY),--dry-run)
+	python3 -u scripts/release.py $(V) --notes $(NOTES) --dmg $(or $(DMG),ci) $(if $(DRY),--dry-run)
 
 ## stop: quit every copy, installed (binary may be named Stylus) or dev, new name or old (two copies = two "This Mac" speakers with one device id)
 stop:
