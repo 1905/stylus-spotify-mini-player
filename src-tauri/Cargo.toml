@@ -1,6 +1,6 @@
 [package]
 name = "stylus"
-version = "0.1.0"
+version = "0.2.0"
 description = "Stylus — a small Spotify player"
 edition = "2021"
 
