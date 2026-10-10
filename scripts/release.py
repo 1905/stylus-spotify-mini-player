@@ -269,10 +269,16 @@ def dmg_air(t, version, body):
     untracked = run(["git", "ls-files", "--others", "--exclude-standard", "--"] + BUILD_PATHS)
     if changed or untracked:
         sys.exit(f"✗ the build sources differ from {t}:\n{changed}\n{untracked}".rstrip())
-    # a CI build of the tag would upload its own DMG over this one
-    r = tag_run(t, 5)
-    if r and r["status"] != "completed":
-        run(["gh", "run", "cancel", str(r["databaseId"]), "-R", REPO], mutate=True)
+    # a CI build of the tag would upload its own DMG over this one: stop it before the upload.
+    # GitHub makes the run some seconds after the tag push, so wait for it to show
+    if not DRY:
+        r = tag_run(t, 90)
+        if not r:
+            sys.exit(f"✗ no build run for {t} after 90 s: a late one could replace the Air DMG")
+        if r["status"] != "completed":
+            run(["gh", "run", "cancel", str(r["databaseId"]), "-R", REPO], mutate=True)
+            while tag_run(t, 5)["status"] != "completed":
+                time.sleep(5)
     run(["make", "dmg"], mutate=True, capture=False)
     if DRY:
         print(f"  [dry-run] gh release create {t} Stylus.dmg Stylus.dmg.sha256")
