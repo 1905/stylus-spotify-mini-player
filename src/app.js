@@ -22,6 +22,7 @@ import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
 import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
+import { isNowRow, matchIndexes, searchLibrary } from "./lib/libsearch.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -1006,6 +1007,7 @@ function setNowArtist(html) {
 }
 
 function renderNow() {
+  markPlaying();
   const t = shownTrack();
   $("stage").classList.toggle("is-loading", isLoading());
   $("stage").classList.toggle("is-starting", (playPending() || restoringNow()) && !shownTrack());
@@ -1048,6 +1050,7 @@ function renderNow() {
 }
 
 function renderChrome() {
+  markPlaying(); // play/pause: the Library's playing mark moves or stops
   const stage = $("stage");
   const mode = state.mode;
   stage.dataset.mode = mode;
@@ -2948,18 +2951,23 @@ function artistLinks(t) {
 /**
  * A playable track row. num: show the position; art: show the cover (album rows skip it, it's the same every row).
  * The title button covers the whole row (CSS), so a click anywhere plays it; the artist links and "+" sit on top.
+ * lib: a Library row: it marks the song that plays now (markPlaying keeps it current), and on hover its number
+ * gives way to a play button that keeps the Library open. from: the list a Library search found it in.
  */
-function trackRow(t, i, { num, art }) {
+function trackRow(t, i, { num, art, lib = false, from = "" }) {
   seenTracks.set(t.uri, t);
   const local = isLocalFile(t.uri);
-  const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}${local ? " is-local" : ""}`;
+  const now = lib && isNowRow(t.uri, state.now);
+  const kind = `${num ? " has-num" : ""}${art ? " has-art" : ""}${local ? " is-local" : ""}${lib ? " is-lib" : ""}${now ? " is-playing" : ""}`;
   const tip = local ? "A local file: play it in Spotify" : "";
+  const hoverPlay = lib && !local ? `<button class="row-hplay" type="button" aria-label="${esc(`Play ${t.name}`)}">${ICONS.play}</button>` : "";
+  const numCell = lib ? `<span class="row-num"><span class="row-n">${i + 1}</span>${EQ_MARK}${hoverPlay}</span>` : `<span class="row-num">${i + 1}</span>`;
   return (
-    `<div class="row row-track${kind}" data-i="${i}"${tip ? ` title="${esc(tip)}"` : ""}>` +
-    (num ? `<span class="row-num">${i + 1}</span>` : "") +
+    `<div class="row row-track${kind}" data-i="${i}"${lib ? ` data-uri="${esc(t.uri)}"` : ""}${tip ? ` title="${esc(tip)}"` : ""}>` +
+    (num ? numCell : "") +
     (art ? `<span class="art row-art">${artHtml(t.cover, t.name)}</span>` : "") +
     `<span class="row-text"><button class="row-title row-play" type="button"${local ? " disabled" : ""}>${esc(t.name)}</button>` +
-    `<span class="row-sub">${artistLinks(t)}</span></span>` +
+    `<span class="row-sub">${artistLinks(t)}${from ? `<span class="row-from"> · in ${esc(from)}</span>` : ""}</span></span>` +
     `<span class="row-time">${fmtTime(t.duration_ms)}</span>` +
     // Spotify can't queue a local file
     (local ? "<span></span>" : `<button class="row-queue" type="button" aria-label="Add to queue" title="Add to queue">${ICONS.addToQueue}</button>`) +
@@ -2967,9 +2975,26 @@ function trackRow(t, i, { num, art }) {
   );
 }
 
+// the "playing" mark: three bars, animated by CSS while the song plays
+const EQ_MARK = `<span class="row-eq" aria-hidden="true"><i></i><i></i><i></i></span>`;
+
+let markedUri = null; // the song the Library rows mark as playing
+
+/** Library rows follow what plays: the playing song's rows marked, the bars still while paused. No re-render. */
+function markPlaying() {
+  const root = $("library");
+  root.classList.toggle("is-paused", !state.isPlaying);
+  const uri = (state.now && state.now.uri) || null;
+  if (uri === markedUri) return;
+  markedUri = uri;
+  for (const r of root.querySelectorAll(".row-track.is-playing")) r.classList.remove("is-playing");
+  if (uri) for (const r of root.querySelectorAll(`.row-track[data-uri="${CSS.escape(uri)}"]`)) r.classList.add("is-playing");
+}
+
 /**
- * A click in a list of track rows: an artist link opens the artist, "+" queues the song, anything else
- * plays from that row (play(i, rowElement)). Returns true if the click was on a row or a link.
+ * A click in a list of track rows: an artist link opens the artist, "+" queues the song, the hover play button
+ * plays from that row and keeps the Library open (play(i, row, {stay: true})), anything else plays from that row
+ * (play(i, rowElement)). Returns true if the click was on a row or a link.
  */
 function onTrackClick(e, tracks, play) {
   const link = e.target.closest(".artist-link");
@@ -2979,6 +3004,7 @@ function onTrackClick(e, tracks, play) {
   const i = Number(row.dataset.i);
   if (!tracks[i]) return true;
   if (e.target.closest(".row-queue")) addToQueue(tracks[i]);
+  else if (e.target.closest(".row-hplay")) play(i, row, { stay: true });
   else if (e.target.closest(".row-play")) play(i, row);
   return true;
 }
@@ -3033,6 +3059,7 @@ function pickImage(images) {
 
 function openLibrary() {
   openOverlay("library");
+  freshFind();
   showList();
   $("sheet").focus();
   loadGroups();
@@ -3047,6 +3074,7 @@ function showList() {
   $("libDetail").hidden = true;
   $("libBack").hidden = true;
   $("libLevel1").hidden = false;
+  $("libFind").hidden = false;
   $("libTabs").hidden = false; // no "Library" heading: the tabs say where you are
   renderLibTabs();
   $("sheetBody").scrollTop = listScroll;
@@ -3270,9 +3298,10 @@ function renderLiked(data) {
   likedTracks = listTracks(data).filter((t) => t && t.uri);
   const n = likedTracks.length;
   const total = Math.max((data && data.total) || 0, n);
-  $("likedRows").innerHTML = likedTracks.map((t, i) => trackRow(t, i, { num: true, art: true })).join("");
+  $("likedRows").innerHTML = likedTracks.map((t, i) => trackRow(t, i, { num: true, art: true, lib: true })).join("");
   setText("likedNote", total > n ? `Showing your newest ${n} of ${total}` : "");
   setEl($("libLiked").querySelector(".status"), n ? "" : "No liked songs yet.");
+  filterLiked();
 }
 
 let savedAlbums = [];
@@ -3361,7 +3390,7 @@ function renderTop(tracks, artists, failed) {
   topTrackList = tracks.filter((t) => t && t.uri);
   topArtistList = artists.filter((a) => a && a.id);
   group.hidden = false;
-  $("topTracks").innerHTML = topTrackList.map((t, i) => trackRow(t, i, { num: true, art: true })).join("");
+  $("topTracks").innerHTML = topTrackList.map((t, i) => trackRow(t, i, { num: true, art: true, lib: true })).join("");
   $("topTracks").style.setProperty("--rows", String(Math.max(1, Math.ceil(topTrackList.length / 2)))); // 2 columns, ranked down
   $("topTracksHead").hidden = !topTrackList.length;
   $("topArtists").hidden = !topArtistList.length;
@@ -3482,6 +3511,14 @@ function resetLibrary() {
   likedTracks = [];
   likedCount = null;
   $("likedRows").innerHTML = "";
+  $("likedFilter").value = "";
+  libDisk.clear();
+  libHits = NO_LIB_HITS;
+  libFindGen++;
+  $("libSearchInput").value = "";
+  $("libResults").innerHTML = "";
+  $("libResults").hidden = true;
+  $("sheet").classList.remove("is-searching");
   setText("likedNote", "");
 }
 
@@ -3721,6 +3758,7 @@ async function openDetail(src, push = true) {
     const fromStage = !state.overlay;
     if (fromPage) page.scroll = $("pageBody").scrollTop;
     openOverlay("library");
+    freshFind();
     $("sheet").focus();
     // from the main screen: Back returns there; from a full page: Back returns to it; from Search: the list
     navStack = fromPage ? [PAGE_ENTRY] : fromStage ? [STAGE_ENTRY] : [];
@@ -3739,6 +3777,7 @@ async function openDetail(src, push = true) {
   detailTracks = [];
   detailAlbums = [];
   $("libLevel1").hidden = true;
+  $("libFind").hidden = true; // the Library search is level 1's; a list has its own filter
   $("libTitle").hidden = true;
   $("libTabs").hidden = true;
   $("libBack").hidden = false;
@@ -3753,6 +3792,8 @@ async function openDetail(src, push = true) {
   setText("detailNote", "");
   $("detailPlay").hidden = src.kind === "artist";
   $("detailPlay").disabled = src.kind !== "mix"; // a mix plays by its uri, its tracks loaded or not
+  $("detailFind").hidden = src.kind === "artist"; // a list gets a filter; the artist page isn't one
+  $("detailFilter").value = "";
   renderDetailSave();
   const rows = $("detailRows");
   setText("detailStatus", "");
@@ -3831,8 +3872,149 @@ function showDetail(src, data) {
   const empty = { album: "This album is empty.", liked: "No liked songs yet.", mix: "" }[src.kind] ?? "This playlist is empty.";
   setText("detailStatus", n ? "" : empty);
   if (src.kind === "mix") setText("detailNote", n ? "" : MIX_NOTE);
-  $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album" })).join("");
+  $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album", lib: true })).join("");
   $("detailPlay").disabled = src.kind !== "mix" && !detailTracks.some((t) => !isLocalFile(t.uri));
+  filterDetail(); // fresh rows over the cached ones: the typed filter still holds
+}
+
+// ---------- the list filter: hides the rows of an open list that don't match (no search) ----------
+
+/** Hide the rows of box whose track doesn't match the input; statusEl says when none does. */
+function applyFilter(box, tracks, input, statusEl) {
+  const q = input.value.trim();
+  const keep = matchIndexes(q, tracks);
+  for (const r of box.querySelectorAll(".row-track[data-i]")) r.hidden = !keep.has(Number(r.dataset.i));
+  if (tracks.length) setEl(statusEl, q && !keep.size ? `No songs match “${q}”.` : "");
+}
+
+const filterDetail = () => applyFilter($("detailRows"), detailTracks, $("detailFilter"), $("detailStatus"));
+const filterLiked = () => applyFilter($("likedRows"), likedTracks, $("likedFilter"), $("libLiked").querySelector(".status"));
+
+/** A Library open from closed: the find fields start empty and the disk copies are read again. */
+function freshFind() {
+  libDisk.clear();
+  clearFind($("libSearchInput"));
+  clearFind($("likedFilter"));
+}
+
+// ---------- Library search: names, and songs in the lists the disk cache holds (no request) ----------
+
+const NO_LIB_HITS = { playlists: [], albums: [], artists: [], songs: [] };
+let libHits = NO_LIB_HITS;
+let libFindGen = 0;
+const libDisk = new Map(); // list cache key → promise of its disk copy, per Library open; a miss is asked again
+
+function diskList(key) {
+  let p = libDisk.get(key);
+  if (!p) {
+    p = diskGet(key).then((v) => {
+      if (v == null && libDisk.get(key) === p) libDisk.delete(key); // opened later: it joins
+      return v;
+    });
+    libDisk.set(key, p);
+  }
+  return p;
+}
+
+/** What the Library search looks through: the names on the tabs, and every list the disk cache has. */
+async function libIndex() {
+  const own = (playlists || (await diskList("playlists")) || []).filter((p) => p && p.id);
+  const lists = [
+    { kind: "liked", id: null, name: "Liked Songs", key: "liked" },
+    ...own.filter((p) => p.snapshot_id).map((p) => ({ kind: "playlist", id: p.id, name: p.name, key: `playlist:${p.id}:${p.snapshot_id}` })),
+    ...savedAlbums.map((a) => ({ kind: "album", id: a.id, name: a.name, key: `album:${a.id}` })),
+  ];
+  // Liked Songs: the rows on its tab when they're loaded (fresher than the disk copy)
+  const data = await Promise.all(lists.map((l) => (l.kind === "liked" && likedTracks.length ? likedTracks : diskList(l.key))));
+  const playlistHits = [
+    ...own.map((p) => ({
+      name: p.name,
+      owner: p.owner,
+      cover: pickImage(p.images),
+      sub: plural((p.tracks && p.tracks.total) || 0, "track", "tracks"),
+      src: { kind: "playlist", id: p.id, name: p.name, cover: pickImage(p.images), sub: plural((p.tracks && p.tracks.total) || 0, "track", "tracks"), snapshotId: p.snapshot_id || null },
+    })),
+    ...addedIn("playlists", own).map((l) => ({ name: l.name, owner: l.owner, cover: l.cover, sub: l.owner ? `Added · ${l.owner}` : "Added", src: detailSrcOf(l) })),
+  ];
+  return {
+    playlists: playlistHits,
+    albums: albumShelf(),
+    artists: artistShelf(),
+    lists: lists.map((source, i) => ({ source, tracks: listTracks(data[i]).filter((t) => t && t.uri) })).filter((l) => l.tracks.length),
+  };
+}
+
+async function onLibSearch() {
+  const gen = ++libFindGen;
+  const q = $("libSearchInput").value.trim();
+  $("sheet").classList.toggle("is-searching", Boolean(q)); // results in place of the tabs and their groups
+  const box = $("libResults");
+  if (!q) {
+    libHits = NO_LIB_HITS;
+    box.innerHTML = "";
+    box.hidden = true;
+    return;
+  }
+  const index = await libIndex();
+  if (gen !== libFindGen) return;
+  renderLibResults(q, searchLibrary(q, index));
+}
+
+function renderLibResults(q, hits) {
+  libHits = hits;
+  const group = (title, rows) => (rows ? `<section class="group"><h3 class="group-title">${title}</h3><div class="rows">${rows}</div></section>` : "");
+  const nameRow = (kind, it, i, sub, round = false) =>
+    `<button class="row row-playlist" type="button" data-hit="${kind}:${i}">` +
+    `<span class="art row-art${round ? " is-round" : ""}">${artHtml(it.cover, it.name)}</span>` +
+    `<span class="row-text"><span class="row-title">${esc(it.name)}</span><span class="row-sub">${esc(sub)}</span></span></button>`;
+  const html =
+    group("Songs", hits.songs.map((h, i) => trackRow(h.track, i, { num: false, art: true, lib: true, from: h.list.source.name })).join("")) +
+    group("Playlists", hits.playlists.map((p, i) => nameRow("playlists", p, i, p.sub)).join("")) +
+    group("Albums", hits.albums.map((a, i) => nameRow("albums", a, i, a.artists || "Album")).join("")) +
+    group("Artists", hits.artists.map((a, i) => nameRow("artists", { name: a.name, cover: a.image }, i, "Artist", true)).join(""));
+  const box = $("libResults");
+  box.innerHTML = html || `<p class="status">Nothing in your library matches “${esc(q)}”. A list you haven't opened yet isn't searched.</p>`;
+  box.hidden = false;
+  $("sheetBody").scrollTop = 0;
+}
+
+function onLibResultsClick(e) {
+  const hit = e.target.closest("[data-hit]");
+  if (hit) {
+    const [kind, i] = hit.dataset.hit.split(":");
+    const it = libHits[kind] && libHits[kind][Number(i)];
+    if (!it) return;
+    if (kind === "playlists") openDetail(it.src);
+    else if (kind === "albums") openAlbum(it);
+    else openArtistTile(it);
+    return;
+  }
+  // a song plays in the list it was found in, from that song
+  onTrackClick(
+    e,
+    libHits.songs.map((h) => h.track),
+    (i, row, opts) => {
+      const { list } = libHits.songs[i];
+      const src = list.source;
+      playFrom(list.tracks, libHits.songs[i].i, { row, name: src.name, origin: src.kind === "liked" ? null : { kind: src.kind, id: src.id }, ...opts, stay: true });
+    },
+  );
+}
+
+/** Empty a find field, and its list (or results) follow. */
+function clearFind(input) {
+  if (!input.value) return;
+  input.value = "";
+  input.dispatchEvent(new Event("input"));
+}
+
+/** ⌘F in the Library: the open list's filter, else the Library search (the artist page has neither). */
+function focusFind() {
+  let field = $("libSearchInput");
+  if (curDetail) field = curDetail.kind === "artist" ? null : $("detailFilter");
+  if (!field) return;
+  field.focus();
+  field.select();
 }
 
 /**
@@ -3922,7 +4104,7 @@ function renderArtist() {
   $("detailPlay").disabled = !detailTracks.length;
   setText("detailStatus", detailAlbums.length || detailTracks.length ? "" : "No albums or singles.");
   const favorites = detailTracks.length
-    ? `<h3 class="group-title">${esc(artistTracksTitle)}</h3><div class="rows">${detailTracks.map((t, i) => trackRow(t, i, { num: true, art: true })).join("")}</div>` +
+    ? `<h3 class="group-title">${esc(artistTracksTitle)}</h3><div class="rows">${detailTracks.map((t, i) => trackRow(t, i, { num: true, art: true, lib: true })).join("")}</div>` +
       (detailAlbums.length ? `<h3 class="group-title">Albums and singles</h3>` : "")
     : "";
   $("detailRows").innerHTML =
@@ -3952,7 +4134,7 @@ const PLAY_URIS_MAX = 200;
  * origin: the detail view it came from ({kind, id}) or null; name: the list's name, for the playlist
  * panel (Spotify names no context for a uris play); opts: as startPlay (row).
  */
-async function playFrom(tracks, i, { name = null, origin = null, ...opts } = {}) {
+async function playFrom(tracks, i, { name = null, origin = null, stay = false, ...opts } = {}) {
   const t = tracks[i];
   if (!t || isLocalFile(t.uri)) return;
   // the whole list, so the panel shows what came before the clicked song too (one song is no list)
@@ -3972,14 +4154,15 @@ async function playFrom(tracks, i, { name = null, origin = null, ...opts } = {})
     src = { uris: all.slice(from, from + PLAY_URIS_MAX), trackUri: t.uri };
   }
   const played = startPlay(src, { kind: "list", ...opts });
-  // the main screen shows the song at once (its cover, title and loaders); a failure says so in a toast
-  closeOverlay();
+  // the main screen shows the song at once (its cover, title and loaders); a failure says so in a toast.
+  // stay: the Library's hover play: the list stays on screen, its row shows the loader
+  if (!stay) closeOverlay();
   await played;
 }
 
 const PLAY_URIS_BEFORE = 50; // songs kept before the clicked one in a uris play
 
-const playDetailFrom = (i, row = null) => playFrom(detailTracks, i, { origin: originOf(curDetail), row, name: curDetail && curDetail.name });
+const playDetailFrom = (i, row = null, opts = {}) => playFrom(detailTracks, i, { origin: originOf(curDetail), row, name: curDetail && curDetail.name, ...opts });
 
 // ---------- search: songs + albums, debounced, last request wins ----------
 
@@ -3990,6 +4173,7 @@ const NO_HITS = { q: "", tracks: [], albums: [] };
 let searchHits = NO_HITS;
 
 function openSearch() {
+  if (state.overlay === "library") return; // the Library has its own search (⌘F); the catalog search is the main screen's
   openOverlay("search");
   const input = $("searchInput");
   input.focus();
@@ -4293,6 +4477,18 @@ function onPageClick(e) {
 const typing = (t) => t && t.closest && t.closest("input, textarea, select, [contenteditable]");
 
 function onKey(e) {
+  // ⌘F in the Library: find in the open list (the Library has no other find)
+  if (e.type === "keydown" && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f" && state.overlay === "library") {
+    e.preventDefault();
+    focusFind();
+    return;
+  }
+  // Esc in a find field with text: clears it first; the next Esc closes as usual
+  if (e.key === "Escape" && e.type === "keydown" && e.target.classList && e.target.classList.contains("lib-find-input") && e.target.value) {
+    e.preventDefault();
+    clearFind(e.target);
+    return;
+  }
   // Esc closes the innermost thing: a popover first, then a full page (back), then the overlay,
   // then the turned-over sleeve
   if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || panelOpen || settingsOpen || state.overlay || sleeve)) {
@@ -4399,9 +4595,9 @@ async function boot() {
   // a group shown or hidden (loaded, empty, not allowed): its tab follows
   const groupsSeen = new MutationObserver(renderLibTabs);
   for (const id of Object.values(LIB_TABS)) groupsSeen.observe($(id), { attributes: true, attributeFilter: ["hidden"] });
-  $("likedRows").addEventListener("click", (e) => onTrackClick(e, likedTracks, (i, row) => playFrom(likedTracks, i, { row, name: "Liked Songs" })));
+  $("likedRows").addEventListener("click", (e) => onTrackClick(e, likedTracks, (i, row, opts) => playFrom(likedTracks, i, { row, name: "Liked Songs", ...opts })));
   $("topTabs").addEventListener("click", onTopTab);
-  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row) => playFrom(topTrackList, i, { row, name: "Your top songs" })));
+  $("topTracks").addEventListener("click", (e) => onTrackClick(e, topTrackList, (i, row, opts) => playFrom(topTrackList, i, { row, name: "Your top songs", ...opts })));
   $("topArtists").addEventListener("click", (e) => openArtistTile(tileAt(e, topArtistList)));
   $("libFollowing").addEventListener("click", (e) => openArtistTile(tileAt(e, artistShelf())));
   $("libAlbums").addEventListener("click", (e) => {
@@ -4426,6 +4622,10 @@ async function boot() {
     if (link) openArtist(link);
   });
   $("detailPlay").addEventListener("click", onDetailPlay);
+  $("detailFilter").addEventListener("input", filterDetail);
+  $("likedFilter").addEventListener("input", filterLiked);
+  $("libSearchInput").addEventListener("input", onLibSearch);
+  $("libResults").addEventListener("click", onLibResultsClick);
   $("detailSave").addEventListener("click", onDetailSave);
   $("libAddBtn").addEventListener("click", () => showAddForm(true));
   $("libAddCancel").addEventListener("click", () => showAddForm(false));

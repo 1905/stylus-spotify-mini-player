@@ -1541,6 +1541,107 @@ body:has(.stage:not(.is-playing)) .bg {
   text-align: right;
 }
 
+/* Library rows: the number cell holds the number, the "playing" bars and the hover play button, one at a time */
+.row-track.is-lib .row-num {
+  display: grid;
+  justify-items: end;
+  align-items: center;
+}
+
+.row-track.is-lib .row-num > * {
+  grid-area: 1 / 1;
+}
+
+.row-eq,
+.row-hplay {
+  display: none;
+}
+
+.row-track.is-playing {
+  background: rgba(246, 244, 248, 0.1);
+}
+
+.row-track.is-playing .row-title {
+  color: var(--live);
+}
+
+.row-track.is-playing .row-n {
+  visibility: hidden;
+}
+
+.row-track.is-playing .row-eq {
+  display: flex;
+}
+
+/* hover or keyboard focus: a play button in place of the number (not on the playing row: its bars stay) */
+.row-track.is-lib:not(.is-playing):is(:hover, :focus-within) .row-n {
+  visibility: hidden;
+}
+
+.row-track.is-lib:not(.is-playing):is(:hover, :focus-within) .row-hplay {
+  display: grid;
+}
+
+/* above the title button, which covers the row */
+.row-hplay {
+  position: relative;
+  z-index: 1;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: -5px;
+  border-radius: 50%;
+  color: var(--fg);
+}
+
+.row-hplay svg {
+  width: 14px;
+  height: 14px;
+}
+
+.row-hplay:hover {
+  background: rgba(246, 244, 248, 0.12);
+}
+
+/* the "playing" bars: small, in the accent; still while paused (and with reduced motion) */
+.row-eq {
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+
+.row-eq i {
+  width: 2.5px;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--live);
+  transform-origin: bottom;
+  animation: eq 900ms ease-in-out infinite alternate;
+}
+
+.row-eq i:nth-child(1) {
+  transform: scaleY(0.55);
+  animation-delay: -300ms;
+}
+
+.row-eq i:nth-child(2) {
+  animation-delay: -650ms;
+}
+
+.row-eq i:nth-child(3) {
+  transform: scaleY(0.35);
+  animation-delay: -100ms;
+}
+
+#library.is-paused .row-eq i {
+  animation-play-state: paused;
+}
+
+@keyframes eq {
+  from { transform: scaleY(0.25); }
+  to { transform: scaleY(1); }
+}
+
 /* level 2 header */
 .detail-head {
   display: flex;
@@ -2900,4 +3001,88 @@ body:has(.stage:not(.is-playing)) .bg {
   .cover.is-flipped .sleeve > .art {
     opacity: 0;
   }
+}
+
+/* ---------- Library find: a list's filter field (and the Library search) ---------- */
+
+.lib-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  color: var(--fg-3);
+  background: rgba(246, 244, 248, 0.08);
+  cursor: text;
+}
+
+.lib-find:focus-within {
+  background: rgba(246, 244, 248, 0.12);
+}
+
+.lib-find svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.lib-find-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.lib-find-input::placeholder {
+  color: var(--fg-3);
+}
+
+/* the ring goes on the pill, not the bare input */
+.lib-find-input:focus-visible {
+  outline: none;
+}
+
+.lib-find:has(.lib-find-input:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+[data-input="pointer"] .lib-find:has(.lib-find-input:focus-visible) {
+  outline: none;
+}
+
+.detail-find {
+  width: min(260px, 100%);
+  margin-left: auto;
+}
+
+.liked-find {
+  max-width: 320px;
+  margin: 0 12px 10px;
+}
+
+/* the Library search: in the bar at level 1; while it has text, its results replace the tabs and their groups */
+.lib-search {
+  flex: 0 1 360px;
+  min-width: 0;
+  margin-left: -12px;
+}
+
+.sheet.is-searching .lib-tabs,
+.sheet.is-searching #libLevel1 > :not(#libResults) {
+  display: none;
+}
+
+.row-art.is-round {
+  border-radius: 50%;
+}
+
+.row-from {
+  color: var(--fg-3);
 }

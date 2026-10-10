@@ -3,9 +3,12 @@
 
 const CDN_HOST = /(^|\.)(scdn\.co|spotifycdn\.com)$/;
 
+// only the app serves cover:// (its pages load from tauri://); the browser mock (dev/) keeps CDN URLs
+const IN_APP = typeof location !== "undefined" && location.protocol === "tauri:";
+
 /** The src for a cover: a CDN https URL → cover://localhost/<encoded URL>; anything else unchanged. */
-export function coverSrc(url) {
-  if (typeof url !== "string" || !url.startsWith("https://")) return url;
+export function coverSrc(url, inApp = IN_APP) {
+  if (!inApp || typeof url !== "string" || !url.startsWith("https://")) return url;
   let u;
   try {
     u = new URL(url);
