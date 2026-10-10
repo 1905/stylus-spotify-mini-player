@@ -1,10 +1,14 @@
 // The menu-bar mini player (Rust tray.rs). A view only: the main window sends what it shows
 // (mini-state, src/lib/mini.js miniPayload); every button goes back to it as mini_command, so
-// routing and spinners are the main window's own.
+// routing and spinners are the main window's own. Copy song link calls copy_text itself: the main
+// window's toast is out of sight while it is hidden, so the popover shows the result.
 import { ICONS } from "./lib/icons.js";
 import { miniProgress, volumeIcon } from "./lib/mini.js";
 import { stepVolume } from "./lib/transport.js";
 import { coverSrc } from "./lib/cover.js";
+
+/** How long the copy button shows its check or cross. */
+const FEEDBACK_MS = 1500;
 
 const $ = (id) => document.getElementById(id);
 const invoke = (cmd, args) => window.__TAURI__.core.invoke(cmd, args);
@@ -13,6 +17,8 @@ let s = null; // the last mini-state, null = none yet
 let drag = null; // a volume drag: its pointer id
 let framing = false;
 let coverUrl = null;
+let shareLink = null; // the link #miniShare copies, null = hidden
+let shareTimer = null; // ends a copy's feedback
 
 const send = (action, value) => invoke("mini_command", value === undefined ? { action } : { action, value }).catch(() => {});
 
@@ -58,6 +64,14 @@ function render() {
     else b.removeAttribute("aria-busy");
   }
 
+  // a new song drops the last copy's check or cross at once
+  const link = st.link || null;
+  $("miniShare").hidden = !link;
+  if (link !== shareLink) {
+    shareLink = link;
+    resetShare();
+  }
+
   const heart = $("miniHeart");
   heart.hidden = st.heart == null;
   heart.disabled = st.heart === "unknown";
@@ -75,6 +89,30 @@ function render() {
     framing = true;
     requestAnimationFrame(frame);
   }
+}
+
+/** The copy button at rest: the link icon, no check or cross. */
+function resetShare() {
+  clearTimeout(shareTimer);
+  shareTimer = null;
+  const b = $("miniShare");
+  setIcon(b, "link");
+  b.classList.remove("is-done", "is-failed");
+  b.setAttribute("aria-label", "Copy song link");
+}
+
+/** Copy the song's link, then a check (or a cross) for FEEDBACK_MS. */
+async function copyLink() {
+  const link = s?.link;
+  if (!link) return;
+  const ok = await invoke("copy_text", { text: link }).then(() => true, () => false);
+  if (s?.link !== link) return; // the song changed meanwhile: render() already reset the button
+  resetShare();
+  const b = $("miniShare");
+  setIcon(b, ok ? "check" : "close");
+  b.classList.add(ok ? "is-done" : "is-failed");
+  b.setAttribute("aria-label", ok ? "Link copied" : "Couldn't copy");
+  shareTimer = setTimeout(resetShare, FEEDBACK_MS);
 }
 
 function renderCover(url) {
@@ -150,10 +188,12 @@ function boot() {
   setIcon($("miniGlyph"), "library");
   setIcon($("miniPrev"), "previous");
   setIcon($("miniNext"), "next");
+  setIcon($("miniShare"), "link");
   $("miniOpen").addEventListener("click", () => send("show"));
   $("miniPlay").addEventListener("click", () => send("toggle"));
   $("miniPrev").addEventListener("click", () => send("previous"));
   $("miniNext").addEventListener("click", () => send("next"));
+  $("miniShare").addEventListener("click", copyLink);
   $("miniHeart").addEventListener("click", () => send("heart"));
   $("miniMute").addEventListener("click", () => send("mute"));
   const slider = $("miniSlider");

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { MINI_DRIFT_MS, miniPayload, miniChanged, miniProgress, volumeIcon } from "./mini.js";
 
-const song = { name: "Intro", artists: "The xx", cover: "https://i.scdn.co/image/a", duration_ms: 128000, uri: "spotify:track:1" };
+const song = { name: "Intro", artists: "The xx", cover: "https://i.scdn.co/image/a", duration_ms: 128000, uri: "spotify:track:7c378mlmubSu7NGkLFa4sN" };
 const base = { mode: "track", now: song, status: "", isPlaying: true, pending: false, skipping: null, loading: false, positionMs: 1000, volume: 60, heart: false, device: "Here" };
 
 afterEach(() => vi.useRealTimers());
@@ -25,7 +25,13 @@ describe("miniPayload", () => {
       volume: 60,
       heart: false,
       device: "Here",
+      link: "https://open.spotify.com/track/7c378mlmubSu7NGkLFa4sN",
     });
+  });
+
+  it("links a Spotify track only", () => {
+    expect(miniPayload({ ...base, mode: "idle", now: null }).link).toBeNull();
+    expect(miniPayload({ ...base, now: { ...song, uri: "spotify:local:The+xx:xx:Intro:128" } }).link).toBeNull();
   });
 
   it("shows the main window's headline when no song shows", () => {
@@ -37,7 +43,7 @@ describe("miniPayload", () => {
 
   it("a starting play shows its preview with the bar at rest", () => {
     const p = miniPayload({ ...base, mode: "idle", loading: true, pending: true, positionMs: 50000 });
-    expect(p).toMatchObject({ title: "Intro", loading: true, pending: true, positionMs: 0 });
+    expect(p).toMatchObject({ title: "Intro", loading: true, pending: true, positionMs: 0, link: null }); // no song playing yet: no link
     expect(miniPayload({ ...base, skipping: "next", positionMs: 9000 }).positionMs).toBe(0);
   });
 });
@@ -50,7 +56,7 @@ describe("miniChanged", () => {
     expect(miniChanged(a, null)).toBe(true);
     expect(miniChanged(null, null)).toBe(false);
     expect(miniChanged(a, { ...a })).toBe(false);
-    for (const [k, v] of [["playing", false], ["pending", true], ["skipping", "next"], ["volume", 61], ["heart", true], ["title", "B"], ["status", "x"]]) {
+    for (const [k, v] of [["playing", false], ["pending", true], ["skipping", "next"], ["volume", 61], ["heart", true], ["title", "B"], ["status", "x"], ["link", null]]) {
       expect(miniChanged(a, { ...a, [k]: v }), k).toBe(true);
     }
   });
