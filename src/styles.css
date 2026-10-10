@@ -3002,3 +3002,67 @@ body:has(.stage:not(.is-playing)) .bg {
     opacity: 0;
   }
 }
+
+/* ---------- Library find: a list's filter field (and the Library search) ---------- */
+
+.lib-find {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  color: var(--fg-3);
+  background: rgba(246, 244, 248, 0.08);
+  cursor: text;
+}
+
+.lib-find:focus-within {
+  background: rgba(246, 244, 248, 0.12);
+}
+
+.lib-find svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.lib-find-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 14px;
+}
+
+.lib-find-input::placeholder {
+  color: var(--fg-3);
+}
+
+/* the ring goes on the pill, not the bare input */
+.lib-find-input:focus-visible {
+  outline: none;
+}
+
+.lib-find:has(.lib-find-input:focus-visible) {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+[data-input="pointer"] .lib-find:has(.lib-find-input:focus-visible) {
+  outline: none;
+}
+
+.detail-find {
+  width: min(260px, 100%);
+  margin-left: auto;
+}
+
+.liked-find {
+  max-width: 320px;
+  margin: 0 12px 10px;
+}

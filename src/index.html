@@ -222,6 +222,10 @@
             </section>
             <section id="libLiked" class="group lib-panel" role="tabpanel" aria-labelledby="libTab-liked" hidden>
               <p class="status" role="status" hidden></p>
+              <label class="lib-find liked-find">
+                <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
+                <input id="likedFilter" class="lib-find-input" type="text" placeholder="Filter" aria-label="Filter your liked songs" autocomplete="off" spellcheck="false" />
+              </label>
               <p id="likedNote" class="detail-note" hidden></p>
               <div id="likedRows" class="rows"></div>
             </section>
@@ -258,6 +262,10 @@
                 <div class="detail-actions">
                   <button id="detailPlay" class="btn btn-solid btn-play" type="button" disabled>Play</button>
                   <button id="detailSave" class="btn btn-ghost detail-save" type="button" hidden></button>
+                  <label id="detailFind" class="lib-find detail-find" hidden>
+                    <svg class="ic ic-search" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.25 15.25 4.75 4.75"/></svg>
+                    <input id="detailFilter" class="lib-find-input" type="text" placeholder="Filter" aria-label="Filter the songs in this list" autocomplete="off" spellcheck="false" />
+                  </label>
                 </div>
               </div>
             </div>

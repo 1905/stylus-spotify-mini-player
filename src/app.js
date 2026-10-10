@@ -22,7 +22,7 @@ import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
 import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
-import { isNowRow } from "./lib/libsearch.js";
+import { isNowRow, matchIndexes } from "./lib/libsearch.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -3059,6 +3059,7 @@ function pickImage(images) {
 
 function openLibrary() {
   openOverlay("library");
+  clearFind($("likedFilter"));
   showList();
   $("sheet").focus();
   loadGroups();
@@ -3299,6 +3300,7 @@ function renderLiked(data) {
   $("likedRows").innerHTML = likedTracks.map((t, i) => trackRow(t, i, { num: true, art: true, lib: true })).join("");
   setText("likedNote", total > n ? `Showing your newest ${n} of ${total}` : "");
   setEl($("libLiked").querySelector(".status"), n ? "" : "No liked songs yet.");
+  filterLiked();
 }
 
 let savedAlbums = [];
@@ -3508,6 +3510,7 @@ function resetLibrary() {
   likedTracks = [];
   likedCount = null;
   $("likedRows").innerHTML = "";
+  $("likedFilter").value = "";
   setText("likedNote", "");
 }
 
@@ -3779,6 +3782,8 @@ async function openDetail(src, push = true) {
   setText("detailNote", "");
   $("detailPlay").hidden = src.kind === "artist";
   $("detailPlay").disabled = src.kind !== "mix"; // a mix plays by its uri, its tracks loaded or not
+  $("detailFind").hidden = src.kind === "artist"; // a list gets a filter; the artist page isn't one
+  $("detailFilter").value = "";
   renderDetailSave();
   const rows = $("detailRows");
   setText("detailStatus", "");
@@ -3859,6 +3864,37 @@ function showDetail(src, data) {
   if (src.kind === "mix") setText("detailNote", n ? "" : MIX_NOTE);
   $("detailRows").innerHTML = detailTracks.map((t, i) => trackRow(t, i, { num: true, art: src.kind !== "album", lib: true })).join("");
   $("detailPlay").disabled = src.kind !== "mix" && !detailTracks.some((t) => !isLocalFile(t.uri));
+  filterDetail(); // fresh rows over the cached ones: the typed filter still holds
+}
+
+// ---------- the list filter: hides the rows of an open list that don't match (no search) ----------
+
+/** Hide the rows of box whose track doesn't match the input; statusEl says when none does. */
+function applyFilter(box, tracks, input, statusEl) {
+  const q = input.value.trim();
+  const keep = matchIndexes(q, tracks);
+  for (const r of box.querySelectorAll(".row-track[data-i]")) r.hidden = !keep.has(Number(r.dataset.i));
+  if (tracks.length) setEl(statusEl, q && !keep.size ? `No songs match “${q}”.` : "");
+}
+
+const filterDetail = () => applyFilter($("detailRows"), detailTracks, $("detailFilter"), $("detailStatus"));
+const filterLiked = () => applyFilter($("likedRows"), likedTracks, $("likedFilter"), $("libLiked").querySelector(".status"));
+
+/** Empty a find field, and its list (or results) follow. */
+function clearFind(input) {
+  if (!input.value) return;
+  input.value = "";
+  input.dispatchEvent(new Event("input"));
+}
+
+/** ⌘F in the Library: the open list's filter (Liked Songs' on its tab). */
+function focusFind() {
+  let field = null;
+  if (curDetail) field = curDetail.kind === "artist" ? null : $("detailFilter");
+  else if (libTabShown() === "liked") field = $("likedFilter");
+  if (!field) return;
+  field.focus();
+  field.select();
 }
 
 /**
@@ -4320,6 +4356,18 @@ function onPageClick(e) {
 const typing = (t) => t && t.closest && t.closest("input, textarea, select, [contenteditable]");
 
 function onKey(e) {
+  // ⌘F in the Library: find in the open list (the Library has no other find)
+  if (e.type === "keydown" && (e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "f" && state.overlay === "library") {
+    e.preventDefault();
+    focusFind();
+    return;
+  }
+  // Esc in a find field with text: clears it first; the next Esc closes as usual
+  if (e.key === "Escape" && e.type === "keydown" && e.target.classList && e.target.classList.contains("lib-find-input") && e.target.value) {
+    e.preventDefault();
+    clearFind(e.target);
+    return;
+  }
   // Esc closes the innermost thing: a popover first, then a full page (back), then the overlay,
   // then the turned-over sleeve
   if (e.key === "Escape" && e.type === "keydown" && (devicesOpen || volumeOpen || panelOpen || settingsOpen || state.overlay || sleeve)) {
@@ -4453,6 +4501,8 @@ async function boot() {
     if (link) openArtist(link);
   });
   $("detailPlay").addEventListener("click", onDetailPlay);
+  $("detailFilter").addEventListener("input", filterDetail);
+  $("likedFilter").addEventListener("input", filterLiked);
   $("detailSave").addEventListener("click", onDetailSave);
   $("libAddBtn").addEventListener("click", () => showAddForm(true));
   $("libAddCancel").addEventListener("click", () => showAddForm(false));
