@@ -1667,6 +1667,7 @@ async function toggleShuffle() {
 async function cycleRepeat() {
   if (state.mode !== "track") return;
   const before = state.repeat;
+  const prefBefore = repeatPref;
   const mode = (state.repeat = nextRepeat(before));
   repeatPref = mode;
   renderChrome();
@@ -1674,7 +1675,11 @@ async function cycleRepeat() {
   await sendIntent(
     "repeat",
     () => routed(dev, () => invoke("local_repeat", { mode }), () => invoke("set_repeat", { mode }), `repeat ${mode}`),
-    () => (state.repeat = before),
+    // a failed pick doesn't hold for the next playlist either
+    () => {
+      state.repeat = before;
+      repeatPref = prefBefore;
+    },
   );
 }
 

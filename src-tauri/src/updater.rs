@@ -21,6 +21,10 @@ const FIRST_CHECK: Duration = Duration::from_secs(10);
 const INTERVAL: Duration = Duration::from_secs(6 * 3600);
 /// Nothing but Check now checks sooner than this after the last check.
 const MIN_GAP: Duration = Duration::from_secs(3600);
+/// A feed request or a download that takes longer is dropped, so a server that stops sending
+/// can't hold `busy` (and every later check) until the next launch. The plugin has no default.
+const FEED_TIMEOUT: Duration = Duration::from_secs(30);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 /// How often the timer looks at the clock. Wall time, not a 6 h sleep: a sleeping Mac stops
 /// monotonic clocks, so a 6 h sleep could last days.
 const TICK: Duration = Duration::from_secs(600);
@@ -252,7 +256,8 @@ async fn check(app: AppHandle, gap: Duration, force: bool) {
 /// Feed, then (setting on) download and verify. The verified archive is staged.
 async fn run_check(app: &AppHandle, auto: bool) -> Result<Status, String> {
     let updater = app.updater().map_err(|e| e.to_string())?;
-    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+    let found = tokio::time::timeout(FEED_TIMEOUT, updater.check()).await.map_err(|_| timed_out("feed", FEED_TIMEOUT))?;
+    let Some(update) = found.map_err(|e| e.to_string())? else {
         return Ok(Status::UpToDate);
     };
     let v = update.version.clone();
@@ -261,11 +266,18 @@ async fn run_check(app: &AppHandle, auto: bool) -> Result<Status, String> {
     }
     set(app, Status::Downloading(v.clone()));
     // download() checks the signature against plugins.updater.pubkey: a bad one stages nothing
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    let bytes = tokio::time::timeout(DOWNLOAD_TIMEOUT, update.download(|_, _| {}, || {}))
+        .await
+        .map_err(|_| timed_out("download", DOWNLOAD_TIMEOUT))?
+        .map_err(|e| e.to_string())?;
     log::info!(target: LOG, "downloaded {v}: {} bytes, signature ok", bytes.len());
     state().staged = Some((update, bytes));
     // the setting may have changed during the download
     Ok(shown(&v, auto_on()))
+}
+
+fn timed_out(what: &str, after: Duration) -> String {
+    format!("the {what} took more than {} s", after.as_secs())
 }
 
 /// Installs the staged update and returns its version. A failed install stays staged (the
