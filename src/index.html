@@ -53,55 +53,9 @@
             </div>
           </div>
           <div class="settings-wrap">
-            <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsPop">
+            <button id="settingsBtn" class="icon-btn" type="button" aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settingsModal">
               <svg class="ic ic-settings" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10.33 5.3l.26-2.19h2.82l.26 2.19a6.9 6.9 0 0 1 1.88.79l1.74-1.37 1.99 1.99-1.37 1.74a6.9 6.9 0 0 1 .79 1.88l2.19.26v2.82l-2.19.26a6.9 6.9 0 0 1-.79 1.88l1.37 1.74-1.99 1.99-1.74-1.37a6.9 6.9 0 0 1-1.88.79l-.26 2.19h-2.82l-.26-2.19a6.9 6.9 0 0 1-1.88-.79l-1.74 1.37-1.99-1.99 1.37-1.74a6.9 6.9 0 0 1-.79-1.88l-2.19-.26v-2.82l2.19-.26a6.9 6.9 0 0 1 .79-1.88L4.72 6.71l1.99-1.99 1.74 1.37a6.9 6.9 0 0 1 1.88-.79z"/><circle cx="12" cy="12" r="2.75"/></svg>
             </button>
-            <div id="settingsPop" class="device-pop settings-pop" role="dialog" aria-label="Settings" hidden>
-              <div class="set-row">
-                <span id="dockArtLabel" class="set-label">Album art as app icon</span>
-                <button id="dockArtSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="dockArtLabel"></button>
-              </div>
-              <div class="set-row">
-                <span id="coverRowLabel" class="set-label">Show cover row</span>
-                <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
-              </div>
-              <div class="set-row">
-                <span id="menuBarLabel" class="set-label">Show in menu bar</span>
-                <button id="menuBarSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="menuBarLabel"></button>
-              </div>
-              <div class="set-row">
-                <span id="menuBarTitleLabel" class="set-label">Show song in menu bar</span>
-                <button id="menuBarTitleSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="menuBarTitleLabel"></button>
-              </div>
-              <div class="set-group">
-                <span id="qualityLabel" class="set-label">Audio quality</span>
-                <div id="qualityOpts" class="seg" role="radiogroup" aria-labelledby="qualityLabel">
-                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="96"><span class="seg-name">Normal</span><span class="seg-sub">96 kbps</span></button>
-                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="160"><span class="seg-name">High</span><span class="seg-sub">160 kbps</span></button>
-                  <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="320"><span class="seg-name">Very high</span><span class="seg-sub">320 kbps</span></button>
-                </div>
-                <p id="qualityNote" class="set-note">Changing restarts the player for a moment.</p>
-              </div>
-              <div class="set-group set-mcp">
-                <div class="set-row">
-                  <span id="mcpLabel" class="set-label">MCP server</span>
-                  <button id="mcpSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="mcpLabel" aria-describedby="mcpStatus"></button>
-                </div>
-                <p id="mcpStatus" class="set-note set-mcp-status" role="status"></p>
-                <div id="mcpActions" class="set-actions" hidden>
-                  <span class="set-actions-label">Copy connect</span>
-                  <button class="chip" type="button" data-copy="json">JSON config</button>
-                  <button class="chip" type="button" data-copy="claude">Claude Code</button>
-                  <button class="chip" type="button" data-copy="skill">Copy skill</button>
-                  <button id="mcpReset" class="chip chip-quiet" type="button">Reset key</button>
-                </div>
-                <div id="mcpResetAsk" class="set-actions set-confirm" hidden>
-                  <span class="set-actions-label">The copied connect text stops working.</span>
-                  <button id="mcpResetYes" class="chip chip-danger" type="button">Reset key</button>
-                  <button id="mcpResetNo" class="chip" type="button">Cancel</button>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </header>
@@ -322,6 +276,87 @@
             <p id="pageStatus" class="status page-status" role="status" hidden></p>
             <button id="pageMore" class="btn btn-ghost page-more" type="button" hidden>Load more</button>
           </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="settingsModal" class="overlay overlay-settings" hidden>
+      <div class="backdrop" data-close></div>
+      <section id="settingsSheet" class="set-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
+        <header class="set-bar">
+          <h2 id="settingsTitle" class="set-title">Settings</h2>
+          <button class="icon-btn" type="button" data-close aria-label="Close settings">
+            <svg class="ic ic-close" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>
+          </button>
+        </header>
+        <div class="set-body">
+          <section class="set-sec" aria-labelledby="setPlaybackHead">
+            <h3 id="setPlaybackHead" class="set-head">Playback</h3>
+            <div class="set-group">
+              <span id="qualityLabel" class="set-label">Audio quality</span>
+              <div id="qualityOpts" class="seg" role="radiogroup" aria-labelledby="qualityLabel">
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="96"><span class="seg-name">Normal</span><span class="seg-sub">96 kbps</span></button>
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="160"><span class="seg-name">High</span><span class="seg-sub">160 kbps</span></button>
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-kbps="320"><span class="seg-name">Very high</span><span class="seg-sub">320 kbps</span></button>
+              </div>
+              <p id="qualityNote" class="set-note">Changing restarts the player for a moment.</p>
+            </div>
+          </section>
+          <section class="set-sec" aria-labelledby="setLookHead">
+            <h3 id="setLookHead" class="set-head">Appearance</h3>
+            <div class="set-row">
+              <span id="dockArtLabel" class="set-label">Album art as app icon</span>
+              <button id="dockArtSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="dockArtLabel"></button>
+            </div>
+            <div class="set-row">
+              <span id="coverRowLabel" class="set-label">Show cover row</span>
+              <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
+            </div>
+          </section>
+          <section class="set-sec" aria-labelledby="setMenuHead">
+            <h3 id="setMenuHead" class="set-head">Menu bar</h3>
+            <div class="set-row">
+              <span id="menuBarLabel" class="set-label">Show in menu bar</span>
+              <button id="menuBarSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="menuBarLabel"></button>
+            </div>
+            <div class="set-row">
+              <span id="menuBarTitleLabel" class="set-label">Show song in menu bar</span>
+              <button id="menuBarTitleSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="menuBarTitleLabel"></button>
+            </div>
+          </section>
+          <section class="set-sec" aria-labelledby="setUpdateHead">
+            <h3 id="setUpdateHead" class="set-head">Updates</h3>
+            <div class="set-row">
+              <span id="autoUpdateLabel" class="set-label">Install updates automatically</span>
+              <button id="autoUpdateSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="autoUpdateLabel"></button>
+            </div>
+            <div id="updateRow" class="set-row set-update" hidden>
+              <p id="updateStatus" class="set-note" role="status"></p>
+              <button id="updateCheck" class="chip" type="button" hidden>Check now</button>
+              <button id="updateRestart" class="chip chip-solid" type="button" hidden>Restart now</button>
+            </div>
+          </section>
+          <section class="set-sec set-mcp" aria-labelledby="setAiHead">
+            <h3 id="setAiHead" class="set-head">AI tools</h3>
+            <div class="set-row">
+              <span id="mcpLabel" class="set-label">MCP server</span>
+              <button id="mcpSwitch" class="switch" type="button" role="switch" aria-checked="false" aria-labelledby="mcpLabel" aria-describedby="mcpStatus"></button>
+            </div>
+            <p id="mcpStatus" class="set-note set-mcp-status" role="status"></p>
+            <div id="mcpActions" class="set-actions" hidden>
+              <span class="set-actions-label">Copy connect</span>
+              <button class="chip" type="button" data-copy="json">JSON config</button>
+              <button class="chip" type="button" data-copy="claude">Claude Code</button>
+              <button class="chip" type="button" data-copy="skill">Copy skill</button>
+              <button id="mcpReset" class="chip chip-quiet" type="button">Reset key</button>
+            </div>
+            <div id="mcpResetAsk" class="set-actions set-confirm" hidden>
+              <span class="set-actions-label">The copied connect text stops working.</span>
+              <button id="mcpResetYes" class="chip chip-danger" type="button">Reset key</button>
+              <button id="mcpResetNo" class="chip" type="button">Cancel</button>
+            </div>
+          </section>
+          <p id="appVersion" class="set-version" hidden></p>
         </div>
       </section>
     </div>

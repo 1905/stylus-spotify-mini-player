@@ -19,6 +19,7 @@ import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 import { parseLink, looksLikeLink, trackLink } from "./lib/links.js";
 import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
+import { updateView } from "./lib/update.js";
 import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
@@ -2277,7 +2278,6 @@ async function pickDevice(d) {
 function onOutside(ev) {
   if (devicesOpen && !ev.target.closest(".device-wrap")) closeDevices();
   if (volumeOpen && !ev.target.closest("#volume")) closeVolume();
-  if (settingsOpen && !ev.target.closest(".settings-wrap")) closeSettings();
 }
 
 // next / previous: a ring on the pressed button from the click until a poll shows another song,
@@ -2600,7 +2600,7 @@ function playPanelRow(r, el) {
   startPlay({ uris, trackUri: uris[0] }, { kind: "panel", row: el });
 }
 
-// ---------- settings: album art as the app icon, the in-app player's audio quality ----------
+// ---------- settings: a window over the stage; album art as the app icon, the player's audio quality ----------
 
 let settings = null; // parseSettings of the stored "settings", read once
 let settingsOpen = false;
@@ -2628,27 +2628,45 @@ function openSettings() {
   closeVolume();
   closePanel();
   settingsOpen = true;
-  $("settingsPop").hidden = false;
+  $("settingsModal").hidden = false;
   $("settingsBtn").setAttribute("aria-expanded", "true");
+  $("stage").inert = true; // a modal window over the stage
   renderSettings();
-  $("dockArtSwitch").focus();
+  renderUpdate();
+  $("settingsSheet").focus({ preventScroll: true });
   loadQuality();
   loadMcp();
+  loadUpdate();
+  loadVersion();
 }
 
 function closeSettings(refocus = false) {
   if (!settingsOpen) return;
   settingsOpen = false;
   $("mcpResetAsk").hidden = true;
-  $("settingsPop").hidden = true;
+  $("settingsModal").hidden = true;
   $("settingsBtn").setAttribute("aria-expanded", "false");
+  if (!state.overlay && !panelOpen) $("stage").inert = false;
   if (refocus) $("settingsBtn").focus();
+}
+
+/** Tab and Shift+Tab wrap inside the settings window. */
+function onSettingsTab(e) {
+  if (e.key !== "Tab") return;
+  const sheet = $("settingsSheet");
+  const stops = [...sheet.querySelectorAll("button, [tabindex]")].filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+  if (!stops.length) return;
+  const at = document.activeElement;
+  const to = e.shiftKey ? (at === stops[0] || at === sheet ? stops.at(-1) : null) : at === stops.at(-1) ? stops[0] : null;
+  if (!to) return;
+  e.preventDefault();
+  to.focus();
 }
 
 const engineReady = () => Boolean(engine && engine.state === "ready");
 
 /** The settings switches: element id → setting. */
-const SWITCHES = { dockArtSwitch: "dockArt", coverRowSwitch: "coverRow", menuBarSwitch: "menuBar", menuBarTitleSwitch: "menuBarTitle" };
+const SWITCHES = { dockArtSwitch: "dockArt", coverRowSwitch: "coverRow", menuBarSwitch: "menuBar", menuBarTitleSwitch: "menuBarTitle", autoUpdateSwitch: "autoUpdate" };
 
 function renderSettings() {
   const s = getSettings();
@@ -2670,6 +2688,78 @@ function renderSettings() {
     : ready
       ? "Changing restarts the player for a moment."
       : "Available once the player here is ready.";
+}
+
+// ---------- settings: updates (Rust updater.rs): the status line, Check now, Restart now ----------
+
+let upd = null; // update_status / update-status: {status, version, message, current, auto}; null = no updater here
+let updRestarting = false; // Restart now is installing
+let appVersion = ""; // the running version (the footer), "" = not known yet
+
+async function loadUpdate() {
+  try {
+    upd = await invoke("update_status");
+  } catch {
+    upd = null; // an older backend: an empty row, no buttons
+  }
+  if (settingsOpen) renderUpdate();
+}
+
+function onUpdateStatus(p) {
+  upd = p || null;
+  if (settingsOpen) renderUpdate();
+}
+
+async function loadVersion() {
+  if (appVersion) return;
+  try {
+    appVersion = (await window.__TAURI__.app?.getVersion?.()) || "";
+  } catch {
+    appVersion = ""; // update_status's current stands in
+  }
+  if (settingsOpen) renderUpdate();
+}
+
+function renderUpdate() {
+  const view = updateView(upd);
+  const had = document.activeElement;
+  setText("updateStatus", view.text);
+  $("updateRow").hidden = !view.text && !view.check && !view.restart;
+  $("updateCheck").hidden = !view.check;
+  $("updateRestart").hidden = !view.restart;
+  $("updateRestart").disabled = updRestarting;
+  $("updateRestart").textContent = updRestarting ? "Restarting…" : "Restart now";
+  // a pressed button that went away (Check now → checking): focus stays in the section
+  if ($("updateRow").contains(had) && !had.getClientRects().length) $("autoUpdateSwitch").focus();
+  const v = appVersion || (upd && upd.current) || "";
+  setText("appVersion", v && `Stylus ${v}`);
+}
+
+const toggleAutoUpdate = () =>
+  flipSetting("autoUpdate", "install updates automatically", (on) => invoke("update_set_auto", { on }).catch(() => {}));
+
+/** Check now: Rust answers with update-status events (checking, then the result). */
+function checkUpdate() {
+  invoke("update_check_now").catch((e) => {
+    applog("warn", `update check: ${e}`);
+    toast(`Couldn't check for updates: ${reason(e)}`);
+    loadUpdate();
+  });
+}
+
+/** Restart now: Rust installs the staged update, then quits and opens the app again. */
+async function restartUpdate() {
+  if (updRestarting) return;
+  updRestarting = true;
+  renderUpdate();
+  try {
+    await invoke("update_restart");
+  } catch (e) {
+    updRestarting = false;
+    applog("warn", `update restart: ${e}`);
+    toast(`Couldn't install the update: ${reason(e)}`);
+    loadUpdate();
+  }
 }
 
 // ---------- settings: the local MCP server (Rust mcp.rs) for AI tools on this Mac ----------
@@ -4575,6 +4665,11 @@ async function boot() {
   $("coverRowSwitch").addEventListener("click", toggleCoverRow);
   $("menuBarSwitch").addEventListener("click", toggleMenuBar);
   $("menuBarTitleSwitch").addEventListener("click", toggleMenuBarTitle);
+  $("autoUpdateSwitch").addEventListener("click", toggleAutoUpdate);
+  $("updateCheck").addEventListener("click", checkUpdate);
+  $("updateRestart").addEventListener("click", restartUpdate);
+  $("settingsModal").addEventListener("click", (e) => e.target.closest("[data-close]") && closeSettings(true));
+  $("settingsSheet").addEventListener("keydown", onSettingsTab);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onQualityKey);
   $("mcpSwitch").addEventListener("click", toggleMcp);
@@ -4700,6 +4795,7 @@ async function boot() {
   listenEvent("toast", (p) => toast(String(p || "")));
   listenEvent("mini-command", onMiniCommand);
   listenEvent("mini-visible", onMiniVisible);
+  listenEvent("update-status", onUpdateStatus);
   // this Mac's player: what plays, from librespot; the loop renders from it
   listenEvent("player-state", onPlayerState);
   // an add or remove in the app's own library (also from MCP): the Library redraws

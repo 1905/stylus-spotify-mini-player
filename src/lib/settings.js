@@ -17,6 +17,7 @@ export const isQuality = (v) => QUALITIES.some((q) => q.kbps === v);
  * - coverRow: played and next covers around the current one (default on); off = the current cover alone, centred.
  * - menuBar: the icon and mini player in the menu bar (default on); Rust tray.rs reads it at launch too.
  * - menuBarTitle: the current song next to that icon (default off).
+ * - autoUpdate: updates download and install at the quit (default on); Rust updater.rs reads it too.
  */
 export function parseSettings(raw) {
   let s = null;
@@ -26,5 +27,5 @@ export function parseSettings(raw) {
     s = null;
   }
   const o = s && typeof s === "object" && !Array.isArray(s) ? s : {};
-  return { dockArt: o.dockArt !== false, coverRow: o.coverRow !== false, menuBar: o.menuBar !== false, menuBarTitle: o.menuBarTitle === true };
+  return { dockArt: o.dockArt !== false, coverRow: o.coverRow !== false, menuBar: o.menuBar !== false, menuBarTitle: o.menuBarTitle === true, autoUpdate: o.autoUpdate !== false };
 }
