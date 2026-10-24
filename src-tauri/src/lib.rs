@@ -25,6 +25,7 @@ mod settings;
 mod spotify;
 mod store;
 mod tray;
+mod updater;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -37,6 +38,8 @@ pub fn run() {
     internal::attach(engine.clone());
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // signed updates from GitHub Releases (updater.rs); config in tauri.conf.json plugins.updater
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine.clone())
         // cover images from disk (covers.rs); the answer comes from a spawned task
         .register_asynchronous_uri_scheme_protocol("cover", |_ctx, request, responder| {
@@ -62,6 +65,8 @@ pub fn run() {
             if let Err(e) = tray::init(app.handle()) {
                 log::warn!("menu bar: {e}");
             }
+            // the update timer: first check 10 s from now, then every 6 h
+            updater::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -139,7 +144,11 @@ pub fn run() {
             tray::mini_get,
             tray::mini_command,
             tray::mini_hide,
-            tray::tray_config
+            tray::tray_config,
+            updater::update_status,
+            updater::update_check_now,
+            updater::update_set_auto,
+            updater::update_restart
         ])
         // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits.
         // The mini player hides when it loses focus (a click outside it).
@@ -161,6 +170,8 @@ pub fn run() {
         tauri::RunEvent::Exit => {
             // pause and leave Spotify Connect cleanly, so "This Mac" doesn't linger as a device
             engine.shutdown();
+            // a staged update replaces the bundle now; the next launch runs it
+            updater::install_at_exit();
         }
         // Dock icon clicked while the window is hidden: bring it back
         #[cfg(target_os = "macos")]

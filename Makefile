@@ -10,6 +10,12 @@ AIR_ENV  := export PATH=/opt/homebrew/bin:$$HOME/.cargo/bin:$$PATH; cd $(REMOTE)
 OUT      := /tmp/stylus-build
 BUNDLE   := $(OUT)/$(APP_NAME).app
 BIN      := $(OUT)/$(BIN_NAME)
+# release builds (make dmg) also make the signed update archive Stylus.app.tar.gz + .sig for the
+# auto-updater (src-tauri/src/updater.rs). The key stays on the Air (empty password); plain builds
+# (install, run) leave createUpdaterArtifacts off and need no key.
+UPD_KEY  := ~/.config/stylus/updater.key
+UPD_CONF := {\"bundle\":{\"createUpdaterArtifacts\":true}}
+UPD_ENV  := { test -s $(UPD_KEY) || { echo "no updater key $(UPD_KEY) on the Air" >&2; false; }; } && export TAURI_SIGNING_PRIVATE_KEY="$$(cat $(UPD_KEY))" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=
 # the app under its old names (Needle, rust-spotify): quit it too, it shares the Connect device id
 OLD_APP_IDS   := com.kass.needle com.kass.rustspotify
 OLD_BIN_NAMES := Needle needle rust-spotify
@@ -46,12 +52,13 @@ run: sync
 	$(MAKE) stop
 	$(BIN)
 
-## dmg: the DMG for a release, built on the Air, copied to $(OUT)/dmg. hdiutil, not Tauri's
-## bundle_dmg.sh: that script drives Finder over AppleScript, which fails in an SSH session.
+## dmg: the DMG and the signed update archive for a release, built on the Air, copied to $(OUT)/dmg.
+## hdiutil, not Tauri's bundle_dmg.sh: that script drives Finder over AppleScript, which fails in an SSH session.
 dmg: sync
-	ssh $(AIR) '$(AIR_ENV) && npm ci --silent && npx tauri build --bundles app && rm -rf /tmp/stylus-dmg && mkdir -p /tmp/stylus-dmg/src && cp -R src-tauri/target/release/bundle/macos/$(APP_NAME).app /tmp/stylus-dmg/src/ && ln -s /Applications /tmp/stylus-dmg/src/Applications && hdiutil create -volname $(APP_NAME) -srcfolder /tmp/stylus-dmg/src -ov -format UDZO /tmp/stylus-dmg/$(APP_NAME).dmg'
+	ssh $(AIR) '$(AIR_ENV) && $(UPD_ENV) && npm ci --silent && npx tauri build --bundles app --config "$(UPD_CONF)" && rm -rf /tmp/stylus-dmg && mkdir -p /tmp/stylus-dmg/src && cp -R src-tauri/target/release/bundle/macos/$(APP_NAME).app /tmp/stylus-dmg/src/ && cp src-tauri/target/release/bundle/macos/$(APP_NAME).app.tar.gz src-tauri/target/release/bundle/macos/$(APP_NAME).app.tar.gz.sig /tmp/stylus-dmg/ && ln -s /Applications /tmp/stylus-dmg/src/Applications && hdiutil create -volname $(APP_NAME) -srcfolder /tmp/stylus-dmg/src -ov -format UDZO /tmp/stylus-dmg/$(APP_NAME).dmg'
 	mkdir -p $(OUT)/dmg
 	rsync -a "$(AIR):/tmp/stylus-dmg/$(APP_NAME).dmg" $(OUT)/dmg/
+	rsync -a "$(AIR):/tmp/stylus-dmg/$(APP_NAME).app.tar.gz*" $(OUT)/dmg/
 	shasum -a 256 $(OUT)/dmg/$(APP_NAME).dmg
 
 ## release: version bump, tag, DMG, release notes and Homebrew cask in one run (scripts/release.py).

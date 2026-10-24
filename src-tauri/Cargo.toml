@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 # tray-icon: the menu-bar mini player (tray.rs); macos-private-api: its transparent, rounded window
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-opener = "2"
+# signed auto-updates from GitHub Releases (updater.rs)
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", features = ["json"] }
@@ -51,6 +53,8 @@ subtle = "2"
 tokio-util = "0.7"
 # the anonymized log (logshare.rs): mask patterns; already in the tree via librespot
 regex = "1"
+# access(2): may the updater replace the bundle (updater.rs); already in the tree via tauri
+libc = "0.2"
 
 # Dock icon = album art (dock.rs); the objc2 versions tauri already pulls in
 [target.'cfg(target_os = "macos")'.dependencies]

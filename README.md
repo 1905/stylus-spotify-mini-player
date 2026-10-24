@@ -44,6 +44,12 @@ Or download **Stylus.dmg** from [the latest release](https://github.com/1905/sty
 
 **Requirements:** macOS 13 or later on Apple Silicon, and a **Spotify Premium** account (playback through Spotify Connect requires Premium).
 
+### Updates
+
+Stylus updates itself. It checks GitHub Releases 10 seconds after launch and then every 6 hours, downloads a signed update in the background, and installs it when you quit Stylus. There are no dialogs. **Settings → Updates** shows the status and has **Check now** and **Restart now**. To stop automatic updates, turn off **Install updates automatically**.
+
+Automatic updates work only when `Stylus.app` is in `/Applications` or `~/Applications`, and not when it runs from the disk image. Stylus 0.3.0 and earlier cannot update themselves: install 0.4.0 once from the DMG or with `brew upgrade --cask stylus`.
+
 ## Features
 
 <table>
@@ -128,7 +134,7 @@ npx tauri build --bundles app   # → src-tauri/target/release/bundle/macos/Styl
 |---|---|
 | `make install` | Builds `Stylus.app` on the build Mac (`AIR` in the Makefile) and installs it into `/Applications`. |
 | `make run` | Fresh release build, run as a bare binary. It has no Dock icon, so you can tell it apart from the installed app. |
-| `make dmg` | Builds `Stylus.dmg` for a release. |
+| `make dmg` | Builds `Stylus.dmg` and the signed update archive `Stylus.app.tar.gz` for a release. The signing key must be on the build Mac. |
 | `make test` | Frontend (vitest) and backend (cargo) tests. |
 | `make stop` | Quits every running copy. |
 
