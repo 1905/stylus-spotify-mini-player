@@ -63,7 +63,7 @@ jobs:
           # the feed installed copies read (releases/latest/download/latest.json); the app shows no notes
           v=$(node -p 'require("./package.json").version')
           python3 scripts/update_feed.py "$v" --notes "Stylus $v" --sig out/Stylus.app.tar.gz.sig \
-            --url "https://github.com/1905/stylus-spotify-mini-player/releases/download/v$v/Stylus.app.tar.gz" --out out/latest.json
+            --url "https://github.com/${{ github.repository }}/releases/download/v$v/Stylus.app.tar.gz" --out out/latest.json
 
       - uses: actions/upload-artifact@v4
         with:

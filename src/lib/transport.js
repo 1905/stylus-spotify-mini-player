@@ -43,6 +43,8 @@ export function createIntents(lagMs, lagFor = {}) {
 }
 
 const REPEAT = ["off", "context", "track"];
+/** The repeat a new playlist gets until the user picks another: on (loop the playlist). */
+export const DEFAULT_REPEAT = "context";
 
 /** off → context → track → off. Anything unknown counts as off. */
 export function nextRepeat(mode) {

@@ -1138,11 +1138,14 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
     }
 }
 
-/// The repeat a restore loads with. Repeat is on by default: a launch turns a saved "off" back
-/// on. A finished playlist (only possible with repeat off) and a reconnect keep the saved mode.
+/// Repeat is on by default: a playlist loops (the UI's DEFAULT_REPEAT, src/lib/transport.js).
+const DEFAULT_REPEAT: Repeat = Repeat::Context;
+
+/// The repeat a restore loads with: a launch turns a saved "off" back to the default. A
+/// finished playlist (only possible with repeat off) and a reconnect keep the saved mode.
 fn restore_repeat(why: Restore, saved: Repeat) -> Repeat {
     if why == Restore::Launch && saved == Repeat::Off {
-        Repeat::Context
+        DEFAULT_REPEAT
     } else {
         saved
     }
@@ -1291,13 +1294,12 @@ async fn load_default_source(engine: &Engine, device_id: &str, tracker: &Tracker
     if !may_load(engine, device_id, Restore::Launch) {
         return true;
     }
-    // repeat on by default: Liked Songs loops
-    if let Err(e) = send_load(engine, source.clone(), None, 0, false, Repeat::Context, tracker.volume()) {
+    if let Err(e) = send_load(engine, source.clone(), None, 0, false, DEFAULT_REPEAT, tracker.volume()) {
         log::warn!(target: DEFAULT_LOG, "default session: Liked Songs {what} not sent: {e}");
         return true;
     }
     // only what was sent (`Engine::load` records after Ok too)
-    tracker.loaded(source, None, 0, false, Repeat::Context);
+    tracker.loaded(source, None, 0, false, DEFAULT_REPEAT);
     if is_context && !track_within(tracker, DEFAULT_CONTEXT_WAIT).await {
         log::warn!(target: DEFAULT_LOG, "default session: the Liked Songs context showed no track in {} s", DEFAULT_CONTEXT_WAIT.as_secs());
         return false;

@@ -40,6 +40,11 @@ def feed(version, notes, signature, url, now=None):
     }
 
 
+def render(f):
+    """The feed as the latest.json text."""
+    return json.dumps(f, indent=2) + "\n"
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("version", help="X.Y.Z")
@@ -52,7 +57,7 @@ def main(argv=None):
     a = p.parse_args(argv)
     text = a.notes if a.notes is not None else Path(a.notes_file).read_text()
     try:
-        out = json.dumps(feed(a.version, text, Path(a.sig).read_text(), a.url), indent=2) + "\n"
+        out = render(feed(a.version, text, Path(a.sig).read_text(), a.url))
     except ValueError as e:
         sys.exit(f"✗ {e}")
     if a.out:

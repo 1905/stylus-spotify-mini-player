@@ -5,7 +5,7 @@ import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeli
 import { panelRows } from "./lib/playlist.js";
 import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
-import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
+import { createIntents, DEFAULT_REPEAT, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
@@ -74,7 +74,7 @@ const state = {
   gen: { detail: 0, search: 0, page: 0 },
 };
 // the repeat a playlist started here gets: on (loop the playlist) until the repeat button picks another
-let repeatPref = "context";
+let repeatPref = DEFAULT_REPEAT;
 
 // ---------- errors ----------
 
@@ -203,8 +203,10 @@ function showLogin(kind) {
   quality = null;
   qualityBusy = 0;
   restartHoldUntil = 0;
-  if (loggedOut) resetDockArt(); // the next account's songs set it again
-  if (loggedOut) repeatPref = "context";
+  if (loggedOut) {
+    resetDockArt(); // the next account's songs set it again
+    repeatPref = DEFAULT_REPEAT;
+  }
   Object.assign(state, {
     mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null,
     shuffle: false, repeat: "off", volume: null, supportsVolume: false, contextUri: null, saved: null,
@@ -504,8 +506,8 @@ async function refresh(epoch) {
   }
   // the finished playlist plays again: its cover comes back. Only a poll begun after the finish
   // counts: an older one can still carry the "playing" of the song that just ended
-  if (dockHeld && state.isPlaying && startedAt > dockHeldAt) {
-    dockHeld = false;
+  if (dockHeldAt !== null && state.isPlaying && startedAt > dockHeldAt) {
+    dockHeldAt = null;
     syncDockArt();
   }
   // right after a local seek, Spotify may still report the old position: keep ours
@@ -2642,7 +2644,6 @@ function openSettings() {
   loadQuality();
   loadMcp();
   loadUpdate();
-  loadVersion();
 }
 
 function closeSettings(refocus = false) {
@@ -2699,7 +2700,6 @@ function renderSettings() {
 
 let upd = null; // update_status / update-status: {status, version, message, current, auto}; null = no updater here
 let updRestarting = false; // Restart now is installing
-let appVersion = ""; // the running version (the footer), "" = not known yet
 
 async function loadUpdate() {
   try {
@@ -2715,16 +2715,6 @@ function onUpdateStatus(p) {
   if (settingsOpen) renderUpdate();
 }
 
-async function loadVersion() {
-  if (appVersion) return;
-  try {
-    appVersion = (await window.__TAURI__.app?.getVersion?.()) || "";
-  } catch {
-    appVersion = ""; // update_status's current stands in
-  }
-  if (settingsOpen) renderUpdate();
-}
-
 function renderUpdate() {
   const view = updateView(upd);
   const had = document.activeElement;
@@ -2736,7 +2726,7 @@ function renderUpdate() {
   $("updateRestart").textContent = updRestarting ? "Restarting…" : "Restart now";
   // a pressed button that went away (Check now → checking): focus stays in the section
   if ($("updateRow").contains(had) && !had.getClientRects().length) $("autoUpdateSwitch").focus();
-  const v = appVersion || (upd && upd.current) || "";
+  const v = (upd && upd.current) || "";
   setText("appVersion", v && `Stylus ${v}`);
 }
 
@@ -2873,8 +2863,8 @@ function applyCoverRow() {
 }
 
 let dockUrl = null; // the cover set as the app icon, null = the app's own icon
-let dockHeld = false; // a playlist played to its end: the app's own icon until something plays
-let dockHeldAt = 0; // when dockHeld was set (performance.now())
+// a playlist played to its end at this performance.now(): the app's own icon until something plays; null = not held
+let dockHeldAt = null;
 
 /**
  * The current song's cover as the app icon (when on), once per cover; no song, or a finished
@@ -2882,7 +2872,7 @@ let dockHeldAt = 0; // when dockHeld was set (performance.now())
  */
 function syncDockArt() {
   if (!getSettings().dockArt) return;
-  const url = (!dockHeld && state.now && state.now.cover) || null;
+  const url = (dockHeldAt === null && state.now && state.now.cover) || null;
   if (url === dockUrl) return;
   dockUrl = url;
   invoke("set_dock_art", { url }).catch(() => {});
@@ -4788,7 +4778,6 @@ async function boot() {
     if ($("stage").hidden) return;
     applog("info", `session restored: ${p && p.trackUri}`);
     if (p && p.finished) {
-      dockHeld = true;
       dockHeldAt = performance.now();
       syncDockArt();
     }

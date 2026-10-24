@@ -312,7 +312,7 @@ def dmg_air(t, version, body, notes):
     (AIR_OUT / "Stylus.dmg.sha256").write_text(f"{digest}  Stylus.dmg\n")
     sig = (AIR_OUT / "Stylus.app.tar.gz.sig").read_text()
     feed = update_feed.feed(version, highlights(notes), sig, tarball_url(version))
-    (AIR_OUT / "latest.json").write_text(json.dumps(feed, indent=2) + "\n")
+    (AIR_OUT / "latest.json").write_text(update_feed.render(feed))
     files = [str(AIR_OUT / f) for f in RELEASE_FILES]
     if release_assets(t) is None:
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:

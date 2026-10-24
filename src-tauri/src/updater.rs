@@ -116,20 +116,14 @@ pub fn due(last: Option<SystemTime>, now: SystemTime, gap: Duration) -> bool {
     last.is_none_or(|t| now.duration_since(t).map_or(true, |d| d >= gap))
 }
 
-/// What a check does with a newer version `v` on the feed.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Next {
-    Report(Status),
-    Download,
-}
-
-pub fn next_step(v: &str, staged: Option<&str>, auto: bool) -> Next {
+/// What a check reports for a newer version `v` on the feed; None = download it.
+pub fn next_step(v: &str, staged: Option<&str>, auto: bool) -> Option<Status> {
     if staged == Some(v) {
-        Next::Report(shown(v, auto))
+        Some(shown(v, auto))
     } else if auto {
-        Next::Download
+        None
     } else {
-        Next::Report(Status::Available(v.to_string()))
+        Some(Status::Available(v.to_string()))
     }
 }
 
@@ -262,9 +256,8 @@ async fn run_check(app: &AppHandle, auto: bool) -> Result<Status, String> {
         return Ok(Status::UpToDate);
     };
     let v = update.version.clone();
-    match next_step(&v, staged_version().as_deref(), auto) {
-        Next::Report(status) => return Ok(status),
-        Next::Download => {}
+    if let Some(status) = next_step(&v, staged_version().as_deref(), auto) {
+        return Ok(status);
     }
     set(app, Status::Downloading(v.clone()));
     // download() checks the signature against plugins.updater.pubkey: a bad one stages nothing
@@ -275,16 +268,31 @@ async fn run_check(app: &AppHandle, auto: bool) -> Result<Status, String> {
     Ok(shown(&v, auto_on()))
 }
 
+/// Installs the staged update and returns its version. A failed install stays staged (the
+/// plugin puts the old bundle back), so a later quit or Restart now tries again.
+fn install_staged() -> Result<String, String> {
+    let Some((update, bytes)) = state().staged.take() else {
+        return Err("no update is staged".into());
+    };
+    match update.install(&bytes) {
+        Ok(()) => Ok(update.version),
+        Err(e) => {
+            let e = format!("install of {} failed: {e}", update.version);
+            state().staged = Some((update, bytes));
+            Err(e)
+        }
+    }
+}
+
 /// Installs the staged update. Runs on `RunEvent::Exit`, while the setting is on. Errors are
 /// logged; the old bundle stays and the next launch checks again.
 pub fn install_at_exit() {
-    if !auto_on() {
+    if !auto_on() || staged_version().is_none() {
         return;
     }
-    let Some((update, bytes)) = state().staged.take() else { return };
-    match update.install(&bytes) {
-        Ok(()) => log::info!(target: LOG, "installed {} at quit", update.version),
-        Err(e) => log::warn!(target: LOG, "install of {} at quit failed: {e}", update.version),
+    match install_staged() {
+        Ok(v) => log::info!(target: LOG, "installed {v} at quit"),
+        Err(e) => log::warn!(target: LOG, "{e} (at quit)"),
     }
 }
 
@@ -316,6 +324,7 @@ pub fn update_set_auto(app: AppHandle, on: bool) {
         }
         _ => {}
     }
+    // `auto` is in the payload: the UI hears the flip even when the status stayed the same
     publish(&app);
 }
 
@@ -323,18 +332,17 @@ pub fn update_set_auto(app: AppHandle, on: bool) {
 /// through `RunEvent::Exit` (async command = off the main thread), so the engine shuts down.
 #[tauri::command]
 pub async fn update_restart(app: AppHandle) -> Result<(), String> {
-    let Some((update, bytes)) = state().staged.take() else {
+    if staged_version().is_none() {
         return Err("no update is staged".into());
-    };
-    let v = update.version.clone();
-    let installed = tauri::async_runtime::spawn_blocking(move || update.install(&bytes))
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r.map_err(|e| e.to_string()));
-    if let Err(e) = installed {
-        set(&app, Status::Failed(e.clone()));
-        return Err(e);
     }
+    let installed = tauri::async_runtime::spawn_blocking(install_staged).await.map_err(|e| e.to_string()).and_then(|r| r);
+    let v = match installed {
+        Ok(v) => v,
+        Err(e) => {
+            set(&app, Status::Failed(e.clone()));
+            return Err(e);
+        }
+    };
     log::info!(target: LOG, "installed {v}, restarting");
     app.request_restart();
     Ok(())
@@ -396,13 +404,13 @@ mod tests {
     fn found_update_transitions() {
         let s = |v: &str| v.to_string();
         // setting on: download a new version; a staged one shows as staged
-        assert_eq!(next_step("0.4.1", None, true), Next::Download);
-        assert_eq!(next_step("0.4.1", Some("0.4.1"), true), Next::Report(Status::Staged(s("0.4.1"))));
+        assert_eq!(next_step("0.4.1", None, true), None);
+        assert_eq!(next_step("0.4.1", Some("0.4.1"), true), Some(Status::Staged(s("0.4.1"))));
         // a newer one than the staged: download again
-        assert_eq!(next_step("0.4.2", Some("0.4.1"), true), Next::Download);
+        assert_eq!(next_step("0.4.2", Some("0.4.1"), true), None);
         // setting off: only report
-        assert_eq!(next_step("0.4.1", None, false), Next::Report(Status::Available(s("0.4.1"))));
-        assert_eq!(next_step("0.4.1", Some("0.4.1"), false), Next::Report(Status::Available(s("0.4.1"))));
+        assert_eq!(next_step("0.4.1", None, false), Some(Status::Available(s("0.4.1"))));
+        assert_eq!(next_step("0.4.1", Some("0.4.1"), false), Some(Status::Available(s("0.4.1"))));
     }
 
     #[test]
