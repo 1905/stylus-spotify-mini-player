@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { parseSettings, isQuality } from "./settings.js";
 
-const DEFAULTS = { dockArt: true, coverRow: true, menuBar: true, menuBarTitle: false };
+const DEFAULTS = { dockArt: true, coverRow: true, menuBar: true, menuBarTitle: false, autoUpdate: true };
 
 describe("parseSettings", () => {
-  it("everything but the song in the menu bar is on by default", () => {
+  it("everything but the song in the menu bar is on by default (automatic updates too)", () => {
     expect(parseSettings(null)).toEqual(DEFAULTS);
     expect(parseSettings(undefined)).toEqual(DEFAULTS);
     expect(parseSettings("{}")).toEqual(DEFAULTS);
@@ -16,10 +16,11 @@ describe("parseSettings", () => {
     expect(parseSettings({ coverRow: false })).toEqual({ ...DEFAULTS, coverRow: false });
     expect(parseSettings({ dockArt: false, coverRow: false })).toEqual({ ...DEFAULTS, dockArt: false, coverRow: false });
     expect(parseSettings({ menuBar: false, menuBarTitle: true })).toEqual({ ...DEFAULTS, menuBar: false, menuBarTitle: true });
+    expect(parseSettings({ autoUpdate: false })).toEqual({ ...DEFAULTS, autoUpdate: false });
   });
 
   it("broken values fall back to the defaults", () => {
-    for (const raw of ["not json", "[1]", [1], "null", "42", 42, '{"dockArt":"no"}', { coverRow: 0 }, { menuBarTitle: "yes" }]) expect(parseSettings(raw)).toEqual(DEFAULTS);
+    for (const raw of ["not json", "[1]", [1], "null", "42", 42, '{"dockArt":"no"}', { coverRow: 0 }, { menuBarTitle: "yes" }, { autoUpdate: 0 }, { autoUpdate: "off" }]) expect(parseSettings(raw)).toEqual(DEFAULTS);
   });
 });
 

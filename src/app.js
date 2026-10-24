@@ -5,7 +5,7 @@ import { buildRun, mergeHistory, measure, flip, coverTarget } from "./lib/timeli
 import { panelRows } from "./lib/playlist.js";
 import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
-import { createIntents, nextRepeat, stepVolume } from "./lib/transport.js";
+import { createIntents, DEFAULT_REPEAT, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
@@ -19,6 +19,7 @@ import { ICONS } from "./lib/icons.js";
 import { PAGE_SIZE, pageOffsets, foldPages } from "./lib/paging.js";
 import { parseLink, looksLikeLink, trackLink } from "./lib/links.js";
 import { mcpStatusLine, MCP_COPY } from "./lib/mcp.js";
+import { updateView } from "./lib/update.js";
 import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
@@ -72,6 +73,8 @@ const state = {
   overlay: null,
   gen: { detail: 0, search: 0, page: 0 },
 };
+// the repeat a playlist started here gets: on (loop the playlist) until the repeat button picks another
+let repeatPref = DEFAULT_REPEAT;
 
 // ---------- errors ----------
 
@@ -200,7 +203,10 @@ function showLogin(kind) {
   quality = null;
   qualityBusy = 0;
   restartHoldUntil = 0;
-  if (loggedOut) resetDockArt(); // the next account's songs set it again
+  if (loggedOut) {
+    resetDockArt(); // the next account's songs set it again
+    repeatPref = DEFAULT_REPEAT;
+  }
   Object.assign(state, {
     mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null,
     shuffle: false, repeat: "off", volume: null, supportsVolume: false, contextUri: null, saved: null,
@@ -497,6 +503,12 @@ async function refresh(epoch) {
     state.isPlaying = false;
     state.supportsVolume = false;
     state.contextUri = null;
+  }
+  // the finished playlist plays again: its cover comes back. Only a poll begun after the finish
+  // counts: an older one can still carry the "playing" of the song that just ended
+  if (dockHeldAt !== null && state.isPlaying && startedAt > dockHeldAt) {
+    dockHeldAt = null;
+    syncDockArt();
   }
   // right after a local seek, Spotify may still report the old position: keep ours
   const seeking = track && state.now && track.uri === state.now.uri && performance.now() < state.seekHoldUntil;
@@ -1337,7 +1349,7 @@ function devName(id) {
 async function playSource(deviceId, src) {
   if (isEngineDevice(engine, deviceId)) {
     try {
-      return await invoke("local_load", { spec: { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat } });
+      return await invoke("local_load", { spec: { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: repeatPref } });
     } catch (e) {
       if (!isCode(e, "ENGINE_NOT_READY")) throw e;
     }
@@ -1411,7 +1423,7 @@ function startPending(kind, trackUri, row = null, needPlaying = true) {
   pendingTimer = setTimeout(() => {
     if (!pending.timeout(token)) return;
     applog("warn", `play ${kind} not confirmed after ${PENDING_MS}ms: want ${trackUri}, now ${state.now && state.now.uri}, playing ${state.isPlaying}`);
-    if (kind !== "resume") toast("Spotify is slow to respond");
+    if (kind !== "resume") toast("Still loading. Spotify is sending this song slowly.");
     renderPending();
   }, PENDING_MS);
   if (pendingRow) pendingRow.classList.remove("is-pending");
@@ -1651,11 +1663,12 @@ async function toggleShuffle() {
   );
 }
 
-/** off → context → track → off. */
+/** off → context → track → off. The pick also holds for the next playlist started here. */
 async function cycleRepeat() {
   if (state.mode !== "track") return;
   const before = state.repeat;
   const mode = (state.repeat = nextRepeat(before));
+  repeatPref = mode;
   renderChrome();
   const dev = state.device && state.device.id;
   await sendIntent(
@@ -2272,7 +2285,6 @@ async function pickDevice(d) {
 function onOutside(ev) {
   if (devicesOpen && !ev.target.closest(".device-wrap")) closeDevices();
   if (volumeOpen && !ev.target.closest("#volume")) closeVolume();
-  if (settingsOpen && !ev.target.closest(".settings-wrap")) closeSettings();
 }
 
 // next / previous: a ring on the pressed button from the click until a poll shows another song,
@@ -2595,7 +2607,7 @@ function playPanelRow(r, el) {
   startPlay({ uris, trackUri: uris[0] }, { kind: "panel", row: el });
 }
 
-// ---------- settings: album art as the app icon, the in-app player's audio quality ----------
+// ---------- settings: a window over the stage; album art as the app icon, the player's audio quality ----------
 
 let settings = null; // parseSettings of the stored "settings", read once
 let settingsOpen = false;
@@ -2623,27 +2635,44 @@ function openSettings() {
   closeVolume();
   closePanel();
   settingsOpen = true;
-  $("settingsPop").hidden = false;
+  $("settingsModal").hidden = false;
   $("settingsBtn").setAttribute("aria-expanded", "true");
+  $("stage").inert = true; // a modal window over the stage
   renderSettings();
-  $("dockArtSwitch").focus();
+  renderUpdate();
+  $("settingsSheet").focus({ preventScroll: true });
   loadQuality();
   loadMcp();
+  loadUpdate();
 }
 
 function closeSettings(refocus = false) {
   if (!settingsOpen) return;
   settingsOpen = false;
   $("mcpResetAsk").hidden = true;
-  $("settingsPop").hidden = true;
+  $("settingsModal").hidden = true;
   $("settingsBtn").setAttribute("aria-expanded", "false");
+  if (!state.overlay && !panelOpen) $("stage").inert = false;
   if (refocus) $("settingsBtn").focus();
+}
+
+/** Tab and Shift+Tab wrap inside the settings window. */
+function onSettingsTab(e) {
+  if (e.key !== "Tab") return;
+  const sheet = $("settingsSheet");
+  const stops = [...sheet.querySelectorAll("button, [tabindex]")].filter((el) => !el.disabled && el.tabIndex >= 0 && el.getClientRects().length);
+  if (!stops.length) return;
+  const at = document.activeElement;
+  const to = e.shiftKey ? (at === stops[0] || at === sheet ? stops.at(-1) : null) : at === stops.at(-1) ? stops[0] : null;
+  if (!to) return;
+  e.preventDefault();
+  to.focus();
 }
 
 const engineReady = () => Boolean(engine && engine.state === "ready");
 
 /** The settings switches: element id → setting. */
-const SWITCHES = { dockArtSwitch: "dockArt", coverRowSwitch: "coverRow", menuBarSwitch: "menuBar", menuBarTitleSwitch: "menuBarTitle" };
+const SWITCHES = { dockArtSwitch: "dockArt", coverRowSwitch: "coverRow", menuBarSwitch: "menuBar", menuBarTitleSwitch: "menuBarTitle", autoUpdateSwitch: "autoUpdate" };
 
 function renderSettings() {
   const s = getSettings();
@@ -2665,6 +2694,67 @@ function renderSettings() {
     : ready
       ? "Changing restarts the player for a moment."
       : "Available once the player here is ready.";
+}
+
+// ---------- settings: updates (Rust updater.rs): the status line, Check now, Restart now ----------
+
+let upd = null; // update_status / update-status: {status, version, message, current, auto}; null = no updater here
+let updRestarting = false; // Restart now is installing
+
+async function loadUpdate() {
+  try {
+    upd = await invoke("update_status");
+  } catch {
+    upd = null; // an older backend: an empty row, no buttons
+  }
+  if (settingsOpen) renderUpdate();
+}
+
+function onUpdateStatus(p) {
+  upd = p || null;
+  if (settingsOpen) renderUpdate();
+}
+
+function renderUpdate() {
+  const view = updateView(upd);
+  const had = document.activeElement;
+  setText("updateStatus", view.text);
+  $("updateRow").hidden = !view.text && !view.check && !view.restart;
+  $("updateCheck").hidden = !view.check;
+  $("updateRestart").hidden = !view.restart;
+  $("updateRestart").disabled = updRestarting;
+  $("updateRestart").textContent = updRestarting ? "Restarting…" : "Restart now";
+  // a pressed button that went away (Check now → checking): focus stays in the section
+  if ($("updateRow").contains(had) && !had.getClientRects().length) $("autoUpdateSwitch").focus();
+  const v = (upd && upd.current) || "";
+  setText("appVersion", v && `Stylus ${v}`);
+}
+
+const toggleAutoUpdate = () =>
+  flipSetting("autoUpdate", "install updates automatically", (on) => invoke("update_set_auto", { on }).catch(() => {}));
+
+/** Check now: Rust answers with update-status events (checking, then the result). */
+function checkUpdate() {
+  invoke("update_check_now").catch((e) => {
+    applog("warn", `update check: ${e}`);
+    toast(`Couldn't check for updates: ${reason(e)}`);
+    loadUpdate();
+  });
+}
+
+/** Restart now: Rust installs the staged update, then quits and opens the app again. */
+async function restartUpdate() {
+  if (updRestarting) return;
+  updRestarting = true;
+  renderUpdate();
+  try {
+    await invoke("update_restart");
+  } catch (e) {
+    updRestarting = false;
+    applog("warn", `update restart: ${e}`);
+    toast(`Couldn't install the update: ${reason(e)}`);
+    loadUpdate();
+  }
 }
 
 // ---------- settings: the local MCP server (Rust mcp.rs) for AI tools on this Mac ----------
@@ -2773,11 +2863,16 @@ function applyCoverRow() {
 }
 
 let dockUrl = null; // the cover set as the app icon, null = the app's own icon
+// a playlist played to its end at this performance.now(): the app's own icon until something plays; null = not held
+let dockHeldAt = null;
 
-/** The current song's cover as the app icon (when on), once per cover. Errors are logged in Rust. */
+/**
+ * The current song's cover as the app icon (when on), once per cover; no song, or a finished
+ * playlist that hasn't played again yet, = the app's own icon. Errors are logged in Rust.
+ */
 function syncDockArt() {
-  if (!getSettings().dockArt || !state.now) return;
-  const url = state.now.cover || null;
+  if (!getSettings().dockArt) return;
+  const url = (dockHeldAt === null && state.now && state.now.cover) || null;
   if (url === dockUrl) return;
   dockUrl = url;
   invoke("set_dock_art", { url }).catch(() => {});
@@ -4565,6 +4660,11 @@ async function boot() {
   $("coverRowSwitch").addEventListener("click", toggleCoverRow);
   $("menuBarSwitch").addEventListener("click", toggleMenuBar);
   $("menuBarTitleSwitch").addEventListener("click", toggleMenuBarTitle);
+  $("autoUpdateSwitch").addEventListener("click", toggleAutoUpdate);
+  $("updateCheck").addEventListener("click", checkUpdate);
+  $("updateRestart").addEventListener("click", restartUpdate);
+  $("settingsModal").addEventListener("click", (e) => e.target.closest("[data-close]") && closeSettings(true));
+  $("settingsSheet").addEventListener("keydown", onSettingsTab);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onQualityKey);
   $("mcpSwitch").addEventListener("click", toggleMcp);
@@ -4677,6 +4777,10 @@ async function boot() {
   listenEvent("session-restored", (p) => {
     if ($("stage").hidden) return;
     applog("info", `session restored: ${p && p.trackUri}`);
+    if (p && p.finished) {
+      dockHeldAt = performance.now();
+      syncDockArt();
+    }
     noteRestored(p);
     kick();
   });
@@ -4686,6 +4790,7 @@ async function boot() {
   listenEvent("toast", (p) => toast(String(p || "")));
   listenEvent("mini-command", onMiniCommand);
   listenEvent("mini-visible", onMiniVisible);
+  listenEvent("update-status", onUpdateStatus);
   // this Mac's player: what plays, from librespot; the loop renders from it
   listenEvent("player-state", onPlayerState);
   // an add or remove in the app's own library (also from MCP): the Library redraws

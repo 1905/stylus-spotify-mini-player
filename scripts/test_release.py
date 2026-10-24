@@ -11,6 +11,12 @@ CASK = '''cask "stylus" do
   sha256 "f658ad548b1cd629520076010f2a47e8664cd9d04c305bb78efcf007943c2cef"
 
   url "https://github.com/1905/stylus-spotify-mini-player/releases/download/v#{version}/Stylus.dmg"
+  name "Stylus"
+
+  depends_on arch: :arm64
+  depends_on macos: :ventura
+
+  app "Stylus.app"
 end
 '''
 SHA = "a" * 64
@@ -78,8 +84,19 @@ class Cask(unittest.TestCase):
     def test_update(self):
         out = release.cask_text(CASK, "0.3.0", SHA)
         self.assertEqual(release.cask_state(out), ("0.3.0", SHA))
-        self.assertEqual(len(changed_lines(CASK, out)), 2)
+        # version, sha256, auto_updates and the blank line after it
+        self.assertEqual(len(changed_lines(CASK, out)), 4)
         self.assertIn("download/v#{version}/Stylus.dmg", out)
+        self.assertIn('  name "Stylus"\n\n  auto_updates true\n\n  depends_on arch: :arm64\n', out)
+
+    def test_auto_updates_once(self):
+        out = release.cask_text(CASK, "0.3.0", SHA)
+        self.assertEqual(release.cask_text(out, "0.3.0", SHA), out)
+        self.assertEqual(release.cask_text(out, "0.3.1", SHA).count("auto_updates true"), 1)
+
+    def test_auto_updates_without_depends_on(self):
+        cask = '  version "0.2.0"\n  sha256 "%s"\n\n  app "Stylus.app"\n' % SHA
+        self.assertIn('  auto_updates true\n\n  app "Stylus.app"', release.cask_text(cask, "0.3.0", SHA))
 
     def test_state(self):
         self.assertEqual(release.cask_state(CASK), ("0.2.0", "f658ad548b1cd629520076010f2a47e8664cd9d04c305bb78efcf007943c2cef"))
@@ -87,6 +104,24 @@ class Cask(unittest.TestCase):
     def test_refuses_a_cask_without_the_lines(self):
         with self.assertRaises(ValueError):
             release.cask_text('cask "stylus" do\nend\n', "0.3.0", SHA)
+
+
+class Assets(unittest.TestCase):
+    def test_missing(self):
+        self.assertEqual(release.missing_assets(None), release.RELEASE_FILES)
+        self.assertEqual(release.missing_assets(release.RELEASE_FILES + ["x.zip"]), [])
+        # a release from before auto-updates: the DMG alone is not enough
+        self.assertEqual(release.missing_assets(["Stylus.dmg", "Stylus.dmg.sha256"]),
+                         ["Stylus.app.tar.gz", "Stylus.app.tar.gz.sig", "latest.json"])
+
+    def test_urls(self):
+        self.assertEqual(release.tarball_url("0.4.0"),
+                         "https://github.com/1905/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz")
+        # the endpoint the app reads (tauri.conf.json)
+        conf = json.loads((release.ROOT / "src-tauri/tauri.conf.json").read_text())
+        self.assertEqual(conf["plugins"]["updater"]["endpoints"], [release.FEED_URL])
+        # release builds turn the artifacts on with --config; plain builds need no key
+        self.assertFalse(conf["bundle"].get("createUpdaterArtifacts", False))
 
 
 if __name__ == "__main__":

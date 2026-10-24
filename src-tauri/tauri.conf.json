@@ -31,5 +31,13 @@
       "icons/icon.png",
       "icons/icon.icns"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIxNDA4NjM1RkRFRkE2MjEKUldRaHB1LzlOWVpBSVhISWJjOGkzT3ZSZVdFK0hsNEhKOE9vYUszbnNUSDl3S3RYMTQ1eEczOUYK",
+      "endpoints": [
+        "https://github.com/1905/stylus-spotify-mini-player/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

@@ -30,6 +30,11 @@
 //   link_resolve / link_save know the two share-link test playlists (Discover Weekly, Moderat Radio), one other user's
 //   playlist (1A2b3C4d5E6f7G8h9I0jKl), the fixture's albums, followed artists and search songs; saves emit library-changed.
 // MCP (Rust mcp.rs): mcp_* commands keep an in-memory state; ?mcp=busy makes the server fail with "port 5590 is in use".
+// Updates (Rust updater.rs): update_* commands and the update-status event; ?update=<status> sets the starting status
+//   (idle, checking, upToDate, available, downloading, staged, failed, notInstallable; default idle, running 0.4.0,
+//   0.4.1 on the feed). Check now runs checking → (setting on) downloading → staged, or (off) available, 600 ms a step;
+//   ?update=failed fails every check. setUpdate(status, extra?) sets and emits any status. ?update=none: no update_*
+//   commands (an older backend). Scenario `settings` opens the Settings window.
 // search_page pages through a pool built from the fixture (search hits first, then every other known
 // track / album): ~10 pages of songs, fewer of albums, so the last page and "no more" show up.
 // The in-app player (Spotify Connect name "This Mac", shown as "Here") is ready and listed once logged in
@@ -46,6 +51,7 @@
 //   cache: the in-memory list cache ("<account>/<key>" → value) behind cache_get.
 //   emit(event, payload): fires listeners from __TAURI__.event.listen (media-command, engine-status).
 //   setEngine(state, reason?): sets the mock engine state and emits engine-status (e.g. "needs_login").
+//   setUpdate(status, extra?): sets the updater status ({version, message}) and emits update-status.
 (function () {
   "use strict";
 
@@ -55,6 +61,7 @@
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-down",
     "slow", "resume", "search-all", "library-all", "playlist", "here", "refused", "finished", "fresh", "library-search",
+    "settings",
   ];
   const requested = new URLSearchParams(location.search).get("s") || "playing";
   const scenario = SCENARIOS.includes(requested) ? requested : "playing";
@@ -169,6 +176,20 @@
 
   // the MCP server's state (Rust mcp.rs)
   const mcp = { enabled: false, key: null, calls: 3, busy: new URLSearchParams(location.search).get("mcp") === "busy" };
+  // the updater (Rust updater.rs): ?update=<status> starts there
+  const UPDATE_FROM = new URLSearchParams(location.search).get("update") || "idle";
+  const UPDATE_NEXT = "0.4.1";
+  const upd = {
+    status: UPDATE_FROM,
+    version: ["available", "downloading", "staged"].includes(UPDATE_FROM) ? UPDATE_NEXT : null,
+    message: UPDATE_FROM === "failed" ? "error sending request for url (https://github.com/1905/stylus-spotify-mini-player/releases/latest/download/latest.json)" : null,
+    current: "0.4.0",
+  };
+  const updateJson = () => ({ ...upd, auto: (store.settings && store.settings.autoUpdate) !== false });
+  function setUpdate(status, extra) {
+    Object.assign(upd, { status, version: null, message: null }, extra || {});
+    emit("update-status", updateJson());
+  }
   const mcpStatus = () => ({
     enabled: mcp.enabled, running: mcp.enabled && !mcp.busy, port: 5590,
     error: mcp.enabled && mcp.busy ? "port 5590 is in use" : null, callsToday: mcp.enabled && !mcp.busy ? mcp.calls : 0,
@@ -741,10 +762,33 @@
       throw "BAD_ARGS: unknown format " + format;
     },
     mcp_skill_text: () => "---\nname: stylus\ndescription: Control the Stylus Spotify player (mock)\n---\n",
+
+    // the updater (Rust updater.rs): Check now walks the statuses with events, like the real check
+    update_status: () => updateJson(),
+    update_check_now: () => {
+      if (upd.status === "notInstallable" || upd.status === "checking" || upd.status === "downloading") return;
+      setUpdate("checking");
+      setTimeout(() => {
+        if (UPDATE_FROM === "failed") return setUpdate("failed", { message: "error sending request (mock)" });
+        if (!updateJson().auto) return setUpdate("available", { version: UPDATE_NEXT });
+        setUpdate("downloading", { version: UPDATE_NEXT });
+        setTimeout(() => setUpdate("staged", { version: UPDATE_NEXT }), 600);
+      }, 600);
+    },
+    update_set_auto: ({ on }) => {
+      if (upd.status === "staged" && !on) setUpdate("available", { version: upd.version });
+      else if (upd.status === "available" && on && upd.version) setUpdate("staged", { version: upd.version });
+      else emit("update-status", updateJson());
+    },
+    update_restart: () => {
+      if (upd.status !== "staged") throw "no update is staged";
+      setTimeout(() => location.reload(), 800); // the app quits and opens again
+    },
   };
+  if (UPDATE_FROM === "none") for (const k of Object.keys(handlers)) if (k.startsWith("update_")) delete handlers[k];
 
   // local commands (the engine, the in-app player, media controls, the disk cache) don't need the network
-  const LOCAL = /^(auth_status|logout$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|links_list$|link_remove$)/;
+  const LOCAL = /^(auth_status|logout$|engine_|media_|local_|cache_get$|set_dock_art$|mini_|tray_|store_|session_get$|app_log$|copy_text$|mcp_|update_|links_list$|link_remove$)/;
   // commands that can change what the in-app player plays: a player-state follows them
   const CHANGES_PLAYER = /^(local_|play_|resume|pause$|next_track$|previous_track$|seek$|transfer_playback$|set_(volume|shuffle|repeat)$|add_to_queue$|engine_)/;
   // `refused`: the remote commands and their action names in Rust's NOT_AVAILABLE_REMOTE (control.rs, internal.rs)
@@ -848,7 +892,7 @@
     for (const [id, rows] of Object.entries(fx.albumTracks || {})) cache.set(`${ME}/album:${id}`, clone(rows));
   }
   if (hereLike) localSeen = true; // the player is up and playing: it has spoken
-  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, mini, calls, cache, store, logs, emit, setEngine, emitLocal };
+  window.__mock = { scenario, state, invoke, advance, handlers, media, dockArt, mini, calls, cache, store, logs, emit, setEngine, emitLocal, setUpdate };
 
   // fresh: no saved session; Rust loads Liked Songs (the context) paused once the player is up
   if (scenario === "fresh") {
@@ -886,6 +930,7 @@
   const XX = "3iOvXCl6edW5Um0fXEBRXy";
   async function drive() {
     if (["devices", "engine-down"].includes(scenario)) (await waitFor("#deviceBtn"))?.click();
+    if (scenario === "settings") (await waitFor("#stage:not([hidden]) #settingsBtn"))?.click();
     if (["library-full", "artist", "mix-detail"].includes(scenario)) {
       (await waitFor("#libraryBtn"))?.click();
       if (scenario === "artist") {
@@ -923,7 +968,7 @@
       (await waitFor("#libTab-albums:not([hidden])"))?.click();
     }
   }
-  const DRIVEN = ["library-search", "library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-down"];
+  const DRIVEN = ["library-search", "library", "library-detail", "search", "search-empty", "search-all", "library-all", "devices", "library-full", "artist", "mix-detail", "engine-down", "settings"];
   if (DRIVEN.includes(scenario)) {
     window.addEventListener("load", () => setTimeout(drive, 300));
   }

@@ -45,8 +45,13 @@ jobs:
       - name: Backend tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Build Stylus.app and DMG
-        run: npx tauri build --bundles app,dmg
+      # createUpdaterArtifacts: the signed Stylus.app.tar.gz + .sig for the auto-updater (updater.rs).
+      # Only release builds turn it on; the key's password is empty
+      - name: Build Stylus.app, DMG and update archive
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npx tauri build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
 
       - name: Collect artifacts
         run: |
@@ -54,6 +59,11 @@ jobs:
           ditto -c -k --keepParent src-tauri/target/release/bundle/macos/Stylus.app out/Stylus.app.zip
           cp src-tauri/target/release/bundle/dmg/*.dmg out/Stylus.dmg
           shasum -a 256 out/Stylus.dmg | tee out/Stylus.dmg.sha256
+          cp src-tauri/target/release/bundle/macos/Stylus.app.tar.gz src-tauri/target/release/bundle/macos/Stylus.app.tar.gz.sig out/
+          # the feed installed copies read (releases/latest/download/latest.json); the app shows no notes
+          v=$(node -p 'require("./package.json").version')
+          python3 scripts/update_feed.py "$v" --notes "Stylus $v" --sig out/Stylus.app.tar.gz.sig \
+            --url "https://github.com/${{ github.repository }}/releases/download/v$v/Stylus.app.tar.gz" --out out/latest.json
 
       - uses: actions/upload-artifact@v4
         with:
@@ -68,4 +78,7 @@ jobs:
           files: |
             out/Stylus.dmg
             out/Stylus.dmg.sha256
+            out/Stylus.app.tar.gz
+            out/Stylus.app.tar.gz.sig
+            out/latest.json
           generate_release_notes: true

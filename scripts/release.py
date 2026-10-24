@@ -6,6 +6,8 @@
     make release V=0.3.1 NOTES=/tmp/notes.md DRY=1      # print the steps, change nothing
 
 NOTES is a markdown file of "- " highlight lines; the script wraps them in the release template.
+The release also gets Stylus.app.tar.gz + .sig + latest.json (scripts/update_feed.py): installed
+copies update themselves from them (src-tauri/src/updater.rs).
 Every step checks whether it is already done, so a second run continues after a failure.
 Tests: python3 -m unittest discover -s scripts
 """
@@ -21,6 +23,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import update_feed
+
 REPO = "1905/stylus-spotify-mini-player"
 TAP = "1905/homebrew-tap"
 CASK = "Casks/stylus.rb"
@@ -28,7 +32,11 @@ GH_USER = "1905"
 WORKFLOW = "build.yml"
 # what the app is built from: on --dmg air the working tree must match the tag here
 BUILD_PATHS = ["src", "src-tauri", "package.json", "package-lock.json"]
-AIR_DMG = Path("/tmp/stylus-build/dmg/Stylus.dmg")  # where `make dmg` puts it
+AIR_OUT = Path("/tmp/stylus-build/dmg")  # where `make dmg` puts the DMG and the update archive
+AIR_DMG = AIR_OUT / "Stylus.dmg"
+# a release has all of these: the DMG for installs, the signed archive + feed for auto-updates
+RELEASE_FILES = ["Stylus.dmg", "Stylus.dmg.sha256", "Stylus.app.tar.gz", "Stylus.app.tar.gz.sig", "latest.json"]
+FEED_URL = f"https://github.com/{REPO}/releases/latest/download/latest.json"
 
 ROOT = Path(__file__).resolve().parent.parent
 DRY = False
@@ -98,9 +106,26 @@ Requires Spotify Premium.
 """
 
 
+def tarball_url(version):
+    return f"https://github.com/{REPO}/releases/download/v{version}/Stylus.app.tar.gz"
+
+
+def missing_assets(assets):
+    """The release files a release lacks (all of them when there is no release)."""
+    return [f for f in RELEASE_FILES if f not in (assets or [])]
+
+
 def cask_text(text, version, sha256):
+    """The cask at version/sha256, with `auto_updates true`: the app updates itself, so brew
+    does not report it as outdated (its own stanza group, before depends_on)."""
     text = replace_once(text, r'^(  version )"[^"]*"$', rf'\1"{version}"', CASK)
-    return replace_once(text, r'^(  sha256 )"[0-9a-f]{64}"$', rf'\1"{sha256}"', CASK)
+    text = replace_once(text, r'^(  sha256 )"[0-9a-f]{64}"$', rf'\1"{sha256}"', CASK)
+    if not re.search(r"^  auto_updates true$", text, re.M):
+        m = re.search(r"^  (?:depends_on|app) ", text, re.M)
+        if not m:
+            raise ValueError(f"{CASK}: no depends_on or app stanza for auto_updates")
+        text = text[:m.start()] + "  auto_updates true\n\n" + text[m.start():]
+    return text
 
 
 def cask_state(text):
@@ -262,7 +287,7 @@ def dmg_ci(t):
     sys.exit(f"✗ build run {rid} failed: fix it, push, then run this again")
 
 
-def dmg_air(t, version, body):
+def dmg_air(t, version, body, notes):
     step("DMG from the Air")
     # make dmg ships the working tree: it must be the tag's source
     changed = run(["git", "diff", "--name-only", t, "--"] + BUILD_PATHS)
@@ -281,12 +306,14 @@ def dmg_air(t, version, body):
                 time.sleep(5)
     run(["make", "dmg"], mutate=True, capture=False)
     if DRY:
-        print(f"  [dry-run] gh release create {t} Stylus.dmg Stylus.dmg.sha256")
+        print(f"  [dry-run] gh release create {t} " + " ".join(RELEASE_FILES))
         return
     digest = hashlib.sha256(AIR_DMG.read_bytes()).hexdigest()
-    sha_file = AIR_DMG.with_name("Stylus.dmg.sha256")
-    sha_file.write_text(f"{digest}  Stylus.dmg\n")
-    files = [str(AIR_DMG), str(sha_file)]
+    (AIR_OUT / "Stylus.dmg.sha256").write_text(f"{digest}  Stylus.dmg\n")
+    sig = (AIR_OUT / "Stylus.app.tar.gz.sig").read_text()
+    feed = update_feed.feed(version, highlights(notes), sig, tarball_url(version))
+    (AIR_OUT / "latest.json").write_text(update_feed.render(feed))
+    files = [str(AIR_OUT / f) for f in RELEASE_FILES]
     if release_assets(t) is None:
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
             f.write(body)
@@ -321,12 +348,13 @@ def cask(t, version):
     digest = dmg_digest(t)
     meta = gh_json(["api", f"repos/{TAP}/contents/{CASK}"])
     text = base64.b64decode(meta["content"]).decode()
-    if cask_state(text) == (version, digest):
+    new = cask_text(text, version, digest)
+    if new == text:
         print("  ✓ already current")
         return
     payload = json.dumps({
         "message": f"stylus {version}",
-        "content": base64.b64encode(cask_text(text, version, digest).encode()).decode(),
+        "content": base64.b64encode(new.encode()).decode(),
         "sha": meta["sha"],
     })
     print(f"  $ gh api -X PUT repos/{TAP}/contents/{CASK} (stylus {version})")
@@ -339,16 +367,24 @@ def cask(t, version):
 def verify(t, version):
     step("verify")
     if DRY:
-        print("  [dry-run] download URL answers 200, cask shows the new version")
+        print("  [dry-run] download URL answers 200, the update feed shows the new version, cask shows it too")
         return
     url = f"https://github.com/{REPO}/releases/download/{t}/Stylus.dmg"
     code = run(["curl", "-sIL", "-o", "/dev/null", "-w", "%{http_code}", url])
     if code != "200":
         sys.exit(f"✗ {url} answered {code}")
+    # what installed copies read: the latest release's feed
+    feed = run(["curl", "-sfL", FEED_URL], check=False)
+    try:
+        feed_version = json.loads(feed)["version"]
+    except (ValueError, KeyError, TypeError):
+        sys.exit(f"✗ {FEED_URL} is not a feed: {feed[:200]!r}")
+    if feed_version != version:
+        sys.exit(f"✗ {FEED_URL} shows {feed_version}, not {version}")
     text = base64.b64decode(gh_json(["api", f"repos/{TAP}/contents/{CASK}"])["content"]).decode()
     if cask_state(text)[0] != version:
         sys.exit(f"✗ the cask still shows {cask_state(text)[0]}")
-    print(f"  ✓ {url}\n  ✓ cask {version}")
+    print(f"  ✓ {url}\n  ✓ {FEED_URL} → {version}\n  ✓ cask {version}")
 
 
 def main():
@@ -366,13 +402,13 @@ def main():
     bump(a.version)
     push_master()
     tag(a.version)
-    body = release_body(a.version, prev_tag(t), Path(a.notes).read_text())
-    assets = release_assets(t)
-    if assets and "Stylus.dmg" in assets:
-        step("DMG")
-        print("  ✓ the release has Stylus.dmg")
+    notes = Path(a.notes).read_text()
+    body = release_body(a.version, prev_tag(t), notes)
+    if not missing_assets(release_assets(t)):
+        step("DMG and update archive")
+        print("  ✓ the release has " + ", ".join(RELEASE_FILES))
     elif a.dmg == "air":
-        dmg_air(t, a.version, body)
+        dmg_air(t, a.version, body, notes)
     else:
         dmg_ci(t)
     notes_step(t, a.version, body)

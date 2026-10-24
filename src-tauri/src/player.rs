@@ -1129,12 +1129,25 @@ async fn restore(engine: Engine, device_id: String, why: Restore) {
         return;
     };
     let Some(source) = saved.source.clone() else { return };
-    match send_load(&engine, source, saved.track_uri.clone(), saved.position_ms, saved.shuffle, saved.repeat, saved.volume) {
+    match send_load(&engine, source, saved.track_uri.clone(), saved.position_ms, saved.shuffle, restore_repeat(why, saved.repeat), saved.volume) {
         Ok(()) => {
             log::info!(target: LOG, "restored ({why:?}) {}{}", session::describe(&saved), if saved.finished { ", finished: from the top" } else { "" });
             emit_restored(&engine, &saved);
         }
         Err(e) => log::warn!(target: LOG, "restore ({why:?}) failed: {e}"),
+    }
+}
+
+/// Repeat is on by default: a playlist loops (the UI's DEFAULT_REPEAT, src/lib/transport.js).
+const DEFAULT_REPEAT: Repeat = Repeat::Context;
+
+/// The repeat a restore loads with: a launch turns a saved "off" back to the default. A
+/// finished playlist (only possible with repeat off) and a reconnect keep the saved mode.
+fn restore_repeat(why: Restore, saved: Repeat) -> Repeat {
+    if why == Restore::Launch && saved == Repeat::Off {
+        DEFAULT_REPEAT
+    } else {
+        saved
     }
 }
 
@@ -1281,12 +1294,12 @@ async fn load_default_source(engine: &Engine, device_id: &str, tracker: &Tracker
     if !may_load(engine, device_id, Restore::Launch) {
         return true;
     }
-    if let Err(e) = send_load(engine, source.clone(), None, 0, false, Repeat::Off, tracker.volume()) {
+    if let Err(e) = send_load(engine, source.clone(), None, 0, false, DEFAULT_REPEAT, tracker.volume()) {
         log::warn!(target: DEFAULT_LOG, "default session: Liked Songs {what} not sent: {e}");
         return true;
     }
     // only what was sent (`Engine::load` records after Ok too)
-    tracker.loaded(source, None, 0, false, Repeat::Off);
+    tracker.loaded(source, None, 0, false, DEFAULT_REPEAT);
     if is_context && !track_within(tracker, DEFAULT_CONTEXT_WAIT).await {
         log::warn!(target: DEFAULT_LOG, "default session: the Liked Songs context showed no track in {} s", DEFAULT_CONTEXT_WAIT.as_secs());
         return false;
@@ -2326,6 +2339,14 @@ mod tests {
         // another device took over (live session): no longer active
         assert!(!active_after(true, &disconnected, false));
         assert!(!active_after(false, &disconnected, true));
+    }
+
+    #[test]
+    fn launch_restore_turns_repeat_on() {
+        assert_eq!(restore_repeat(Restore::Launch, Repeat::Off), Repeat::Context);
+        assert_eq!(restore_repeat(Restore::Launch, Repeat::Track), Repeat::Track);
+        assert_eq!(restore_repeat(Restore::Finished, Repeat::Off), Repeat::Off, "a finished playlist stays finished");
+        assert_eq!(restore_repeat(Restore::Reconnect, Repeat::Off), Repeat::Off);
     }
 
     #[test]

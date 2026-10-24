@@ -404,10 +404,9 @@ body:has(.stage:not(.is-playing)) .bg {
   margin-top: 6px;
 }
 
-/* ---------- settings: the cog and its popover (the device popover's look) ---------- */
+/* ---------- settings: the cog, and the window it opens (a centred sheet, the app blurred behind) ---------- */
 
 .settings-wrap {
-  position: relative;
   flex: none;
   margin-right: 6px; /* the cog, not its hit area, lines up with the gutter */
 }
@@ -428,9 +427,90 @@ body:has(.stage:not(.is-playing)) .bg {
   background: rgba(246, 244, 248, 0.08);
 }
 
-.settings-pop {
-  width: 320px;
-  padding: 8px 14px 12px;
+.overlay-settings {
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.overlay-settings .backdrop {
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  animation-duration: 180ms;
+}
+
+.set-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 100%);
+  max-height: 80vh;
+  border: 1px solid var(--hair);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgb(var(--v) / 0.1), transparent 240px),
+    rgb(var(--i));
+  box-shadow: 0 40px 90px -20px rgb(0 0 0 / 0.7);
+  animation: page-in 180ms var(--ease) both;
+}
+
+/* a short window: the sheet takes what there is, it scrolls anyway */
+@media (max-height: 600px) {
+  .set-sheet {
+    max-height: calc(100vh - 48px);
+  }
+}
+
+.set-sheet:focus {
+  outline: none;
+}
+
+.set-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 52px;
+  padding: 4px 10px 0 22px;
+}
+
+.set-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  font-stretch: 85%;
+  line-height: 1;
+}
+
+/* rows scrolled up fade out under the title instead of being cut */
+.set-body {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 22px 18px;
+  -webkit-mask-image: linear-gradient(transparent, #000 12px);
+  mask-image: linear-gradient(transparent, #000 12px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair) transparent;
+}
+
+.set-sec {
+  padding: 14px 0 10px;
+  border-top: 1px solid var(--hair);
+}
+
+.set-sec:first-child {
+  padding-top: 4px;
+  border-top: 0;
+}
+
+.set-head {
+  margin: 0 0 2px;
+  color: var(--fg-3);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .set-row {
@@ -441,10 +521,12 @@ body:has(.stage:not(.is-playing)) .bg {
   min-height: 44px;
 }
 
+.set-row + .set-row {
+  border-top: 1px solid rgb(246 244 248 / 0.06);
+}
+
 .set-group {
-  padding-top: 10px;
-  margin-top: 4px;
-  border-top: 1px solid var(--hair);
+  padding: 8px 0 4px;
 }
 
 .set-label {
@@ -457,6 +539,30 @@ body:has(.stage:not(.is-playing)) .bg {
   color: var(--fg-3);
   font-size: 12.5px;
   line-height: 17px;
+}
+
+/* Updates: the status line, then Check now or Restart now; a long failure wraps, never scrolls sideways */
+.set-update {
+  padding: 8px 0;
+}
+
+.set-update .set-note {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+
+.set-update .chip {
+  flex: none;
+}
+
+.set-version {
+  padding-top: 14px;
+  border-top: 1px solid var(--hair);
+  color: var(--fg-3);
+  font-size: 12px;
 }
 
 /* an on/off switch: the knob slides right and turns the track green when on */
@@ -2660,6 +2766,16 @@ body:has(.stage:not(.is-playing)) .bg {
 
 .chip-quiet:hover {
   color: var(--fg);
+}
+
+/* the one action of its row (Restart now) */
+.chip-solid {
+  color: var(--ink);
+  background: var(--fg);
+}
+
+.chip-solid:hover {
+  background: #fff;
 }
 
 .chip-danger {
