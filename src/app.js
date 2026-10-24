@@ -502,7 +502,12 @@ async function refresh(epoch) {
     state.supportsVolume = false;
     state.contextUri = null;
   }
-  if (dockHeld && state.isPlaying) syncDockArt(); // the finished playlist plays again: its cover comes back
+  // the finished playlist plays again: its cover comes back. Only a poll begun after the finish
+  // counts: an older one can still carry the "playing" of the song that just ended
+  if (dockHeld && state.isPlaying && startedAt > dockHeldAt) {
+    dockHeld = false;
+    syncDockArt();
+  }
   // right after a local seek, Spotify may still report the old position: keep ours
   const seeking = track && state.now && track.uri === state.now.uri && performance.now() < state.seekHoldUntil;
   if (!seeking) {
@@ -2869,6 +2874,7 @@ function applyCoverRow() {
 
 let dockUrl = null; // the cover set as the app icon, null = the app's own icon
 let dockHeld = false; // a playlist played to its end: the app's own icon until something plays
+let dockHeldAt = 0; // when dockHeld was set (performance.now())
 
 /**
  * The current song's cover as the app icon (when on), once per cover; no song, or a finished
@@ -2876,7 +2882,6 @@ let dockHeld = false; // a playlist played to its end: the app's own icon until 
  */
 function syncDockArt() {
   if (!getSettings().dockArt) return;
-  if (dockHeld && state.isPlaying) dockHeld = false;
   const url = (!dockHeld && state.now && state.now.cover) || null;
   if (url === dockUrl) return;
   dockUrl = url;
@@ -4784,6 +4789,7 @@ async function boot() {
     applog("info", `session restored: ${p && p.trackUri}`);
     if (p && p.finished) {
       dockHeld = true;
+      dockHeldAt = performance.now();
       syncDockArt();
     }
     noteRestored(p);
