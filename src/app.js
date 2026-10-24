@@ -72,6 +72,8 @@ const state = {
   overlay: null,
   gen: { detail: 0, search: 0, page: 0 },
 };
+// the repeat a playlist started here gets: on (loop the playlist) until the repeat button picks another
+let repeatPref = "context";
 
 // ---------- errors ----------
 
@@ -201,6 +203,7 @@ function showLogin(kind) {
   qualityBusy = 0;
   restartHoldUntil = 0;
   if (loggedOut) resetDockArt(); // the next account's songs set it again
+  if (loggedOut) repeatPref = "context";
   Object.assign(state, {
     mode: "idle", now: null, device: null, devices: null, queue: [], recent: [], session: [], historyOk: false, error: null,
     shuffle: false, repeat: "off", volume: null, supportsVolume: false, contextUri: null, saved: null,
@@ -498,6 +501,7 @@ async function refresh(epoch) {
     state.supportsVolume = false;
     state.contextUri = null;
   }
+  if (dockHeld && state.isPlaying) syncDockArt(); // the finished playlist plays again: its cover comes back
   // right after a local seek, Spotify may still report the old position: keep ours
   const seeking = track && state.now && track.uri === state.now.uri && performance.now() < state.seekHoldUntil;
   if (!seeking) {
@@ -1337,7 +1341,7 @@ function devName(id) {
 async function playSource(deviceId, src) {
   if (isEngineDevice(engine, deviceId)) {
     try {
-      return await invoke("local_load", { spec: { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: state.repeat } });
+      return await invoke("local_load", { spec: { ...src, positionMs: 0, play: true, shuffle: state.shuffle, repeat: repeatPref } });
     } catch (e) {
       if (!isCode(e, "ENGINE_NOT_READY")) throw e;
     }
@@ -1411,7 +1415,7 @@ function startPending(kind, trackUri, row = null, needPlaying = true) {
   pendingTimer = setTimeout(() => {
     if (!pending.timeout(token)) return;
     applog("warn", `play ${kind} not confirmed after ${PENDING_MS}ms: want ${trackUri}, now ${state.now && state.now.uri}, playing ${state.isPlaying}`);
-    if (kind !== "resume") toast("Spotify is slow to respond");
+    if (kind !== "resume") toast("Still loading. Spotify is sending this song slowly.");
     renderPending();
   }, PENDING_MS);
   if (pendingRow) pendingRow.classList.remove("is-pending");
@@ -1651,11 +1655,12 @@ async function toggleShuffle() {
   );
 }
 
-/** off → context → track → off. */
+/** off → context → track → off. The pick also holds for the next playlist started here. */
 async function cycleRepeat() {
   if (state.mode !== "track") return;
   const before = state.repeat;
   const mode = (state.repeat = nextRepeat(before));
+  repeatPref = mode;
   renderChrome();
   const dev = state.device && state.device.id;
   await sendIntent(
@@ -2773,11 +2778,16 @@ function applyCoverRow() {
 }
 
 let dockUrl = null; // the cover set as the app icon, null = the app's own icon
+let dockHeld = false; // a playlist played to its end: the app's own icon until something plays
 
-/** The current song's cover as the app icon (when on), once per cover. Errors are logged in Rust. */
+/**
+ * The current song's cover as the app icon (when on), once per cover; no song, or a finished
+ * playlist that hasn't played again yet, = the app's own icon. Errors are logged in Rust.
+ */
 function syncDockArt() {
-  if (!getSettings().dockArt || !state.now) return;
-  const url = state.now.cover || null;
+  if (!getSettings().dockArt) return;
+  if (dockHeld && state.isPlaying) dockHeld = false;
+  const url = (!dockHeld && state.now && state.now.cover) || null;
   if (url === dockUrl) return;
   dockUrl = url;
   invoke("set_dock_art", { url }).catch(() => {});
@@ -4677,6 +4687,10 @@ async function boot() {
   listenEvent("session-restored", (p) => {
     if ($("stage").hidden) return;
     applog("info", `session restored: ${p && p.trackUri}`);
+    if (p && p.finished) {
+      dockHeld = true;
+      syncDockArt();
+    }
     noteRestored(p);
     kick();
   });
