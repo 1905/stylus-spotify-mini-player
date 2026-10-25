@@ -10,7 +10,7 @@ CASK = '''cask "stylus" do
   version "0.2.0"
   sha256 "f658ad548b1cd629520076010f2a47e8664cd9d04c305bb78efcf007943c2cef"
 
-  url "https://github.com/SandQuattro/stylus-spotify-mini-player/releases/download/v#{version}/Stylus.dmg"
+  url "https://github.com/1905/stylus-spotify-mini-player/releases/download/v#{version}/Stylus.dmg"
   name "Stylus"
 
   depends_on arch: :arm64
@@ -75,7 +75,7 @@ class Notes(unittest.TestCase):
     def test_body(self):
         body = release.release_body("0.3.0", "v0.2.0", "- Copy song link.\n")
         self.assertTrue(body.startswith("Stylus 0.3.0 for macOS (Apple Silicon).\n\nHighlights:\n- Copy song link.\n"))
-        self.assertIn("brew install --cask SandQuattro/tap/stylus", body)
+        self.assertIn("brew install --cask 1905/tap/stylus", body)
         self.assertIn("xattr -dr com.apple.quarantine /Applications/Stylus.app", body)
         self.assertTrue(body.endswith("compare/v0.2.0...v0.3.0\n"))
 
@@ -116,7 +116,7 @@ class Assets(unittest.TestCase):
 
     def test_urls(self):
         self.assertEqual(release.tarball_url("0.4.0"),
-                         "https://github.com/SandQuattro/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz")
+                         "https://github.com/1905/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz")
         # the endpoint the app reads (tauri.conf.json)
         conf = json.loads((release.ROOT / "src-tauri/tauri.conf.json").read_text())
         self.assertEqual(conf["plugins"]["updater"]["endpoints"], [release.FEED_URL])

@@ -25,10 +25,10 @@ from pathlib import Path
 
 import update_feed
 
-REPO = "SandQuattro/stylus-spotify-mini-player"
-TAP = "SandQuattro/homebrew-tap"
+REPO = "1905/stylus-spotify-mini-player"
+TAP = "1905/homebrew-tap"
 CASK = "Casks/stylus.rb"
-GH_USER = "SandQuattro"
+GH_USER = "1905"
 WORKFLOW = "build.yml"
 # what the app is built from: on --dmg air the working tree must match the tag here
 BUILD_PATHS = ["src", "src-tauri", "package.json", "package-lock.json"]
@@ -97,10 +97,10 @@ def release_body(version, prev_tag, notes):
 Highlights:
 {highlights(notes)}
 
-Install: `brew install --cask SandQuattro/tap/stylus` or download Stylus.dmg below.
+Install: `brew install --cask 1905/tap/stylus` or download Stylus.dmg below.
 The app is not signed with an Apple Developer ID. On first launch run: `xattr -dr com.apple.quarantine /Applications/Stylus.app`
 
-A Premium account plays through the built-in player; a Free account through Spotify's web player, with ads.
+Requires Spotify Premium.
 
 **Full Changelog**: https://github.com/{REPO}/compare/{prev_tag}...v{version}
 """
