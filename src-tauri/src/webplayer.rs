@@ -3,10 +3,12 @@
 //! The window also hosts the player login for everyone (player.rs `engine_login` opens the OAuth
 //! page here), so the web player inherits the session: one login. The page gets no Tauri IPC (no
 //! capability lists the window). It talks to Rust one way, by navigating to
-//! `https://stylus.invalid/webplayer?device_id=…&logged_out=…`, which `on_navigation` cancels and
-//! parses: the page's Connect device id (from the `PUT …/connect-state/v1/devices/hobs_<id>` it
-//! makes; it changes on every page load) and whether it shows a login button. Control never reads
-//! the page: commands go over Connect (internal.rs) to the reported id.
+//! `https://stylus.invalid/webplayer?device_id=…&logged_out=…&token=…`, which `on_navigation`
+//! cancels and parses: the page's Connect device id (from the `PUT …/connect-state/v1/devices/hobs_<id>`
+//! it makes; it changes on every page load), whether it shows a login button, and the page's own
+//! Bearer token (the `authorization` header of its requests; lyrics.rs needs it, Spotify's lyrics
+//! endpoint answers to no other token). Control never reads the page: commands go over Connect
+//! (internal.rs) to the reported id. The token is never logged.
 
 use std::sync::Mutex;
 
@@ -23,17 +25,22 @@ const REPORT_HOST: &str = "stylus.invalid";
 /// Safari's user agent: the web player serves unknown browsers a "not supported" page.
 const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
 /// Runs before the page's scripts on every load in the window (hence the host guard): takes the
-/// device id from the page's own device registration, polls the login button, reports changes.
-/// Every report carries the current id, so a fresh page load reports an empty id (the old one is
-/// gone) before its own registration reports the new one.
+/// device id from the page's own device registration and the Bearer token from the headers of its
+/// requests, polls the login button, reports changes. Every report carries the whole state (id,
+/// login, token): a later `location.href` replaces a navigation not yet handled, so a partial
+/// report could drop another's news. A fresh page load reports an empty id (the old one is gone)
+/// before its own registration reports the new one.
 const INIT_JS: &str = r#"
 (() => {
   if (location.host !== "open.spotify.com") return;
-  let id = null, out = null;
-  const report = () => { location.href = "https://stylus.invalid/webplayer?device_id=" + encodeURIComponent(id || "") + "&logged_out=" + (out ? "true" : "false"); };
+  let id = null, out = null, tok = null;
+  const report = () => { location.href = "https://stylus.invalid/webplayer?device_id=" + encodeURIComponent(id || "") + "&logged_out=" + (out ? "true" : "false") + "&token=" + encodeURIComponent(tok || ""); };
   const seen = (u) => { const m = /connect-state\/v1\/devices\/hobs_([0-9a-f]+)/.exec(String(u)); if (m && m[1] !== id) { id = m[1]; report(); } };
-  const f = window.fetch; window.fetch = function (i, o) { seen(i && i.url || i); return f.apply(this, arguments); };
+  const take = (v) => { if (typeof v === "string" && v.startsWith("Bearer ") && v !== tok) { tok = v; report(); } };
+  const grab = (h) => { try { take(new Headers(h).get("authorization")); } catch (_) {} };
+  const f = window.fetch; window.fetch = function (i, o) { seen(i && i.url || i); grab(o && o.headers); grab(i && i.headers); return f.apply(this, arguments); };
   const xo = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u) { seen(u); return xo.apply(this, arguments); };
+  const xh = XMLHttpRequest.prototype.setRequestHeader; XMLHttpRequest.prototype.setRequestHeader = function (k, v) { if (String(k).toLowerCase() === "authorization") take(v); return xh.apply(this, arguments); };
   setInterval(() => { const now = !!document.querySelector('[data-testid="login-button"]'); if (now !== out) { out = now; report(); } }, 2000);
 })();
 "#;
@@ -45,12 +52,15 @@ pub struct Report {
     pub device_id: Option<String>,
     /// The page shows a login button: the web player's Spotify session is gone.
     pub logged_out: bool,
+    /// The page's own Bearer (its `authorization` header, `Bearer …`), for the lyrics endpoint.
+    /// None until the page sent one. Never logged.
+    pub token: Option<String>,
 }
 
-static STATE: Mutex<Report> = Mutex::new(Report { device_id: None, logged_out: false });
+static STATE: Mutex<Report> = Mutex::new(Report { device_id: None, logged_out: false, token: None });
 
-/// The report in a `https://stylus.invalid/webplayer?device_id=…&logged_out=…` url (an empty id is
-/// None); None for any other url.
+/// The report in a `https://stylus.invalid/webplayer?device_id=…&logged_out=…&token=…` url (an
+/// empty id or token is None); None for any other url.
 pub fn parse_report(url: &Url) -> Option<Report> {
     if url.host_str() != Some(REPORT_HOST) {
         return None;
@@ -60,17 +70,30 @@ pub fn parse_report(url: &Url) -> Option<Report> {
         match &*k {
             "device_id" if !v.is_empty() => r.device_id = Some(v.into_owned()),
             "logged_out" => r.logged_out = v == "true",
+            "token" if !v.is_empty() => r.token = Some(v.into_owned()),
             _ => {}
         }
     }
     Some(r)
 }
 
-/// Takes a report: logs what changed and sends `engine-status` (Here is the reported id in Free
-/// mode). The lock is released before the engine reads the report back.
+/// Takes a report: logs what changed (the token only as received, renewed or gone) and, when the
+/// id or the login changed, sends `engine-status` (Here is the reported id in Free mode; the status
+/// carries no token). The lock is released before the engine reads the report back.
 pub fn apply(report: Report) {
     let prev = std::mem::replace(&mut *lock(&STATE), report.clone());
     if prev == report {
+        return;
+    }
+    if prev.token != report.token {
+        let what = match (&prev.token, &report.token) {
+            (None, Some(_)) => "received",
+            (Some(_), Some(_)) => "renewed",
+            _ => "gone",
+        };
+        log::info!(target: AUTH, "web player: token {what}");
+    }
+    if prev.device_id == report.device_id && prev.logged_out == report.logged_out {
         return;
     }
     if prev.device_id != report.device_id {
@@ -127,7 +150,7 @@ fn open(app: &AppHandle, url: Option<&str>) -> Result<WebviewWindow, String> {
         // nothing shows for it.
         .on_page_load(|_, load| {
             if matches!(load.event(), PageLoadEvent::Started) && load.url().host_str() == Some("accounts.spotify.com") {
-                apply(Report { device_id: None, logged_out: true });
+                apply(Report { device_id: None, logged_out: true, ..Default::default() });
             }
         })
         .visible(false)
@@ -220,10 +243,20 @@ mod tests {
     fn parse_report_reads_the_report_url() {
         let url = |s: &str| s.parse::<tauri::Url>().unwrap();
         let r = parse_report(&url("https://stylus.invalid/webplayer?device_id=0a19054b&logged_out=false")).unwrap();
-        assert_eq!(r, Report { device_id: Some("0a19054b".into()), logged_out: false });
+        assert_eq!(r, Report { device_id: Some("0a19054b".into()), logged_out: false, ..Default::default() });
         let out = parse_report(&url("https://stylus.invalid/webplayer?device_id=&logged_out=true")).unwrap();
-        assert_eq!(out, Report { device_id: None, logged_out: true });
+        assert_eq!(out, Report { device_id: None, logged_out: true, ..Default::default() });
         assert!(parse_report(&url("https://open.spotify.com/")).is_none());
         assert!(parse_report(&url("http://127.0.0.1:5588/login?code=x")).is_none());
+    }
+
+    #[test]
+    fn parse_report_reads_the_token() {
+        let url = |s: &str| s.parse::<tauri::Url>().unwrap();
+        let r = parse_report(&url("https://stylus.invalid/webplayer?device_id=0a19054b&logged_out=false&token=Bearer%20abc")).unwrap();
+        assert_eq!(r.token.as_deref(), Some("Bearer abc"));
+        let none = parse_report(&url("https://stylus.invalid/webplayer?device_id=0a19054b&logged_out=false&token=")).unwrap();
+        assert_eq!(none.token, None);
+        assert_eq!(parse_report(&url("https://stylus.invalid/webplayer?device_id=0a19054b&logged_out=false")).unwrap().token, None);
     }
 }

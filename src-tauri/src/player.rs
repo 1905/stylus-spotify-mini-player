@@ -2314,12 +2314,12 @@ mod tests {
         let now = engine.0.generation.load(Ordering::SeqCst);
         engine.apply(now, Event::Start { has_credentials: true });
         assert_eq!(engine.apply(now, Event::Connected), Ready);
-        crate::webplayer::apply(crate::webplayer::Report { device_id: None, logged_out: true });
+        crate::webplayer::apply(crate::webplayer::Report { device_id: None, logged_out: true, ..Default::default() });
         assert!(!engine.status(&engine.state()).web_login, "Premium mode never asks for the web login");
         engine.set_mode(now, Mode::Free);
         assert!(engine.status(&engine.state()).web_login);
         assert_eq!(engine.status(&engine.state()).device_id, None);
-        crate::webplayer::apply(crate::webplayer::Report { device_id: Some("wp".into()), logged_out: false });
+        crate::webplayer::apply(crate::webplayer::Report { device_id: Some("wp".into()), logged_out: false, ..Default::default() });
         assert!(!engine.status(&engine.state()).web_login);
         assert_eq!(engine.status(&engine.state()).device_id.as_deref(), Some("wp"), "the newest report is Here");
     }
