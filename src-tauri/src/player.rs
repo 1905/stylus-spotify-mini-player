@@ -645,6 +645,9 @@ impl Engine {
             ("saved state", blocking(|| crate::store::remove(&[crate::library::HOME_KEY, crate::library::KNOWN_KEY])).await),
             ("session", blocking(move || session.forget()).await),
             ("MCP", crate::mcp::disable_for_logout().await),
+            // the web player's data store holds the OAuth cookies: without this the next login
+            // would silently pick the old account
+            ("web player", self.0.app.get().map_or(Ok(()), crate::webplayer::clear)),
         ];
         // the next login is a new start: it restores that account's session
         self.0.restore_tried.store(false, Ordering::SeqCst);
@@ -1454,7 +1457,23 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
         // a logout bumps login_gen: the browser wait stops at once and frees the port
         let e = engine.inner().clone();
         let cancelled = move || e.0.login_gen.load(Ordering::SeqCst) != gen;
-        let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT, cancelled).await?;
+        // the login page opens in the webplayer window (webplayer.rs): the web player, Free mode's
+        // speaker, inherits the session, so a Free account logs in once
+        let app = engine.0.app.get().cloned().ok_or_else(|| "no app handle".to_string())?;
+        let login_app = app.clone();
+        let open = move |url: &str| crate::webplayer::show_login(&login_app, url);
+        let token = match crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT, open, cancelled).await {
+            Ok(token) => token,
+            Err(e) => {
+                crate::webplayer::destroy(&app);
+                return Err(e);
+            }
+        };
+        // the login page is done: the window moves on to the web player, hidden (a Premium engine
+        // destroys it at Ready, `run`)
+        if let Err(e) = crate::webplayer::start(&app) {
+            log::warn!(target: AUTH, "web player: {e}");
+        }
         let _op = engine.0.auth_op.lock().await;
         if engine.0.login_gen.load(Ordering::SeqCst) != gen {
             return Err(crate::auth::LOGIN_CANCELLED.to_string());
