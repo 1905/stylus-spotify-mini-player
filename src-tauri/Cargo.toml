@@ -90,8 +90,9 @@ strip = true
 # 2. dealer/mod.rs: a failed dealer-URL/token fetch retries instead of ending the worker
 # 3. login5.rs Login5Manager::invalidate: drops a cached token that got HTTP 401 (internal.rs Api::send)
 # 4. spclient.rs put_connect_state_request: keeps each response (the cluster) for our listener (player.rs put_clusters)
-# librespot-connect 0.8.0, vendored with 1 patch (re-apply when upgrading librespot):
+# librespot-connect 0.8.0, vendored with 2 patches (re-apply when upgrading librespot):
 # 1. spirc.rs handle_player_event: a Playing event moves Paused → Playing (pause race, plans 2026-10-09)
+# 2. spirc.rs connect setup: no automatic takeover for a non-Premium account (Free mode plays on the web player; a takeover made the dead This Mac the active device after a fresh login)
 [patch.crates-io]
 librespot-core = { path = "vendor/librespot-core" }
 librespot-connect = { path = "vendor/librespot-connect" }

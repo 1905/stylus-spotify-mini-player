@@ -855,6 +855,12 @@ impl SpircTask {
         } else if cluster.transfer_data.is_empty() {
             debug!("got empty transfer state, do nothing");
             return Ok(());
+        } else if !takeover_allowed(self.session.user_data().attributes.get("type").map(String::as_str)) {
+            // Stylus patch: a non-Premium account plays on the web player (Stylus player.rs Mode::Free);
+            // librespot gets no audio keys for it, so a takeover here would make a dead player the
+            // active device and every play from the UI would go to it
+            info!("not taking over control automatically: a non-premium account plays on the web player");
+            return Ok(());
         } else {
             info!(
                 "trying to take over control automatically, session_id: {}",
@@ -1829,5 +1835,26 @@ impl SpircTask {
 impl Drop for SpircTask {
     fn drop(&mut self) {
         debug!("drop Spirc[{}]", self.spirc_id);
+    }
+}
+
+/// Stylus patch: whether the automatic takeover on connect may run for this account type
+/// (the `type` user attribute): Premium, or no attribute yet (ProductInfo not in), as librespot
+/// always did; any other value is a Free account, which plays on the web player.
+fn takeover_allowed(account_type: Option<&str>) -> bool {
+    !account_type.is_some_and(|t| t != "premium")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::takeover_allowed;
+
+    // Stylus patch: the automatic takeover on connect is for Premium only
+    #[test]
+    fn takeover_is_for_premium_or_an_unknown_account() {
+        assert!(takeover_allowed(Some("premium")));
+        assert!(takeover_allowed(None));
+        assert!(!takeover_allowed(Some("free")));
+        assert!(!takeover_allowed(Some("open")));
     }
 }
