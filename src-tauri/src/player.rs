@@ -497,14 +497,20 @@ impl Engine {
             log::info!(target: AUTH, "engine: {prev} → {} ({name})", Status::new(&now, None).state);
         }
         if changed {
-            if let Some(app) = self.0.app.get() {
-                let _ = app.emit("engine-status", self.status(&now));
-            }
+            self.emit_status();
             if now != State::Ready {
                 self.0.now.set_inactive();
             }
         }
         now
+    }
+
+    /// Sends `engine-status` with the status now: on every state change (`apply`), and when the
+    /// web player reports (webplayer.rs): in Free mode Here is its device id.
+    pub fn emit_status(&self) {
+        if let Some(app) = self.0.app.get() {
+            let _ = app.emit("engine-status", self.status(&self.state()));
+        }
     }
 
     fn is_current(&self, generation: u64) -> bool {

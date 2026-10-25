@@ -26,6 +26,7 @@ mod spotify;
 mod store;
 mod tray;
 mod updater;
+mod webplayer;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -148,7 +149,8 @@ pub fn run() {
             updater::update_status,
             updater::update_check_now,
             updater::update_set_auto,
-            updater::update_restart
+            updater::update_restart,
+            webplayer::webplayer_show
         ])
         // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits.
         // The mini player hides when it loses focus (a click outside it).
