@@ -433,12 +433,15 @@ impl Engine {
         let mode = self.mode();
         let (here, web_login) = match mode {
             Mode::Premium => (self.0.device_id.get().cloned(), false),
-            Mode::Free => {
-                let r = crate::webplayer::report();
-                (r.device_id, r.logged_out && *state == State::Ready)
-            }
+            Mode::Free => (self.web_player_device_id(), crate::webplayer::report().logged_out && *state == State::Ready),
         };
         Status { mode, web_login, ..Status::new(state, here.as_deref()) }
+    }
+
+    /// The web player's device id once it reported one (Free mode's Here): the cluster's full id
+    /// when the cluster lists it, `web_player_id`.
+    pub fn web_player_device_id(&self) -> Option<String> {
+        crate::webplayer::report().device_id.map(|id| web_player_id(id, self.0.now.cluster().as_deref()))
     }
 
     /// The persisted device id; reads or creates the file on the first call.
@@ -915,6 +918,10 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                                     follow_cluster(&tracker, &update, session.device_id());
                                 }
                                 now_playing.on_cluster(&update, session.device_id());
+                                // Free mode: Here's full id is known only once the cluster lists the web player
+                                if engine.mode() == Mode::Free {
+                                    engine.emit_status();
+                                }
                                 // the restore that found no Connect state runs once, now
                                 if let Some(why) = lock(&engine.0.restore_pending).take() {
                                     tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), why));
@@ -1227,6 +1234,13 @@ enum Gate {
 
 /// The cluster for the UI: the latest one; else, `QUIET_VIEW_AFTER` after Connect came up with none,
 /// an empty one (no device active, This Mac alone in the list); else None (ENGINE_NOT_READY).
+/// The web player's id in the cluster: the device whose id starts with the one the page reported
+/// (its `hobs_<id>` is the first 35 characters of the cluster's 40), the reported id until the
+/// cluster lists it.
+fn web_player_id(reported: String, cluster: Option<&librespot_protocol::connect::Cluster>) -> String {
+    cluster.and_then(|c| c.device.keys().find(|id| id.starts_with(&reported)).cloned()).unwrap_or(reported)
+}
+
 fn cluster_or_quiet(cluster: Option<Arc<librespot_protocol::connect::Cluster>>, since_session: Option<Duration>) -> Option<Arc<librespot_protocol::connect::Cluster>> {
     match cluster {
         Some(c) => Some(c),
@@ -2308,6 +2322,18 @@ mod tests {
         crate::webplayer::apply(crate::webplayer::Report { device_id: Some("wp".into()), logged_out: false });
         assert!(!engine.status(&engine.state()).web_login);
         assert_eq!(engine.status(&engine.state()).device_id.as_deref(), Some("wp"), "the newest report is Here");
+    }
+
+    #[test]
+    fn web_player_id_is_the_cluster_id_the_report_starts() {
+        let mut cluster = librespot_protocol::connect::Cluster::default();
+        cluster.device.insert("dc64dc52a9d2f7ec2ae79b16659111589f063796".into(), Default::default());
+        cluster.device.insert("other-device".into(), Default::default());
+        // the page's hobs_ id is the first 35 characters of the cluster's 40
+        assert_eq!(web_player_id("dc64dc52a9d2f7ec2ae79b16659111589f0".into(), Some(&cluster)), "dc64dc52a9d2f7ec2ae79b16659111589f063796");
+        // not listed yet (page load, no cluster): the reported id as is
+        assert_eq!(web_player_id("abc".into(), Some(&cluster)), "abc");
+        assert_eq!(web_player_id("abc".into(), None), "abc");
     }
 
     #[test]

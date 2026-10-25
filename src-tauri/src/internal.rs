@@ -819,7 +819,7 @@ pub fn here_device_id() -> Option<String> {
     let engine = ENGINE.get()?;
     match engine.mode() {
         Mode::Premium => own_device_id(),
-        Mode::Free => engine.is_ready().then(|| crate::webplayer::report().device_id).flatten(),
+        Mode::Free => engine.is_ready().then(|| engine.web_player_device_id()).flatten(),
     }
 }
 
