@@ -2608,6 +2608,25 @@ p.lyrics-line {
 
 }
 
+/* under 560 px the side thirds of the control row are narrower than playlist, link and lyrics at
+   44 px: smaller hit areas, so the row fits down to the 480 px minimum with the main group centred */
+@media (max-width: 559px) {
+  .controls .ctl:not(.ctl-play) {
+    width: 36px;
+    height: 36px;
+  }
+
+  .controls-lead {
+    gap: 0;
+    margin-left: -7px; /* (36 - 22) / 2: the icon lines up with the scrub's start */
+  }
+
+  .controls-side {
+    gap: 0;
+    margin-right: -7px;
+  }
+}
+
 /* ---------- reduced motion ---------- */
 
 /* ---------- a play starting: the clicked song shows at once, alive until Spotify confirms it ---------- */
