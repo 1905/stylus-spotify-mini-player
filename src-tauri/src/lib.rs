@@ -29,6 +29,7 @@ mod store;
 mod tray;
 mod updater;
 mod webplayer;
+mod webtoken;
 
 use std::sync::Arc;
 use tauri::Manager;

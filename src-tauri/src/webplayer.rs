@@ -21,7 +21,7 @@ use crate::nowplaying::lock;
 pub const LABEL: &str = "webplayer";
 const PLAYER_URL: &str = "https://open.spotify.com/";
 /// The host the page reports to; the navigation is cancelled, so it never leaves the app.
-const REPORT_HOST: &str = "stylus.invalid";
+pub(crate) const REPORT_HOST: &str = "stylus.invalid";
 /// Safari's user agent: the web player serves unknown browsers a "not supported" page.
 pub(crate) const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
 /// Runs before the page's scripts on every load in the window (hence the host guard): takes the
