@@ -1919,7 +1919,7 @@ function renderLyrics(p, t, frozen) {
   const { cur, next } = shown === "title" && ready && own.synced ? linePreview(own.lines, i) : { cur: "", next: "" };
   $("lyricsCur").textContent = cur;
   $("lyricsNext").textContent = next;
-  if (shown !== "cover" && shown !== "panel") return;
+  if (shown !== "cover") return;
   // the list: rebuilt per song (or per answer), the current row moved and kept in the middle
   const list = $("lyricsList");
   if (own !== lyricsListOf) buildLyricsList(list, own);
