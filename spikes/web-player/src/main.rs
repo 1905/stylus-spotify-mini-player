@@ -26,6 +26,7 @@ use tao::{
     window::WindowBuilder,
 };
 use wry::WebViewBuilder;
+use std::sync::Mutex;
 
 /// Safari's user agent: the web player serves unknown browsers a "not supported" page.
 const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
@@ -53,13 +54,39 @@ const INIT_JS: &str = r#"
   }
   const seen = new Set();
   const net = (u) => { try { u = String(u); const k = u.split('?')[0]; if (/connect-state\/v1\/(devices|connect|player)|hobs_/.test(u) && !seen.has(k)) { seen.add(k); send('net', u.slice(0, 200)); } } catch (_) {} };
+  // token-only mode (Premium lyrics): the dealer socket and the Connect device registration never
+  // leave the page, so no "Web Player" device can appear; the page lives only until the token is out
+  const tokenOnly = __TOKEN_ONLY__;
+  const blocked = (u) => tokenOnly && /connect-state\/v1\/(devices|connect)|hobs_/.test(String(u));
+  if (tokenOnly && window.WebSocket) {
+    const WS = window.WebSocket;
+    window.WebSocket = function (u, p) {
+      if (/dealer/.test(String(u))) {
+        // a socket that never opens: the page keeps waiting for its Connect connection id and never registers a device
+        send('blocked', 'websocket ' + String(u).split('?')[0]);
+        return Object.assign(new EventTarget(), { readyState: 0, url: String(u), protocol: '', extensions: '', binaryType: 'blob', bufferedAmount: 0, send() {}, close() {} });
+      }
+      return p === undefined ? new WS(u) : new WS(u, p);
+    };
+    window.WebSocket.prototype = WS.prototype; Object.assign(window.WebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+  }
   // lyrics spike: take the Bearer token (and client-token) the page sends to spclient, then ask the
   // lyrics endpoint with them from the page's own context
   let tok = null, ctok = null, tried = false;
   const hv = (h, name) => { try { if (!h) return null; if (h instanceof Headers) return h.get(name); if (Array.isArray(h)) { const p = h.find(x => String(x[0]).toLowerCase() === name); return p && p[1]; } for (const k in h) if (k.toLowerCase() === name) return h[k]; } catch (_) {} return null; };
-  const grab = (h) => { const a = hv(h, 'authorization'), c = hv(h, 'client-token'); if (a && /^Bearer /.test(a) && a !== tok) { tok = a; send('token', 'bearer captured, ' + a.length + ' chars'); } if (c && c !== ctok) { ctok = c; send('token', 'client-token captured'); } if (tok && ctok) send('tokdump', JSON.stringify({ authorization: tok, 'client-token': ctok })); };
-  const f = window.fetch; if (f) window.fetch = function (i, o) { net(i && i.url || i); grab(o && o.headers); if (i && i.headers) grab(i.headers); return f.apply(this, arguments); };
-  const xo = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u) { net(u); return xo.apply(this, arguments); };
+  const grab = (h) => { const a = hv(h, 'authorization'), c = hv(h, 'client-token'); if (a && /^Bearer /.test(a) && a !== tok) { tok = a; send('token', 'bearer captured, ' + a.length + ' chars'); } if (c && c !== ctok) { ctok = c; send('token', 'client-token captured'); } if (tok && (ctok || tokenOnly)) send('tokdump', JSON.stringify({ authorization: tok, 'client-token': ctok })); };
+  const f = window.fetch; if (f) window.fetch = function (i, o) {
+    const u = i && i.url || i; net(u); grab(o && o.headers); if (i && i.headers) grab(i.headers);
+    if (blocked(u)) { send('blocked', 'fetch ' + String(u).slice(0, 120)); return Promise.reject(new TypeError('blocked by host')); }
+    const r = f.apply(this, arguments);
+    if (tokenOnly && /\/api\/token|get_access_token/.test(String(u))) r.then(x => x.clone().json()).then(j => {
+      send('expiry', 'token expires in ' + Math.round((j.accessTokenExpirationTimestampMs - Date.now()) / 60000) + ' min, anonymous=' + j.isAnonymous);
+      // token-only: the token is read from the page's own token response, before any authenticated request leaves the page
+      if (j.accessToken && !j.isAnonymous) { tok = 'Bearer ' + j.accessToken; send('token', 'bearer from the token response, ' + tok.length + ' chars'); send('tokdump', JSON.stringify({ authorization: tok, 'client-token': ctok })); }
+    }).catch(() => {});
+    return r;
+  };
+  const xo = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (m, u) { net(u); if (blocked(u)) { send('blocked', 'xhr ' + String(u).slice(0, 120)); arguments[1] = 'https://stylus.invalid/blocked'; } return xo.apply(this, arguments); };
   const xs = XMLHttpRequest.prototype.setRequestHeader; XMLHttpRequest.prototype.setRequestHeader = function (k, v) { grab({ [k]: v }); return xs.apply(this, arguments); };
   setInterval(() => {
     if (!tok || tried) return; tried = true;
@@ -133,6 +160,14 @@ fn main() -> wry::Result<()> {
     // SPIKE_START_HIDDEN=1: the window is never shown (Stylus's Free-mode launch); SPIKE_SHOW_AT=<s>: show it then
     let start_hidden = std::env::var("SPIKE_START_HIDDEN").is_ok();
     let show_at: Option<u64> = std::env::var("SPIKE_SHOW_AT").ok().and_then(|v| v.parse().ok());
+    // SPIKE_TOKEN_ONLY=1: dealer socket and device registration blocked in the page; the window is
+    // destroyed SPIKE_EXIT_AFTER_TOKEN seconds (default 4) after the token reached the host, or at
+    // SPIKE_MAX_SECS (default 30) without one
+    let token_only = std::env::var("SPIKE_TOKEN_ONLY").is_ok();
+    let exit_after: u64 = std::env::var("SPIKE_EXIT_AFTER_TOKEN").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let max_secs: u64 = std::env::var("SPIKE_MAX_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
+    let exit_at: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+    let init_js = INIT_JS.replace("__TOKEN_ONLY__", if token_only { "true" } else { "false" });
     let window = WindowBuilder::new()
         .with_title("Spotify web player spike")
         .with_inner_size(LogicalSize::new(1100.0, 760.0))
@@ -145,16 +180,19 @@ fn main() -> wry::Result<()> {
     let start_url = if oauth { authorize_url() } else { "https://open.spotify.com/".to_string() };
     println!(
         "mode: {}\nUA: {ua}",
-        if oauth { "oauth (incognito store, Stylus's authorize URL, then open.spotify.com)" } else { "web player (persistent store), the window hides once playback runs" }
+        if oauth { "oauth (incognito store, Stylus's authorize URL, then open.spotify.com)" }
+        else if token_only { "token-only (persistent store, hidden page, dealer + device registration blocked)" }
+        else { "web player (persistent store), the window hides once playback runs" }
     );
     let nav_proxy = proxy.clone();
+    let ipc_exit_at = exit_at.clone();
     let webview = WebViewBuilder::new()
         .with_url(&start_url)
         .with_user_agent(&ua)
         .with_autoplay(true)
         .with_devtools(true)
         .with_incognito(oauth)
-        .with_initialization_script(INIT_JS)
+        .with_initialization_script(init_js.as_str())
         // SPIKE_TOKEN_FILE=<path>: the page's auth headers go to that file (never to stdout), for a
         // check from outside the page (curl)
         .with_ipc_handler(move |req| {
@@ -162,7 +200,11 @@ fn main() -> wry::Result<()> {
             if body.contains("\"kind\":\"tokdump\"") {
                 if let Ok(path) = std::env::var("SPIKE_TOKEN_FILE") {
                     let data = serde_json::from_str::<serde_json::Value>(body).ok().and_then(|v| v["data"].as_str().map(str::to_owned));
-                    if let Some(d) = data { let _ = std::fs::write(&path, d); println!("{} host: token headers written to {path}", stamp()); }
+                    if let Some(d) = data {
+                        let _ = std::fs::write(&path, d);
+                        let mut at = ipc_exit_at.lock().unwrap();
+                        if at.is_none() { println!("{} host: token headers written to {path}", stamp()); if token_only { *at = Some(Instant::now() + Duration::from_secs(exit_after)); } }
+                    }
                 }
                 return;
             }
@@ -203,6 +245,19 @@ fn main() -> wry::Result<()> {
                 println!("{} WINDOW SHOWN", stamp());
             }
         }
+        if token_only {
+            let at = *exit_at.lock().unwrap();
+            if at.is_some_and(|at| Instant::now() >= at) {
+                println!("{} WINDOW DESTROYED (token-only: {exit_after}s after the token)", stamp());
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+            if started.elapsed() >= Duration::from_secs(max_secs) {
+                println!("{} GIVING UP: no token within {max_secs}s", stamp());
+                *control_flow = ControlFlow::Exit;
+                return;
+            }
+        }
         if Instant::now() >= next_poll {
             next_poll += POLL;
             let (proxy, playing_polls, hidden) = (proxy.clone(), playing_polls.clone(), hidden.clone());
@@ -216,6 +271,7 @@ fn main() -> wry::Result<()> {
                 }
             });
         }
-        *control_flow = ControlFlow::WaitUntil(next_poll);
+        let wake = exit_at.lock().unwrap().map_or(next_poll, |at| at.min(next_poll));
+        *control_flow = ControlFlow::WaitUntil(wake.min(started + Duration::from_secs(max_secs)));
     });
 }

@@ -55,3 +55,19 @@ Silicon, a Free account created in the "31…" username era. The Connect checks 
 - Web player changes: Spotify can change the UI or its DRM path at any time; the spike reads only
   `data-testid` hooks and the device PUT for observation, control goes over Connect.
 - The user agent is Safari's; the real one is a tracked lie. Not tested without it.
+
+## Token-only page (2026-10-25, for lyrics in Premium mode)
+
+`SPIKE_TOKEN_ONLY=1 SPIKE_START_HIDDEN=1 SPIKE_TOKEN_FILE=<path> ./target/debug/web-player-spike`:
+the hidden page's `WebSocket` to `*dealer*` is a stub that never opens, `connect-state/v1/(devices|connect)`
+requests are rejected, the token is read from the page's own `/api/token` response, and the window is
+destroyed `SPIKE_EXIT_AFTER_TOKEN` seconds later (default 4; `SPIKE_MAX_SECS`, default 30, without a token).
+
+| Observation | Value |
+|---|---|
+| `/api/token` response | 1.0–1.1 s after the load started; `isAnonymous=false`; expires in 55 min on the first run, then 54, 50, 42 min: the same token comes back with its remaining time |
+| Token | `Bearer` + `accessToken`, 419 chars, the same the page sends; lyrics endpoint HTTP 200 inside and outside the page |
+| After the window is destroyed | lyrics endpoint still HTTP 200 (the token outlives the page) |
+| Device registration | none: no `connect-state/v1/devices/hobs_…` request in 5–9 s; the plain hidden page sends it at 2.0–2.2 s |
+| Throwing from the `WebSocket` constructor | kills the bootstrap: the token response arrives, no authenticated request ever leaves (run 1); the stub must be silent |
+| Device picker (Stylus's "Here ⌄" list, read through the GUI; `GET api.spotify.com/v1/me/player/devices` answers 429 to the page token) | plain hidden page alive: "MacBook Pro — Igor", "Web Player (Safari)", "Here"; token-only page alive 8 s and 20 s: "MacBook Pro — Igor", "Here" only; the plain page's entry leaves the list within 5 s of its exit |
