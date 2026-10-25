@@ -1,0 +1,48 @@
+import { describe, it, expect } from "vitest";
+import { lyricsActive, lineAt, preview } from "./lyrics.js";
+
+const FREE = { state: "ready", mode: "free" };
+const PREMIUM = { state: "ready", mode: "premium" };
+const L = [
+  { ms: 1000, text: "a" },
+  { ms: 2500, text: "" },
+  { ms: 4000, text: "c" },
+];
+
+describe("lyricsActive", () => {
+  it("needs a placement, Free mode and a song", () => {
+    expect(lyricsActive({ lyrics: "title" }, FREE, "track")).toBe(true);
+    expect(lyricsActive({ lyrics: "off" }, FREE, "track")).toBe(false);
+    expect(lyricsActive({ lyrics: "panel" }, PREMIUM, "track")).toBe(false);
+    expect(lyricsActive({ lyrics: "cover" }, null, "track")).toBe(false);
+    for (const mode of ["other", "idle"]) expect(lyricsActive({ lyrics: "title" }, FREE, mode)).toBe(false);
+  });
+});
+
+describe("lineAt", () => {
+  it("is the last line that has started, -1 before the first", () => {
+    expect(lineAt(L, 0)).toBe(-1);
+    expect(lineAt(L, 999)).toBe(-1);
+    expect(lineAt(L, 1000)).toBe(0);
+    expect(lineAt(L, 2499)).toBe(0);
+    expect(lineAt(L, 2500)).toBe(1);
+    expect(lineAt(L, 99999)).toBe(2);
+    expect(lineAt([], 5)).toBe(-1);
+  });
+
+  it("takes the previous answer as a hint and still answers right", () => {
+    expect(lineAt(L, 2600, 1)).toBe(1); // the hint holds
+    expect(lineAt(L, 4000, 1)).toBe(2); // the song moved on
+    expect(lineAt(L, 500, 2)).toBe(-1); // a seek back
+  });
+});
+
+describe("preview", () => {
+  it("shows the current line and the next, ♪ for the intro and the gaps", () => {
+    expect(preview(L, -1)).toEqual({ cur: "♪", next: "a" });
+    expect(preview(L, 0)).toEqual({ cur: "a", next: "♪" });
+    expect(preview(L, 1)).toEqual({ cur: "♪", next: "c" });
+    expect(preview(L, 2)).toEqual({ cur: "c", next: "" });
+    expect(preview([], -1)).toEqual({ cur: "", next: "" });
+  });
+});
