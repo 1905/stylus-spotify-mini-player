@@ -9,7 +9,7 @@ A small Spotify player for macOS on Apple Silicon. This is a fork of [1905/stylu
 - **Premium:** Stylus plays by itself through the built-in player (librespot) and shows up as "This Mac" in your other Spotify apps.
 - **Free:** Stylus plays through Spotify's web player in a hidden window, with Spotify's ads. That window shows only the login page.
 
-The app is the same either way: the window tints to the album cover, the Library (playlists, Liked Songs, albums, artists, mixes) with search, a panel with what played and what comes next, a menu-bar mini player, media keys and Now Playing, control of your other Spotify Connect devices, and a local MCP server for AI tools.
+The app is the same either way: the window tints to the album cover, the Library (playlists, Liked Songs, albums, artists, mixes) with search, a panel with what played and what comes next, lyrics under the title or instead of the cover (Settings → Appearance → Lyrics; the ❝ button hides them), a menu-bar mini player, media keys and Now Playing, control of your other Spotify Connect devices, and a local MCP server for AI tools.
 
 ## Install
 
@@ -37,7 +37,6 @@ Select **Log in with Spotify**. Spotify's login page opens inside Stylus (OAuth 
 
 - Spotify's ads play as Spotify sends them. During an ad Stylus shows an ad card; skip and seek wait until it ends.
 - Audio quality is set by Spotify's web player, so the quality setting is hidden.
-- Lyrics: Settings → Appearance → Lyrics shows the words of the song under the title or instead of the cover; the ❝ button hides them.
 - After a launch Stylus starts idle instead of on the last song.
 - Your other Spotify apps list both "Web Player (Safari)" (Stylus's speaker) and "This Mac"; the second one plays nothing.
 - Memory: about 450 MB in total, most of it the web player's page.
