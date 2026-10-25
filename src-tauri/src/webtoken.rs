@@ -1,5 +1,5 @@
-//! Premium mode's lyrics token: the hidden `webtoken` window loads open.spotify.com for about a
-//! second, only to read the Bearer token of the page's own `/api/token` response, and is destroyed.
+//! The lyrics token, in both modes: the hidden `webtoken` window loads open.spotify.com for about
+//! a second, only to read the Bearer token of the page's own `/api/token` response, and is destroyed.
 //! Its script stubs the dealer WebSocket and rejects the Connect device registration, so the page
 //! never shows up as a "Web Player" device anywhere (spikes/web-player, token-only mode). The page
 //! reports once, by navigating to `https://stylus.invalid/webtoken?token=…&expires=…&anonymous=…`,

@@ -1,11 +1,8 @@
-//! The playing song's lyrics from Spotify's own endpoint, with the web player's token, the only
-//! token it answers to: in Free mode the hidden page's (webplayer.rs reports it), in Premium mode
-//! the token page's (webtoken.rs fetches it for a second).
+//! The playing song's lyrics from Spotify's own endpoint, with the token of the hidden token page
+//! (webtoken.rs fetches it for a second, in both modes): the only token the endpoint answers to.
 
 use serde::Serialize;
 use serde_json::Value;
-
-use crate::player::Mode;
 
 const ENDPOINT: &str = "https://spclient.wg.spotify.com/color-lyrics/v2/track";
 const LOG: &str = "stylus::lyrics";
@@ -39,28 +36,20 @@ pub fn parse(body: &[u8]) -> Result<Lyrics, String> {
     Ok(Lyrics { synced: lyrics["syncType"] == "LINE_SYNCED", lines })
 }
 
-/// The lyrics of track `track_id` (a 22-character id) through the web player's token: None when
-/// Spotify has none for it (any non-2xx answer, logged with its status); Err before the Free page
-/// sent its token or while no token page may open (`LYRICS_NO_TOKEN`), while the account has no
-/// web session (`LYRICS_NO_WEB_SESSION`), for anything but a track id (`LYRICS_BAD_ID`), and on a
-/// transport or parse failure. A cached token the endpoint refuses (401/403) is dropped and fetched
+/// The lyrics of track `track_id` (a 22-character id) through the token page's token: None when
+/// Spotify has none for it (any non-2xx answer, logged with its status); Err while no token page
+/// may open (`LYRICS_NO_TOKEN`), while the account has no web session (`LYRICS_NO_WEB_SESSION`),
+/// for anything but a track id (`LYRICS_BAD_ID`), and on a transport or parse failure. A cached token the endpoint refuses (401/403) is dropped and fetched
 /// once more; one fetched in this call is not. The token is never logged.
 #[tauri::command]
 pub async fn get_lyrics(track_id: String) -> Result<Option<Lyrics>, String> {
     if !crate::links::is_id(&track_id) {
         return Err("LYRICS_BAD_ID: not a track id".into());
     }
-    // Premium asks the token page (STYLUS_LYRICS_TOKEN_PAGE=1 does so on a Free account too: the
-    // way to run this path here); Free uses its page's token
-    let page = std::env::var_os("STYLUS_LYRICS_TOKEN_PAGE").is_some() || crate::internal::engine().map_or(true, |e| e.mode() == Mode::Premium);
-    let (token, fetched) = if page {
-        crate::webtoken::token().await?
-    } else {
-        (crate::webplayer::report().token.ok_or("LYRICS_NO_TOKEN: the web player has not sent its token yet")?, false)
-    };
+    let (token, fetched) = crate::webtoken::token().await?;
     let mut resp = send(&track_id, &token).await?;
     let status = resp.status().as_u16();
-    if page && matches!(status, 401 | 403) {
+    if matches!(status, 401 | 403) {
         crate::webtoken::reject(&token, status).await;
         if fetched {
             log::info!(target: LOG, "lyrics {track_id}: HTTP {status} with a token fetched just now");

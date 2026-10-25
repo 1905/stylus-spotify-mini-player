@@ -1,6 +1,6 @@
 // The playing song's lyrics: when they can show, which line is current, what the two-line preview
-// says. Spotify's lyrics endpoint answers to the web player's own token (Rust lyrics.rs): the Free
-// page's, or in Premium mode the token page's.
+// says. Spotify's lyrics endpoint answers to the web player's own token (Rust lyrics.rs), fetched
+// by a hidden token page in both modes.
 
 /** A placement is picked and a song (not an ad) plays. */
 export const lyricsActive = (settings, mode) => settings.lyrics && settings.lyrics !== "off" && mode === "track";

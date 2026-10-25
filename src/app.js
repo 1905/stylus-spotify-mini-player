@@ -1814,7 +1814,7 @@ function volumeKey(ev) {
 // ---------- heart: the current song in Liked Songs (not a player command) ----------
 
 // Bumped on each track change and heart click: an is_saved answer from before either is stale.
-// ---------- lyrics (the web player's token reads them, Rust lyrics.rs) ----------
+// ---------- lyrics (the token page's token reads them, Rust lyrics.rs) ----------
 
 let lyricsGen = 0; // bumped whenever state.lyrics is replaced or dropped: a late answer is ignored
 let lastLyricsKey = ""; // what applyLyrics last set up
