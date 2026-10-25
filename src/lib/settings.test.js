@@ -17,7 +17,13 @@ describe("parseSettings", () => {
     expect(parseSettings({ dockArt: false, coverRow: false })).toEqual({ ...DEFAULTS, dockArt: false, coverRow: false });
     expect(parseSettings({ menuBar: false, menuBarTitle: true })).toEqual({ ...DEFAULTS, menuBar: false, menuBarTitle: true });
     expect(parseSettings({ autoUpdate: false })).toEqual({ ...DEFAULTS, autoUpdate: false });
-    expect(parseSettings({ lyrics: "panel", lyricsShown: false })).toEqual({ ...DEFAULTS, lyrics: "panel", lyricsShown: false });
+    expect(parseSettings({ lyrics: "cover", lyricsShown: false })).toEqual({ ...DEFAULTS, lyrics: "cover", lyricsShown: false });
+  });
+
+  it("the retired placements: a stored off keeps the lyrics hidden, the side panel lands under the title", () => {
+    expect(parseSettings({ lyrics: "off" })).toEqual({ ...DEFAULTS, lyricsShown: false });
+    expect(parseSettings({ lyrics: "off", lyricsShown: true })).toEqual({ ...DEFAULTS, lyricsShown: false });
+    expect(parseSettings({ lyrics: "panel", lyricsShown: false })).toEqual({ ...DEFAULTS, lyricsShown: false });
   });
 
   it("broken values fall back to the defaults", () => {
@@ -26,8 +32,8 @@ describe("parseSettings", () => {
 });
 
 describe("LYRICS_PLACEMENTS", () => {
-  it("lists the four placements", () => {
-    expect(LYRICS_PLACEMENTS).toEqual(["off", "title", "cover", "panel"]);
+  it("lists the two placements", () => {
+    expect(LYRICS_PLACEMENTS).toEqual(["title", "cover"]);
   });
 });
 

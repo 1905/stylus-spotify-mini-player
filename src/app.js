@@ -571,9 +571,7 @@ async function refresh(epoch) {
       notifyAd();
       skipAd();
     }
-    if (mode === "track" && track && (!state.now || state.now.uri !== track.uri)) {
-      notifySongStart(track.artists, track.name);
-    }
+    if (changed && track) notifySongStart(track.artists, track.name);
     // a song needs its queue (this Mac's comes with its state); with no song, the device list says
     // who could play. Each list at most every 30 s: a skipped one is fetched once it's due.
     const own = queueOf(s);
@@ -1827,11 +1825,11 @@ let lyricsListIn = null; // the placement the list was last painted in: a move r
 let lyricsCurRow = null; // the row marked current
 let lyricsUserAt = -Infinity; // the user last scrolled the list (performance.now): auto-follow pauses 4 s
 
-/** What shows now: null, or the placement the setting names ("cover" and "panel" only while the ❝ button is on). */
+/** What shows now: null, or the placement the setting names (only while the ❝ button is on). */
 function lyricsShown() {
   const s = getSettings();
   if (!lyricsActive(s, engine, state.mode)) return null;
-  return s.lyrics === "title" || s.lyricsShown ? s.lyrics : null;
+  return s.lyricsShown ? s.lyrics : null;
 }
 
 /** Fetch the playing song's lines when a placement can show them; drop them when lyrics are off. Idempotent. */
@@ -1892,7 +1890,7 @@ function applyLyrics() {
     $("stage").dataset.lyrics = shown || "off";
     $("lyricsPreview").hidden = shown !== "title";
     const btn = $("lyricsBtn");
-    btn.hidden = !(active && s.lyrics !== "title");
+    btn.hidden = !active;
     btn.setAttribute("aria-pressed", String(s.lyricsShown));
     btn.classList.toggle("is-on", s.lyricsShown);
     $("lyricsStage").hidden = shown !== "cover";
@@ -2409,13 +2407,9 @@ function flipSetting(key, label, after) {
   putSetting(key, on, `${label} ${on ? "on" : "off"}`, after);
 }
 
-const cycleLyricsPlacement = () => {
-  const s = getSettings();
-  const placements = ["title", "cover", "off"];
-  const currentIndex = placements.indexOf(s.lyrics);
-  const nextIndex = (currentIndex + 1) % placements.length;
-  const newLyrics = placements[nextIndex];
-  putSetting("lyrics", newLyrics, `lyrics ${newLyrics}`, syncLyrics);
+const flipLyricsPlacement = () => {
+  const v = getSettings().lyrics === "title" ? "cover" : "title";
+  putSetting("lyrics", v, `lyrics ${v}`, syncLyrics);
 };
 const toggleLyricsShown = () => flipSetting("lyricsShown", "lyrics shown", syncLyrics);
 
@@ -2914,8 +2908,7 @@ function renderSettings() {
   }
   $("lyricsGroup").hidden = !free;
   const lyricsPlacementBtn = $("lyricsPlacementBtn");
-  const placementLabels = { title: "Under title", cover: "Instead of cover", off: "Off" };
-  lyricsPlacementBtn.textContent = placementLabels[s.lyrics] || "Under title";
+  lyricsPlacementBtn.textContent = s.lyrics === "cover" ? "Instead of cover" : "Under title";
   $("qualityNote").textContent = free
     ? "Quality is set by Spotify's web player."
     : qualityBusy
@@ -4896,7 +4889,7 @@ async function boot() {
   $("settingsSheet").addEventListener("keydown", onSettingsTab);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onRadioKey);
-  $("lyricsPlacementBtn").addEventListener("click", cycleLyricsPlacement);
+  $("lyricsPlacementBtn").addEventListener("click", flipLyricsPlacement);
   $("mcpSwitch").addEventListener("click", toggleMcp);
   $("mcpActions").addEventListener("click", (e) => {
     const b = e.target.closest("[data-copy]");

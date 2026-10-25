@@ -74,7 +74,7 @@
         <p id="emptyState" class="now-empty" hidden></p>
       </section>
 
-      <aside id="lyricsPanel" class="lyrics-panel" aria-label="Lyrics" hidden><p class="panel-kicker">Lyrics</p></aside>
+
 
       <footer class="transport">
         <div class="scrub-row">
@@ -324,11 +324,9 @@
             </div>
             <div id="lyricsGroup" class="set-group" hidden>
               <span id="lyricsLabel" class="set-label">Lyrics</span>
-              <div id="lyricsOpts" class="seg seg-lyrics" role="radiogroup" aria-labelledby="lyricsLabel">
-                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="off"><span class="seg-name">Off</span></button>
-                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="title"><span class="seg-name">Under the title</span></button>
-                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="cover"><span class="seg-name">Instead of the cover</span></button>
-                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="panel"><span class="seg-name">Side panel</span></button>
+              <div class="set-row">
+                <span id="lyricsPlacementLabel" class="set-label">Lyrics placement</span>
+                <button id="lyricsPlacementBtn" class="chip" type="button" aria-labelledby="lyricsPlacementLabel">Under title</button>
               </div>
               <p class="set-note">Spotify's web player provides the lyrics; not every song has them.</p>
             </div>
