@@ -59,6 +59,76 @@ impl std::fmt::Debug for TokenReport {
     }
 }
 
+/// `get_lyrics` fails with this while the page's account has no web session: the lyrics need a new
+/// login (the OAuth page in the webview creates the cookies). Until then no page opens.
+pub const NO_WEB_SESSION: &str = "LYRICS_NO_WEB_SESSION: no Spotify web session; log in again";
+/// `get_lyrics` fails with this for anything else that is not a token yet (a page that failed or
+/// timed out holds new pages back for `HOLD_MS`).
+pub const NO_TOKEN: &str = "LYRICS_NO_TOKEN: no web token yet";
+/// A token is fresh while it has more than this left.
+const MARGIN_MS: u64 = 60_000;
+/// After a failed page, how long no new page opens.
+const HOLD_MS: u64 = 300_000;
+
+/// The token in memory and what holds a new page back: `hold` is `(until_ms, the error code)`, the
+/// no-session hold never ends on its own (`u64::MAX`; a login or logout forgets the cache).
+/// `rejected` is the bearer the lyrics endpoint last refused: the page handing it back again is a
+/// failure, not a token (the page returns the same token with its remaining time all hour).
+#[derive(Default)]
+pub(crate) struct Cache {
+    token: Option<(String, u64)>,
+    hold: Option<(u64, &'static str)>,
+    rejected: Option<String>,
+}
+
+impl Cache {
+    /// The token while it has more than `MARGIN_MS` left.
+    fn fresh(&self, now_ms: u64) -> Option<&str> {
+        self.token.as_ref().filter(|(_, exp)| now_ms + MARGIN_MS < *exp).map(|(t, _)| t.as_str())
+    }
+
+    /// The error code of a hold still in force.
+    fn held(&self, now_ms: u64) -> Option<&'static str> {
+        self.hold.filter(|(until, _)| now_ms < *until).map(|(_, code)| code)
+    }
+
+    /// Takes what the page reported: a usable token lifts every hold; no session holds until a
+    /// login; the refused token again, or one without a usable expiry, is a failed page.
+    fn took(&mut self, r: TokenReport, now_ms: u64) -> Result<(), &'static str> {
+        if r.anonymous {
+            self.token = None;
+            self.hold = Some((u64::MAX, NO_WEB_SESSION));
+            return Err(NO_WEB_SESSION);
+        }
+        match (r.token, r.expires_ms) {
+            (Some(t), Some(exp)) if exp > now_ms + MARGIN_MS && self.rejected.as_deref() != Some(t.as_str()) => {
+                self.token = Some((t, exp));
+                self.hold = None;
+                self.rejected = None;
+                Ok(())
+            }
+            _ => {
+                self.failed(now_ms);
+                Err(NO_TOKEN)
+            }
+        }
+    }
+
+    /// A page that failed or timed out: no new page for `HOLD_MS`.
+    fn failed(&mut self, now_ms: u64) {
+        self.hold = Some((now_ms + HOLD_MS, NO_TOKEN));
+    }
+
+    /// The lyrics endpoint refused `bearer`: dropped if it is still the cached one (another call
+    /// may have replaced it already), and remembered so the page cannot hand it back.
+    fn reject(&mut self, bearer: &str) {
+        if self.token.as_ref().is_some_and(|(t, _)| t == bearer) {
+            self.token = None;
+            self.rejected = Some(bearer.to_owned());
+        }
+    }
+}
+
 /// The report in a `https://stylus.invalid/webtoken?token=…&expires=…&anonymous=…` url (an empty
 /// token or expiry is None); None for any other url, the Free page's report included.
 pub(crate) fn parse_token_report(url: &Url) -> Option<TokenReport> {
@@ -94,6 +164,72 @@ mod tests {
         assert_eq!(anon, TokenReport { token: None, expires_ms: None, anonymous: true });
         assert!(parse_token_report(&url("https://stylus.invalid/webplayer?device_id=x&logged_out=false")).is_none());
         assert!(parse_token_report(&url("https://open.spotify.com/api/token")).is_none());
+    }
+
+    const T0: u64 = 1_761_400_000_000;
+    const HOUR: u64 = 3_600_000;
+    fn report(token: &str, expires_ms: Option<u64>, anonymous: bool) -> TokenReport { TokenReport { token: (!token.is_empty()).then(|| token.to_owned()), expires_ms, anonymous } }
+
+    #[test]
+    fn a_fresh_token_is_used_until_a_minute_before_it_expires() {
+        let mut c = Cache::default();
+        assert_eq!(c.took(report("Bearer a", Some(T0 + HOUR), false), T0), Ok(()));
+        assert_eq!(c.fresh(T0), Some("Bearer a"));
+        assert_eq!(c.fresh(T0 + HOUR - MARGIN_MS - 1), Some("Bearer a"));
+        assert_eq!(c.fresh(T0 + HOUR - MARGIN_MS), None);
+        assert_eq!(c.held(T0), None);
+    }
+
+    #[test]
+    fn an_anonymous_report_sets_the_login_hold() {
+        let mut c = Cache::default();
+        assert_eq!(c.took(report("", None, true), T0), Err(NO_WEB_SESSION));
+        assert_eq!(c.fresh(T0), None);
+        assert_eq!(c.held(T0 + 30 * 24 * HOUR), Some(NO_WEB_SESSION), "the login hold has no clock");
+    }
+
+    #[test]
+    fn a_report_without_a_usable_expiry_is_a_transient_failure() {
+        for exp in [None, Some(T0 - 1), Some(T0 + MARGIN_MS)] {
+            let mut c = Cache::default();
+            assert_eq!(c.took(report("Bearer a", exp, false), T0), Err(NO_TOKEN), "{exp:?}");
+            assert_eq!(c.fresh(T0), None);
+            assert_eq!(c.held(T0 + HOLD_MS - 1), Some(NO_TOKEN));
+            assert_eq!(c.held(T0 + HOLD_MS), None);
+        }
+    }
+
+    #[test]
+    fn a_rejected_token_is_dropped_only_while_it_is_the_cached_one() {
+        let mut c = Cache::default();
+        c.took(report("Bearer a", Some(T0 + HOUR), false), T0).unwrap();
+        c.reject("Bearer other");
+        assert_eq!(c.fresh(T0), Some("Bearer a"), "another call's token stays");
+        c.reject("Bearer a");
+        assert_eq!(c.fresh(T0), None);
+        assert_eq!(c.held(T0), None, "a 401 is not a hold: the next call fetches");
+        c.took(report("Bearer b", Some(T0 + HOUR), false), T0 + 1).unwrap();
+        assert_eq!(c.fresh(T0 + 1), Some("Bearer b"));
+    }
+
+    #[test]
+    fn the_page_handing_back_a_rejected_token_is_a_transient_failure() {
+        let mut c = Cache::default();
+        c.took(report("Bearer a", Some(T0 + HOUR), false), T0).unwrap();
+        c.reject("Bearer a");
+        assert_eq!(c.took(report("Bearer a", Some(T0 + HOUR), false), T0 + 1), Err(NO_TOKEN));
+        assert_eq!(c.fresh(T0 + 1), None);
+        assert_eq!(c.held(T0 + 1), Some(NO_TOKEN));
+        assert_eq!(c.held(T0 + 1 + HOLD_MS), None);
+    }
+
+    #[test]
+    fn a_good_report_lifts_a_hold() {
+        let mut c = Cache::default();
+        c.failed(T0);
+        assert_eq!(c.held(T0), Some(NO_TOKEN));
+        c.took(report("Bearer a", Some(T0 + 2 * HOUR), false), T0 + HOLD_MS).unwrap();
+        assert_eq!(c.held(T0 + HOLD_MS), None);
     }
 
     #[test]
