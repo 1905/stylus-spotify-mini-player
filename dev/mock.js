@@ -268,6 +268,15 @@
   const reject = (msg) => Promise.reject(msg);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // lyrics for every song but one: synced lines over the first minute, one instrumental gap
+  const LYRICS = [
+    [1200, "I know you're out there somewhere tonight"], [6800, "Counting the lights on the water"],
+    [12400, "I left the door open, the radio on"], [18000, ""], [24500, "Nobody told me the summer could end"],
+    [30100, "Nobody told me at all"], [36700, "So I keep the window down"], [42300, "And the song keeps playing"],
+    [48900, "Long after you're gone"], [55500, "Long after the lights are gone"],
+  ].map(([ms, text]) => ({ ms, text }));
+  const NO_LYRICS = "2qKioq4HNraWk0DXH4Rdut"; // Infinity: Spotify has no lyrics for it
+
   // the in-app player
   const media = []; // media_update / media_clear calls, oldest first
   let loginRunning = false;
@@ -464,6 +473,10 @@
       return { items: clone(items), has_more: items.length === 10 && offset + 10 < 1000 && offset + 10 < pool.length };
     },
     get_queue: () => clone(state.queue),
+    get_lyrics: async ({ trackId }) => {
+      await sleep(1500);
+      return trackId === NO_LYRICS ? null : { synced: true, lines: clone(LYRICS) };
+    },
     get_recently_played: () =>
       clone(state.history.slice(0, 30)).map((r) => ({ context_uri: null, ...r })),
 

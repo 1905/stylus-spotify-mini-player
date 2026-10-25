@@ -69,6 +69,7 @@
         <h1 id="nowTitle" class="now-title"></h1>
         <p id="nowArtist" class="now-artist"></p>
         <p id="nowAlbum" class="now-album"></p>
+        <div id="lyricsPreview" class="lyrics-preview" aria-live="off" hidden><p id="lyricsCur" class="lyrics-cur"></p><p id="lyricsNext" class="lyrics-next"></p></div>
         <p id="emptyState" class="now-empty" hidden></p>
       </section>
 
@@ -314,6 +315,16 @@
             <div class="set-row">
               <span id="coverRowLabel" class="set-label">Show cover row</span>
               <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
+            </div>
+            <div id="lyricsGroup" class="set-group" hidden>
+              <span id="lyricsLabel" class="set-label">Lyrics</span>
+              <div id="lyricsOpts" class="seg seg-lyrics" role="radiogroup" aria-labelledby="lyricsLabel">
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="off"><span class="seg-name">Off</span></button>
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="title"><span class="seg-name">Under the title</span></button>
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="cover"><span class="seg-name">Instead of the cover</span></button>
+                <button class="seg-opt" type="button" role="radio" aria-checked="false" data-lyrics="panel"><span class="seg-name">Side panel</span></button>
+              </div>
+              <p class="set-note">Spotify's web player provides the lyrics; not every song has them.</p>
             </div>
           </section>
           <section class="set-sec" aria-labelledby="setMenuHead">
