@@ -1,9 +1,12 @@
 // Which path a player command takes: the in-app player ("Here") directly, or the remote path
 // (the playback commands in Rust: a connect-state command for another device).
 
-/** True when deviceId is the in-app player and it's ready (connected; maybe not active). */
+/**
+ * True when deviceId is the in-app player and it's ready (connected; maybe not active). Never in
+ * Free mode: Here is the web player then, and it takes the remote path like any other device.
+ */
 export const isEngineDevice = (engine, deviceId) =>
-  Boolean(engine && engine.state === "ready" && engine.device_id && deviceId && deviceId === engine.device_id);
+  Boolean(engine && engine.state === "ready" && engine.mode !== "free" && engine.device_id && deviceId && deviceId === engine.device_id);
 
 /**
  * Send play/pause/seek/next/prev/volume to the in-app player directly? Only when deviceId (the

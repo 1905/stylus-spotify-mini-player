@@ -7,7 +7,7 @@ import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, DEFAULT_REPEAT, nextRepeat, stepVolume } from "./lib/transport.js";
 import { noteMixes } from "./lib/mixes.js";
-import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
+import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isFree, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
 import { isEngineDevice, isLocal, refusedText, volumeTiming } from "./lib/route.js";
@@ -137,7 +137,7 @@ function toast(msg) {
 const LOGIN_COPY = {
   login: {
     title: "Your music, in order",
-    sub: "Log in with Spotify to see what played, what's playing, and what's next. Stylus needs Spotify Premium.",
+    sub: "Log in with Spotify to see what played, what's playing, and what's next.",
     btn: "Log in with Spotify",
   },
   ended: {
@@ -2089,6 +2089,8 @@ async function playOnThisMac() {
       await refreshEngine(); // its device id: how the list shows it
       if (sess !== authSession) return;
       setBusy("connecting");
+    } else if (st.web_login) {
+      await invoke("webplayer_show"); // Free mode: the web player's own login page; it hides itself once logged in
     } else if (st.state !== "ready") {
       return void fail(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
     }
@@ -2115,6 +2117,7 @@ let lastMediaAt = 0;
  * force: a local seek, sent even when it moved less than the jump threshold. Never from frames.
  */
 function syncMedia(force = false) {
+  if (isFree(engine)) return; // the web player's WebKit owns Now Playing and the media keys for what it plays
   const next = mediaPayload({ mode: state.mode, now: state.now, isPlaying: state.isPlaying, positionMs: progress() });
   const t = performance.now();
   if (!(force && next) && !mediaChanged(lastMedia, next, t - lastMediaAt)) return;
@@ -2684,6 +2687,8 @@ function renderSettings() {
   for (const [id, key] of Object.entries(SWITCHES)) $(id).setAttribute("aria-checked", String(s[key]));
   $("menuBarTitleSwitch").disabled = !s.menuBar; // no icon, no song next to it
   const ready = engineReady();
+  const free = isFree(engine); // the web player picks its own quality
+  $("qualityOpts").hidden = free;
   for (const b of $("qualityOpts").querySelectorAll("[data-kbps]")) {
     const kbps = Number(b.dataset.kbps);
     const on = qualityBusy ? kbps === qualityBusy : kbps === quality;
@@ -2694,11 +2699,13 @@ function renderSettings() {
     if (kbps === qualityBusy) b.setAttribute("aria-busy", "true");
     else b.removeAttribute("aria-busy");
   }
-  $("qualityNote").textContent = qualityBusy
-    ? "Restarting the player…"
-    : ready
-      ? "Changing restarts the player for a moment."
-      : "Available once the player here is ready.";
+  $("qualityNote").textContent = free
+    ? "Quality is set by Spotify's web player."
+    : qualityBusy
+      ? "Restarting the player…"
+      : ready
+        ? "Changing restarts the player for a moment."
+        : "Available once the player here is ready.";
 }
 
 // ---------- settings: updates (Rust updater.rs): the status line, Check now, Restart now ----------

@@ -57,7 +57,7 @@
 
   const SCENARIOS = [
     "ended",
-    "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error",
+    "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error", "free",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-down",
     "slow", "resume", "search-all", "library-all", "playlist", "here", "refused", "finished", "fresh", "library-search",
@@ -125,6 +125,7 @@
       scenario === "login" ? { state: "needs_login", name: RUN_NAME, device_id: null } // first run: no player login yet
       : scenario === "not_premium" ? { state: "failed", name: RUN_NAME, reason: PREMIUM_REQUIRED, device_id: null }
       : scenario === "engine-down" ? { state: "failed", name: RUN_NAME, reason: "Spotify changed its protocol (mock)", device_id: null }
+      : scenario === "free" ? { state: "ready", name: RUN_NAME, device_id: RUN_ID, mode: "free", web_login: false } // the web player is Here
       : { state: "ready", name: RUN_NAME, device_id: RUN_ID },
     quality: 160, // the in-app player's bitrate, kbps
   };
