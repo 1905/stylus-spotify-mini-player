@@ -16,7 +16,8 @@ export function lineAt(lines, ms, hint = -1) {
   return lines.findLastIndex((l) => l.ms <= ms);
 }
 
-const sung = (line) => (line ? line.text || "♪" : "");
+/** A line as sung: its words, or ♪ for an instrumental gap. */
+export const sung = (line) => (line ? line.text || "♪" : "");
 
 /** The two lines under the title: the current one (♪ before the first line and in the gaps) and the next. */
 export function preview(lines, i) {

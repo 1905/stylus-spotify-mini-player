@@ -24,7 +24,7 @@ import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
 import { isNowRow, matchIndexes, searchLibrary } from "./lib/libsearch.js";
-import { lyricsActive, lineAt, preview as linePreview } from "./lib/lyrics.js";
+import { lyricsActive, lineAt, preview as linePreview, sung } from "./lib/lyrics.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -1801,6 +1801,10 @@ let lyricsGen = 0; // bumped whenever state.lyrics is replaced or dropped: a lat
 let lastLyricsKey = ""; // what applyLyrics last set up
 let lastLyricsPaint = ""; // what renderLyrics last painted
 let lastLyricsLine = -1; // the line painted last: lineAt's hint
+let lyricsListOf = null; // the state.lyrics object the list's rows were built from
+let lyricsListIn = null; // the placement the list was last painted in: a move re-centres it
+let lyricsCurRow = null; // the row marked current
+let lyricsUserAt = -Infinity; // the user last scrolled the list (performance.now): auto-follow pauses 4 s
 
 /** What shows now: null, or the placement the setting names ("cover" and "panel" only while the ❝ button is on). */
 function lyricsShown() {
@@ -1855,35 +1859,106 @@ async function readLyrics(id, gen) {
   }
 }
 
-/** The one place that sets what is visible: the stage's data-lyrics and the two-line block; the cover re-measures when that changed. */
+/** The one place that sets what is visible: the stage's data-lyrics, the two-line block, the column, the panel and the
+ *  Lyrics button; the cover re-measures when that changed. */
 function applyLyrics() {
+  const s = getSettings();
+  const active = lyricsActive(s, engine, state.mode);
   const shown = lyricsShown();
-  const key = `${shown}|${getSettings().lyrics}`;
+  const key = `${active}|${shown}|${s.lyrics}`;
   if (key !== lastLyricsKey) {
     lastLyricsKey = key;
     $("stage").dataset.lyrics = shown || "off";
     $("lyricsPreview").hidden = shown !== "title";
+    const btn = $("lyricsBtn");
+    btn.hidden = !(active && s.lyrics !== "title");
+    btn.setAttribute("aria-pressed", String(s.lyricsShown));
+    btn.classList.toggle("is-on", s.lyricsShown);
+    $("lyricsStage").hidden = shown !== "cover";
+    $("run").hidden = shown === "cover";
+    $("lyricsPanel").hidden = shown !== "panel";
+    const list = $("lyricsList");
+    const target = shown === "panel" ? $("lyricsPanel") : $("lyricsStage");
+    if (list.parentElement !== target) target.append(list);
     resetPan();
     if (!$("stage").hidden) renderRun();
   }
   renderProgress(); // → renderLyrics with the bar's position, song and frozen state
 }
 
-/** Paint the current line (and the next) for the open placement; nothing when the lines are not this song's. */
+/** Paint the current line for the open placement; nothing of a song that is not the one on screen. */
 function renderLyrics(p, t, frozen) {
   const l = state.lyrics;
   const shown = lyricsShown();
-  const ready = !frozen && l && l.status === "ready" && t && l.uri === t.uri;
-  const i = ready && l.synced ? lineAt(l.lines, p, lastLyricsLine) : -1;
-  const key = `${shown}|${l ? l.uri + l.status : ""}|${i}`;
+  const own = l && t && l.uri === t.uri ? l : null; // the lines of the song on screen
+  const ready = !frozen && own && own.status === "ready";
+  const i = ready && own.synced ? lineAt(own.lines, p, lastLyricsLine) : -1;
+  const key = `${shown}|${own ? own.uri + own.status : ""}|${i}`;
   if (key === lastLyricsPaint) return;
   lastLyricsPaint = key;
+  const step = i === lastLyricsLine + 1;
   lastLyricsLine = i;
   // the two lines under the title; empty (not stale) while another placement or none is open
-  const { cur, next } = shown === "title" && ready && l.synced ? linePreview(l.lines, i) : { cur: "", next: "" };
+  const { cur, next } = shown === "title" && ready && own.synced ? linePreview(own.lines, i) : { cur: "", next: "" };
   $("lyricsCur").textContent = cur;
   $("lyricsNext").textContent = next;
+  if (shown !== "cover" && shown !== "panel") return;
+  // the list: rebuilt per song (or per answer), the current row moved and kept in the middle
+  const list = $("lyricsList");
+  if (own !== lyricsListOf) buildLyricsList(list, own);
+  const moved = shown !== lyricsListIn;
+  lyricsListIn = shown;
+  const row = i >= 0 ? list.children[i] : null;
+  if (row === lyricsCurRow && !moved) return;
+  if (lyricsCurRow) lyricsCurRow.classList.remove("is-cur");
+  if (row) row.classList.add("is-cur");
+  lyricsCurRow = row;
+  if (row && performance.now() - lyricsUserAt > 4000) centerRow(list, row, step && !moved);
 }
+
+/** The list's rows for l: nothing while loading, a note when a song has none, one row per line (buttons seek when synced). */
+function buildLyricsList(list, l) {
+  lyricsListOf = l;
+  lyricsCurRow = null;
+  list.replaceChildren();
+  if (!l || l.status === "loading") return;
+  if (l.status === "none") {
+    const p = document.createElement("p");
+    p.className = "lyrics-empty";
+    p.textContent = "No lyrics for this song";
+    list.append(p);
+    return;
+  }
+  list.append(
+    ...l.lines.map((line, n) => {
+      const el = document.createElement(l.synced ? "button" : "p");
+      el.className = "lyrics-line";
+      if (l.synced) {
+        el.type = "button";
+        el.tabIndex = -1; // a click seeks; the scrub bar is the keyboard's way
+        el.dataset.i = String(n);
+      }
+      el.textContent = sung(line);
+      return el;
+    }),
+  );
+  list.scrollTop = 0;
+}
+
+/** Scroll list so that row sits in its middle; smooth only for a one-line step (and no reduced motion). */
+function centerRow(list, row, smooth) {
+  list.scrollTo({ top: row.offsetTop - list.offsetTop - (list.clientHeight - row.offsetHeight) / 2, behavior: smooth && !reducedMotion() ? "smooth" : "auto" });
+}
+
+function onLyricsLineClick(e) {
+  const b = e.target.closest("[data-i]");
+  const lines = state.lyrics && state.lyrics.lines;
+  if (b && lines) seekTo(lines[Number(b.dataset.i)].ms);
+}
+
+const noteLyricsScroll = () => {
+  lyricsUserAt = performance.now();
+};
 
 let heartGen = 0;
 let savedChain = Promise.resolve(); // save/unsave in click order, so the last click wins
@@ -2314,6 +2389,7 @@ function flipSetting(key, label, after) {
 }
 
 const setLyricsPlacement = (v) => putSetting("lyrics", v, `lyrics ${v}`, syncLyrics);
+const toggleLyricsShown = () => flipSetting("lyricsShown", "lyrics shown", syncLyrics);
 
 function onLyricsClick(e) {
   const b = e.target.closest("[data-lyrics]");
@@ -2695,7 +2771,7 @@ function panelHtml(view) {
 function centerPanelNow() {
   const list = $("panelList");
   const row = list.querySelector('[aria-current="true"]');
-  if (row) list.scrollTop = row.offsetTop - list.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
+  if (row) centerRow(list, row, false);
 }
 
 function onPanelClick(e) {
@@ -4805,6 +4881,9 @@ async function boot() {
   $("mcpResetYes").addEventListener("click", resetMcpKey);
   $("panelBtn").addEventListener("click", togglePanel);
   $("panelList").addEventListener("click", onPanelClick);
+  $("lyricsBtn").addEventListener("click", toggleLyricsShown);
+  $("lyricsList").addEventListener("click", onLyricsLineClick);
+  for (const ev of ["wheel", "pointerdown", "touchstart", "keydown"]) $("lyricsList").addEventListener(ev, noteLyricsScroll, { passive: true });
   $("panel").addEventListener("error", onImgError, true);
   $("panelLayer").addEventListener("click", (e) => e.target.closest("[data-close]") && closePanel(true));
   document.addEventListener("pointerdown", onOutside);

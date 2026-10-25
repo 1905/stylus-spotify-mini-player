@@ -53,5 +53,6 @@ export const ICONS = {
 
   // the song link: two chain links hooked on the diagonal; check = copied
   link: svg("link", LINE, '<path d="M13.78 11.21A4 4 0 0 0 7.67 10.67l-3.5 3.5a4 4 0 0 0 5.66 5.66l2-2M10.22 12.79A4 4 0 0 0 16.33 13.33l3.5-3.5a4 4 0 0 0-5.66-5.66l-2 2"/>'),
+  lyrics: svg("lyrics", LINE, '<path d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3z"/><path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3.5M9 20.5h6"/>'),
   check: svg("check", LINE, '<path d="m5 12.5 4.5 4.5 9.5-9.5"/>'),
 };
