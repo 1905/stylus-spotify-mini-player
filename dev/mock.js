@@ -3,6 +3,7 @@
 // Scenario from ?s= : playing (default), paused, nothing, nodevice,
 // login (no player login yet: the login screen; "Log in with Spotify" logs the player in),
 // not_premium (the account has no Premium: the "Stylus needs Spotify Premium" login screen),
+// free (a Free account: the hidden web player is Here, mode "free" in engine_status),
 // logged_out (logged in, then the menu's "Log out" fires `logout-requested` after 1.5 s),
 // ended (Spotify refuses the player login after the first poll: the "session ended" screen),
 // error, library, library-detail, search, search-empty, long-titles, ad,
