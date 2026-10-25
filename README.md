@@ -42,7 +42,7 @@ Or download **Stylus.dmg** from [the latest release](https://github.com/1905/sty
 > xattr -dr com.apple.quarantine /Applications/Stylus.app
 > ```
 
-**Requirements:** macOS 13 or later on Apple Silicon, and a **Spotify Premium** account (playback through Spotify Connect requires Premium).
+**Requirements:** macOS 13 or later on Apple Silicon and a Spotify account. A Premium account plays through the built-in player; a Free account plays through Spotify's web player in a hidden window, with Spotify's ads.
 
 ### Updates
 
@@ -142,7 +142,7 @@ npx tauri build --bundles app   # → src-tauri/target/release/bundle/macos/Styl
 
 ### Spotify login
 
-Stylus has one login: the player login. On first launch, select **Log in with Spotify**. Your browser opens the Spotify login page (OAuth with PKCE, no client secret), and Stylus gets the login for its built-in Spotify Connect speaker. Stylus uses this login for playback and also for your library, search and playlists. The account must have Spotify Premium: without Premium, the login screen says so. You do not need a Spotify developer app.
+Stylus has one login: the player login. On first launch, select **Log in with Spotify**. The Spotify login page opens inside Stylus (OAuth with PKCE, no client secret), and Stylus gets the login for its built-in Spotify Connect speaker. Stylus uses this login for playback and also for your library, search and playlists. Passkeys don't work in that window; use a password or a one-time code. You do not need a Spotify developer app.
 
 <details>
 <summary>How it works</summary>

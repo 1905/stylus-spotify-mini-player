@@ -1134,6 +1134,11 @@ enum Restore {
 /// with no saved session it loads Liked Songs (`load_default`). It never starts sound.
 async fn restore(engine: Engine, device_id: String, why: Restore) {
     const LOG: &str = "stylus::session";
+    if engine.mode() == Mode::Free {
+        // ponytail: Free mode starts idle; a remote restore (transfer + pause + seek on the web player) is the upgrade if the user misses the last song
+        log::info!(target: LOG, "restore ({why:?}) skipped: Free mode plays on the web player");
+        return;
+    }
     let tracker = engine.0.session.clone();
     let saved = tracker.current();
     if saved.is_none() && why != Restore::Launch {

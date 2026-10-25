@@ -754,8 +754,10 @@ pub async fn playback_snapshot() -> Result<Value, String> {
 /// `playback_snapshot` from a `cluster_state` the caller already has.
 pub async fn playback_snapshot_from(c: &Value) -> Value {
     let track = match c["track_uri"].as_str() {
-        Some(uri) => track_meta(uri).await,
-        None => Value::Null,
+        // an ad has no track metadata (and a failed lookup isn't cached: it would repeat on every
+        // poll); without a track the UI shows its ad break
+        Some(uri) if !uri.starts_with("spotify:ad:") => track_meta(uri).await,
+        _ => Value::Null,
     };
     snapshot_shape(c, track, &devices().unwrap_or_default())
 }
