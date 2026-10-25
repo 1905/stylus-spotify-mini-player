@@ -170,7 +170,8 @@ pub struct Status {
     name: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
-    /// The engine's Connect device id. Null until `ready`.
+    /// Here's Connect device id: this Mac's, or the web player's in Free mode. Null until `ready`
+    /// (and, in Free mode, until the web player reported one).
     device_id: Option<String>,
     /// How this Mac plays (`Mode`); meaningful once `ready`.
     mode: Mode,
@@ -423,8 +424,15 @@ impl Engine {
         auth_status_for(self.0.store.load().is_some(), &self.state())
     }
 
+    /// The status, with Here's id: this Mac's in Premium mode, the web player's (once reported,
+    /// webplayer.rs) in Free mode.
     fn status(&self, state: &State) -> Status {
-        Status { mode: self.mode(), ..Status::new(state, self.0.device_id.get().map(String::as_str)) }
+        let mode = self.mode();
+        let here = match mode {
+            Mode::Premium => self.0.device_id.get().cloned(),
+            Mode::Free => crate::webplayer::report().device_id,
+        };
+        Status { mode, ..Status::new(state, here.as_deref()) }
     }
 
     /// The persisted device id; reads or creates the file on the first call.

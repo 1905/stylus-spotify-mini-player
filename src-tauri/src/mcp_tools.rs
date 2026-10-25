@@ -638,7 +638,7 @@ async fn top_track(b: &dyn Backend, query: &str) -> Result<Value, String> {
 /// Stylus is named "This Mac", so the name alone can pick another computer), else the name.
 async fn devices(b: &dyn Backend) -> Result<(Vec<Value>, Option<String>), String> {
     let list = b.devices().await?.as_array().cloned().unwrap_or_default();
-    let own = crate::internal::own_device_id()
+    let own = crate::internal::here_device_id()
         .filter(|id| list.iter().any(|d| d["id"].as_str() == Some(id.as_str())))
         .or_else(|| list.iter().find(|d| d["name"] == crate::player::DEVICE_NAME).and_then(|d| d["id"].as_str().map(str::to_string)));
     Ok((list, own))

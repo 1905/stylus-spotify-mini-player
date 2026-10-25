@@ -9,6 +9,8 @@ use std::time::Duration;
 use librespot_core::Session;
 use serde_json::{json, Value};
 
+use crate::player::Mode;
+
 pub const PATHFINDER: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
 const LOG: &str = "stylus::internal";
 /// One request (tokens included) may take this long, like `paths::http()`'s timeout.
@@ -798,15 +800,37 @@ fn snapshot_shape(c: &Value, track: Value, devices: &Value) -> Value {
     })
 }
 
-/// This Mac's id while the engine is ready.
+/// This Mac's id while it may play: the engine is ready and in Premium mode. None in Free mode,
+/// where Spirc plays nothing: every caller then takes the remote path, and `here_device_id` is
+/// the web player.
 pub fn own_device_id() -> Option<String> {
-    ENGINE.get()?.live_session().map(|s| s.device_id().to_string())
+    let engine = ENGINE.get()?;
+    if engine.mode() == Mode::Free {
+        return None;
+    }
+    engine.live_session().map(|s| s.device_id().to_string())
 }
 
-/// `list_devices` from the cluster, with this Mac listed even before Spotify lists it.
+/// Here's id while the engine is ready: this Mac's (Premium mode), else the web player's once it
+/// reported one (Free mode, webplayer.rs).
+pub fn here_device_id() -> Option<String> {
+    let engine = ENGINE.get()?;
+    match engine.mode() {
+        Mode::Premium => own_device_id(),
+        Mode::Free => engine.is_ready().then(|| crate::webplayer::report().device_id).flatten(),
+    }
+}
+
+/// `list_devices` from the cluster, with this Mac listed even before Spotify lists it. Free mode:
+/// without this Mac (Spirc plays nothing there; the web player is Here).
 pub fn devices() -> Result<Value, String> {
     let (cluster, own, volume) = connect()?;
-    Ok(Value::Array(with_own_device(crate::pb::devices(&cluster), &own, &cluster.active_device_id, volume)))
+    let mut list = crate::pb::devices(&cluster);
+    if ENGINE.get().is_some_and(|e| e.mode() == Mode::Free) {
+        list.retain(|d| d["id"] != own.as_str());
+        return Ok(Value::Array(list));
+    }
+    Ok(Value::Array(with_own_device(list, &own, &cluster.active_device_id, volume)))
 }
 
 /// Last resort while the engine is ready: this Mac alone.
@@ -874,6 +898,8 @@ pub enum RemoteCmd {
     Volume(u8),
     /// A context (from `track` when given) or a track list (from `track`, else the first).
     Play { context: Option<String>, uris: Vec<String>, track: Option<String>, position_ms: u64 },
+    /// Queue one track uri (the web player in Free mode; `queue_command`).
+    Queue(String),
 }
 
 impl RemoteCmd {
@@ -889,6 +915,7 @@ impl RemoteCmd {
             RemoteCmd::Repeat(_) => "repeat",
             RemoteCmd::Volume(_) => "volume",
             RemoteCmd::Play { .. } => "play",
+            RemoteCmd::Queue(_) => "queue",
         }
     }
 }
@@ -918,6 +945,7 @@ pub fn command_bodies(cmd: &RemoteCmd) -> Vec<(reqwest::Method, String, Value)> 
         RemoteCmd::Repeat(RepeatMode::Context) => vec![flag("set_repeating_context", true), flag("set_repeating_track", false)],
         RemoteCmd::Repeat(RepeatMode::Track) => vec![flag("set_repeating_context", true), flag("set_repeating_track", true)],
         RemoteCmd::Volume(p) => vec![(reqwest::Method::PUT, "connect/volume".into(), json!({ "volume": crate::nowplaying::volume_from_percent(*p) }))],
+        RemoteCmd::Queue(uri) => vec![(reqwest::Method::POST, "player/command".into(), queue_command(uri))],
         RemoteCmd::Play { context, uris, track, position_ms } => {
             let (ctx, skip_to) = match context {
                 Some(c) => (json!({ "uri": c, "url": format!("context://{c}") }), track.as_ref().map(|t| json!({ "track_uri": t }))),
@@ -958,9 +986,10 @@ pub fn remote_error(action: &str, err: String) -> String {
     }
 }
 
-/// This Mac's id and the API, for a request from This Mac to another device.
+/// This Mac's id and the API, for a request from This Mac to another device. The Spirc id in both
+/// modes: in Free mode This Mac still sends, it just never plays (so not `own_device_id`).
 fn remote_caller() -> Result<(String, Api), String> {
-    let own = own_device_id().ok_or_else(|| not_ready("the player isn't connected"))?;
+    let own = ENGINE.get().and_then(|e| e.live_session()).map(|s| s.device_id().to_string()).ok_or_else(|| not_ready("the player isn't connected"))?;
     Ok((own, Api::current()?))
 }
 
@@ -1251,6 +1280,17 @@ mod tests {
         assert_eq!(l[1]["is_active"], true);
         assert_eq!(l[1]["volume_percent"], 40);
         assert!(with_own_device(vec![], "", "", 0).is_empty());
+    }
+
+    #[test]
+    fn queue_is_one_player_command() {
+        let cmd = RemoteCmd::Queue("spotify:track:x".into());
+        assert_eq!(cmd.action(), "queue");
+        let reqs = command_bodies(&cmd);
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].1, "player/command");
+        assert_eq!(reqs[0].2["command"]["endpoint"], "add_to_queue");
+        assert_eq!(reqs[0].2["command"]["track"]["uri"], "spotify:track:x");
     }
 
     #[test]
