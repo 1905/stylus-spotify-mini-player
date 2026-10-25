@@ -11,7 +11,7 @@ export const QUALITIES = [
 
 export const isQuality = (v) => QUALITIES.some((q) => q.kbps === v);
 
-/** Where the playing song's lyrics show (Free mode only): under the title or instead of the cover; the ❝ button hides them. */
+/** Where the playing song's lyrics show: under the title or instead of the cover; the ❝ button hides them. */
 export const LYRICS_PLACEMENTS = ["title", "cover"];
 
 /**
@@ -21,7 +21,7 @@ export const LYRICS_PLACEMENTS = ["title", "cover"];
  * - menuBar: the icon and mini player in the menu bar (default on); Rust tray.rs reads it at launch too.
  * - menuBarTitle: the current song next to that icon (default off).
  * - autoUpdate: updates download and install at the quit (default on); Rust updater.rs reads it too.
- * - lyrics: where the song's words show, one of LYRICS_PLACEMENTS (default "title"); Free mode only, the web player has the token.
+ * - lyrics: where the song's words show, one of LYRICS_PLACEMENTS (default "title").
  * - lyricsShown: the ❝ button's state (default on): off hides the lyrics in either placement. A stored "off" placement (retired) lands here.
  */
 export function parseSettings(raw) {

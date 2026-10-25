@@ -12,4 +12,10 @@ describe("dev harness markup", () => {
   it("has the same <body> as src/mini.html", () => {
     expect(body("../dev/mini.html")).toBe(body("./mini.html"));
   });
+
+  it("shows the Lyrics group in every mode and names its note", () => {
+    const html = body("./index.html");
+    expect(html).toMatch(/<div id="lyricsGroup" class="set-group">/);
+    expect(html).toMatch(/<p id="lyricsNote" class="set-note">Spotify's web player provides the lyrics; not every song has them.<\/p>/);
+  });
 });

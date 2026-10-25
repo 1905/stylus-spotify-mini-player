@@ -276,6 +276,7 @@
     [48900, "Long after you're gone"], [55500, "Long after the lights are gone"],
   ].map(([ms, text]) => ({ ms, text }));
   const NO_LYRICS = "2qKioq4HNraWk0DXH4Rdut"; // Infinity: Spotify has no lyrics for it
+  const NO_SESSION = new URLSearchParams(location.search).get("lyrics") === "nosession"; // ?lyrics=nosession: Premium without a web session
 
   // the in-app player
   const media = []; // media_update / media_clear calls, oldest first
@@ -474,6 +475,7 @@
     },
     get_queue: () => clone(state.queue),
     get_lyrics: async ({ trackId }) => {
+      if (NO_SESSION) throw "LYRICS_NO_WEB_SESSION: no Spotify web session; log in again";
       await sleep(1500);
       return trackId === NO_LYRICS ? null : { synced: true, lines: clone(LYRICS) };
     },

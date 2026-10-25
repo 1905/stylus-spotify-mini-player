@@ -1814,7 +1814,7 @@ function volumeKey(ev) {
 // ---------- heart: the current song in Liked Songs (not a player command) ----------
 
 // Bumped on each track change and heart click: an is_saved answer from before either is stale.
-// ---------- lyrics (Free mode: the web player's token reads them) ----------
+// ---------- lyrics (the web player's token reads them, Rust lyrics.rs) ----------
 
 let lyricsGen = 0; // bumped whenever state.lyrics is replaced or dropped: a late answer is ignored
 let lastLyricsKey = ""; // what applyLyrics last set up
@@ -1828,14 +1828,14 @@ let lyricsUserAt = -Infinity; // the user last scrolled the list (performance.no
 /** What shows now: null, or the placement the setting names (only while the ❝ button is on). */
 function lyricsShown() {
   const s = getSettings();
-  if (!lyricsActive(s, engine, state.mode)) return null;
+  if (!lyricsActive(s, state.mode)) return null;
   return s.lyricsShown ? s.lyrics : null;
 }
 
 /** Fetch the playing song's lines when a placement can show them; drop them when lyrics are off. Idempotent. */
 function syncLyrics() {
   const track = state.now;
-  if (!lyricsActive(getSettings(), engine, state.mode)) {
+  if (!lyricsActive(getSettings(), state.mode)) {
     if (state.lyrics) {
       state.lyrics = null;
       lyricsGen++;
@@ -1852,11 +1852,13 @@ async function loadLyrics(track) {
   state.lyrics = { uri: track.uri, status: "loading" };
   let got = null;
   let note = "none";
+  let noSession = false;
   if (track.id && !isLocalFile(track.uri)) {
     try {
       got = await readLyrics(track.id, gen);
     } catch (e) {
       note = String(e);
+      noSession = isCode(e, "LYRICS_NO_WEB_SESSION");
     }
     if (gen !== lyricsGen) return;
   }
@@ -1864,6 +1866,8 @@ async function loadLyrics(track) {
     state.lyrics = { uri: track.uri, status: "ready", synced: got.synced, lines: got.lines };
     note = `${got.synced ? "synced" : "unsynced"} ${got.lines.length} lines`;
   } else state.lyrics = { uri: track.uri, status: "none" };
+  // the Settings note is the one place the no-session state lives: a new login clears it with the next song's lyrics
+  $("lyricsNote").textContent = noSession ? "Log in again to see lyrics." : "Spotify's web player provides the lyrics; not every song has them.";
   applog(got || note === "none" ? "info" : "warn", `lyrics: ${track.id || track.uri} ${note}`);
   applyLyrics();
 }
@@ -1882,7 +1886,7 @@ async function readLyrics(id, gen) {
  *  Lyrics button; the cover re-measures when that changed. */
 function applyLyrics() {
   const s = getSettings();
-  const active = lyricsActive(s, engine, state.mode);
+  const active = lyricsActive(s, state.mode);
   const shown = lyricsShown();
   const key = `${active}|${shown}|${s.lyrics}`;
   if (key !== lastLyricsKey) {
@@ -2906,7 +2910,6 @@ function renderSettings() {
     if (kbps === qualityBusy) b.setAttribute("aria-busy", "true");
     else b.removeAttribute("aria-busy");
   }
-  $("lyricsGroup").hidden = !free;
   const lyricsPlacementBtn = $("lyricsPlacementBtn");
   lyricsPlacementBtn.textContent = s.lyrics === "cover" ? "Instead of cover" : "Under title";
   $("qualityNote").textContent = free

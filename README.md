@@ -37,7 +37,7 @@ Select **Log in with Spotify**. Spotify's login page opens inside Stylus (OAuth 
 
 - Spotify's ads play as Spotify sends them. During an ad Stylus shows an ad card; skip and seek wait until it ends.
 - Audio quality is set by Spotify's web player, so the quality setting is hidden.
-- Lyrics: Settings → Appearance → Lyrics shows the words of the song under the title, instead of the cover or in a side panel.
+- Lyrics: Settings → Appearance → Lyrics shows the words of the song under the title or instead of the cover; the ❝ button hides them.
 - After a launch Stylus starts idle instead of on the last song.
 - Your other Spotify apps list both "Web Player (Safari)" (Stylus's speaker) and "This Mac"; the second one plays nothing.
 - Memory: about 450 MB in total, most of it the web player's page.

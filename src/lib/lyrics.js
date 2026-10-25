@@ -1,11 +1,9 @@
 // The playing song's lyrics: when they can show, which line is current, what the two-line preview
-// says. Lyrics exist only in Free mode: Spotify's lyrics endpoint answers to the hidden web
-// player's own token (Rust lyrics.rs), and Premium mode has no web player page.
+// says. Spotify's lyrics endpoint answers to the web player's own token (Rust lyrics.rs): the Free
+// page's, or in Premium mode the token page's.
 
-import { isFree } from "./engine.js";
-
-/** A placement is picked, the engine plays through the web player, and a song (not an ad) plays. */
-export const lyricsActive = (settings, engine, mode) => settings.lyrics && settings.lyrics !== "off" && isFree(engine) && mode === "track";
+/** A placement is picked and a song (not an ad) plays. */
+export const lyricsActive = (settings, mode) => settings.lyrics && settings.lyrics !== "off" && mode === "track";
 
 /**
  * The index of the last line that has started by `ms`, -1 before the first. `lines` are sorted by

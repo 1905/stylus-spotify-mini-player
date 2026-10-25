@@ -1,8 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { lyricsActive, lineAt, preview } from "./lyrics.js";
 
-const FREE = { state: "ready", mode: "free" };
-const PREMIUM = { state: "ready", mode: "premium" };
 const L = [
   { ms: 1000, text: "a" },
   { ms: 2500, text: "" },
@@ -10,12 +8,11 @@ const L = [
 ];
 
 describe("lyricsActive", () => {
-  it("needs a placement, Free mode and a song", () => {
-    expect(lyricsActive({ lyrics: "title" }, FREE, "track")).toBe(true);
-    expect(lyricsActive({ lyrics: "off" }, FREE, "track")).toBe(false);
-    expect(lyricsActive({ lyrics: "panel" }, PREMIUM, "track")).toBe(false);
-    expect(lyricsActive({ lyrics: "cover" }, null, "track")).toBe(false);
-    for (const mode of ["other", "idle"]) expect(lyricsActive({ lyrics: "title" }, FREE, mode)).toBe(false);
+  it("needs a placement and a song, in either mode", () => {
+    expect(lyricsActive({ lyrics: "title" }, "track")).toBe(true);
+    expect(lyricsActive({ lyrics: "cover" }, "track")).toBe(true);
+    expect(lyricsActive({ lyrics: "off" }, "track")).toBe(false);
+    for (const mode of ["other", "idle"]) expect(lyricsActive({ lyrics: "title" }, mode)).toBe(false);
   });
 });
 
