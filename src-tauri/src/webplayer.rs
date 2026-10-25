@@ -102,7 +102,7 @@ fn open(app: &AppHandle, url: Option<&str>) -> Result<WebviewWindow, String> {
         return Ok(w);
     }
     let hide = app.clone();
-    WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(parse(url.unwrap_or(PLAYER_URL))?))
+    let w = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(parse(url.unwrap_or(PLAYER_URL))?))
         .title("Spotify login")
         .inner_size(1000.0, 720.0)
         .user_agent(SAFARI_UA)
@@ -128,7 +128,30 @@ fn open(app: &AppHandle, url: Option<&str>) -> Result<WebviewWindow, String> {
         .visible(false)
         .skip_taskbar(true)
         .build()
-        .map_err(|e| format!("web player window: {e}"))
+        .map_err(|e| format!("web player window: {e}"))?;
+    #[cfg(target_os = "macos")]
+    keep_awake(&w);
+    Ok(w)
+}
+
+/// Keeps the hidden page responsive. WebKit lets the process of a page nobody sees nap, and a
+/// napping web player that has not played since its load stops acting on Connect commands after a
+/// minute or two idle (a page that played once stays responsive, even paused). The switch is a
+/// private WKPreferences setter; a WebKit without it only logs.
+#[cfg(target_os = "macos")]
+fn keep_awake(w: &WebviewWindow) {
+    let _ = w.with_webview(|pw| unsafe {
+        use objc2::{msg_send, runtime::AnyObject, sel};
+        let wk = pw.inner() as *mut AnyObject;
+        let cfg: *mut AnyObject = msg_send![wk, configuration];
+        let prefs: *mut AnyObject = msg_send![cfg, preferences];
+        let supported: bool = msg_send![prefs, respondsToSelector: sel!(_setPageVisibilityBasedProcessSuppressionEnabled:)];
+        if supported {
+            let _: () = msg_send![prefs, _setPageVisibilityBasedProcessSuppressionEnabled: false];
+        } else {
+            log::warn!(target: AUTH, "web player: no process-suppression switch in this WebKit; a hidden page may nap");
+        }
+    });
 }
 
 /// Shows the window at `url`: the player login's OAuth page (player.rs `engine_login`).
