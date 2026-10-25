@@ -46,7 +46,7 @@ const INIT_JS: &str = r#"
 "#;
 
 /// What the page last reported. The newest report wins.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct Report {
     /// The web player's Connect device id: Here in Free mode. None until the page registers.
     pub device_id: Option<String>,
@@ -55,6 +55,17 @@ pub struct Report {
     /// The page's own Bearer (its `authorization` header, `Bearer …`), for the lyrics endpoint.
     /// None until the page sent one. Never logged.
     pub token: Option<String>,
+}
+
+/// `{:?}` never shows the token (the account's web session): the log is shareable.
+impl std::fmt::Debug for Report {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Report")
+            .field("device_id", &self.device_id)
+            .field("logged_out", &self.logged_out)
+            .field("token", &self.token.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 static STATE: Mutex<Report> = Mutex::new(Report { device_id: None, logged_out: false, token: None });
@@ -248,6 +259,15 @@ mod tests {
         assert_eq!(out, Report { device_id: None, logged_out: true, ..Default::default() });
         assert!(parse_report(&url("https://open.spotify.com/")).is_none());
         assert!(parse_report(&url("http://127.0.0.1:5588/login?code=x")).is_none());
+    }
+
+    #[test]
+    fn debug_output_hides_the_token() {
+        let r = Report { device_id: Some("0a19054b".into()), logged_out: false, token: Some("Bearer secret-web-session".into()) };
+        let shown = format!("{r:?}");
+        assert!(!shown.contains("secret-web-session"), "{shown}");
+        assert!(shown.contains("0a19054b") && shown.contains("redacted"), "{shown}");
+        assert!(format!("{:?}", Report::default()).contains("None"));
     }
 
     #[test]
