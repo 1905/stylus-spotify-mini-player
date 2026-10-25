@@ -11,6 +11,7 @@ mod internal;
 mod library;
 pub mod links;
 pub mod logshare;
+mod lyrics;
 pub mod mcp;
 mod mcp_app;
 pub mod mcp_tools;
@@ -79,6 +80,7 @@ pub fn run() {
             player::engine_status,
             player::engine_login,
             player::logout,
+            lyrics::get_lyrics,
             player::engine_get_quality,
             player::engine_set_quality,
             dock::set_dock_art,
