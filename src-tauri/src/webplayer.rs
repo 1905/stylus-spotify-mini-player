@@ -19,7 +19,7 @@ use crate::applog::AUTH;
 use crate::nowplaying::lock;
 
 pub const LABEL: &str = "webplayer";
-const PLAYER_URL: &str = "https://open.spotify.com/";
+pub(crate) const PLAYER_URL: &str = "https://open.spotify.com/";
 /// The host the page reports to; the navigation is cancelled, so it never leaves the app.
 pub(crate) const REPORT_HOST: &str = "stylus.invalid";
 /// Safari's user agent: the web player serves unknown browsers a "not supported" page.

@@ -5,11 +5,21 @@
 //! reports once, by navigating to `https://stylus.invalid/webtoken?token=…&expires=…&anonymous=…`,
 //! which `on_navigation` cancels and parses. The token is never logged.
 
-use tauri::Url;
+use std::sync::Mutex;
+use std::time::Duration;
 
-use crate::webplayer::REPORT_HOST;
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tokio::sync::oneshot;
+
+use crate::applog::AUTH;
+use crate::nowplaying::lock;
+use crate::paths::now_ms;
+use crate::player::blocking;
+use crate::webplayer::{PLAYER_URL, REPORT_HOST, SAFARI_UA};
 
 pub const LABEL: &str = "webtoken";
+/// How long the page gets to report (the spike saw 1.0–1.1 s after the load started).
+const PAGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Runs before the page's scripts (hence the host guard). The dealer WebSocket becomes a socket
 /// that never opens, so the page keeps waiting for its Connect connection id and never registers a
@@ -120,13 +130,123 @@ impl Cache {
     }
 
     /// The lyrics endpoint refused `bearer`: dropped if it is still the cached one (another call
-    /// may have replaced it already), and remembered so the page cannot hand it back.
-    fn reject(&mut self, bearer: &str) {
-        if self.token.as_ref().is_some_and(|(t, _)| t == bearer) {
+    /// may have replaced it already), and remembered so the page cannot hand it back. True when
+    /// something was dropped.
+    fn reject(&mut self, bearer: &str) -> bool {
+        let dropped = self.token.as_ref().is_some_and(|(t, _)| t == bearer);
+        if dropped {
             self.token = None;
             self.rejected = Some(bearer.to_owned());
         }
+        dropped
     }
+}
+
+/// The one cache. `token` holds it for its whole run: a second caller waits and then finds the
+/// fresh token, and a second window with the label can never be built.
+static CACHE: tokio::sync::Mutex<Cache> = tokio::sync::Mutex::const_new(Cache { token: None, hold: None, rejected: None });
+
+/// The Bearer for the lyrics endpoint and whether a page fetched it in this call: the cached one
+/// while fresh, else the page's. Err with `NO_WEB_SESSION` or `NO_TOKEN` while a hold is in force,
+/// and when the page failed (a hold starts then). Never logs the token.
+pub async fn token() -> Result<(String, bool), String> {
+    let mut cache = CACHE.lock().await;
+    let now = now_ms();
+    if let Some(code) = cache.held(now) {
+        return Err(code.into());
+    }
+    if let Some(t) = cache.fresh(now) {
+        return Ok((t.to_owned(), false));
+    }
+    let fetched = match crate::internal::engine().and_then(|e| e.app()) {
+        Some(app) => fetch(app).await,
+        None => Err("no app handle".to_string()),
+    };
+    let now = now_ms();
+    match fetched {
+        Ok(report) => match cache.took(report, now) {
+            Ok(()) => {
+                let (t, exp) = cache.token.as_ref().map(|(t, e)| (t.clone(), *e)).expect("a taken token is stored");
+                log::info!(target: AUTH, "web token: fetched, expires in {} min", exp.saturating_sub(now) / 60_000);
+                Ok((t, true))
+            }
+            Err(code) => {
+                if code == NO_WEB_SESSION {
+                    log::warn!(target: AUTH, "web token: no Spotify web session; lyrics need a new login");
+                } else {
+                    log::warn!(target: AUTH, "web token: the page's token is unusable (refused before, or no expiry)");
+                }
+                Err(code.into())
+            }
+        },
+        Err(e) => {
+            cache.failed(now);
+            log::warn!(target: AUTH, "web token: {e}");
+            Err(NO_TOKEN.into())
+        }
+    }
+}
+
+/// The lyrics endpoint refused `bearer` with `status`: dropped while it is still the cached one,
+/// and never taken back from the page.
+pub async fn reject(bearer: &str, status: u16) {
+    if CACHE.lock().await.reject(bearer) {
+        log::info!(target: AUTH, "web token: dropped (HTTP {status})");
+    }
+}
+
+/// Login and logout: the token (the old account's) and the holds go. tokio's mutex is FIFO: a
+/// reset queued behind a page in flight runs after it and clears its result.
+pub async fn forget() {
+    *CACHE.lock().await = Cache::default();
+}
+
+/// Builds the hidden window, waits for the page's one report, destroys the window: after the
+/// report, the time limit or a build error alike. Both window operations run through `blocking`
+/// (they block on the main thread, `webplayer::open`); the destroy never runs inside the
+/// navigation callback, which would block the main thread on itself.
+async fn fetch(app: AppHandle) -> Result<TokenReport, String> {
+    let (tx, rx) = oneshot::channel::<TokenReport>();
+    let sender = Mutex::new(Some(tx));
+    let build_app = app.clone();
+    let built = blocking(move || {
+        let url = Url::parse(PLAYER_URL).map_err(|e| format!("web token url: {e}"))?;
+        WebviewWindowBuilder::new(&build_app, LABEL, WebviewUrl::External(url))
+            .user_agent(SAFARI_UA)
+            .initialization_script(TOKEN_JS)
+            .on_navigation(move |url| match parse_token_report(url) {
+                Some(r) => {
+                    if let Some(tx) = lock(&sender).take() {
+                        let _ = tx.send(r);
+                    }
+                    false
+                }
+                None => true,
+            })
+            .visible(false)
+            .skip_taskbar(true)
+            .build()
+            .map(|_| ())
+            .map_err(|e| format!("web token window: {e}"))
+    })
+    .await;
+    let result = match built {
+        Ok(()) => match tokio::time::timeout(PAGE_TIMEOUT, rx).await {
+            Ok(Ok(report)) => Ok(report),
+            Ok(Err(_)) => Err("the page went away before it reported".to_string()),
+            Err(_) => Err(format!("page gave no token in {} s", PAGE_TIMEOUT.as_secs())),
+        },
+        Err(e) => Err(e),
+    };
+    let destroyed = blocking(move || match app.get_webview_window(LABEL) {
+        Some(w) => w.destroy().map_err(|e| format!("web token destroy: {e}")),
+        None => Ok(()),
+    })
+    .await;
+    if let Err(e) = destroyed {
+        log::warn!(target: AUTH, "web token: {e}");
+    }
+    result
 }
 
 /// The report in a `https://stylus.invalid/webtoken?token=…&expires=…&anonymous=…` url (an empty
@@ -230,6 +350,19 @@ mod tests {
         assert_eq!(c.held(T0), Some(NO_TOKEN));
         c.took(report("Bearer a", Some(T0 + 2 * HOUR), false), T0 + HOLD_MS).unwrap();
         assert_eq!(c.held(T0 + HOLD_MS), None);
+    }
+
+    // the one test on the static cache: no window is built, the hold decides before `fetch`
+    #[tokio::test]
+    async fn token_fails_fast_while_held_and_forget_lifts_the_hold() {
+        forget().await;
+        CACHE.lock().await.took(report("", None, true), crate::paths::now_ms()).unwrap_err();
+        assert!(token().await.unwrap_err().starts_with("LYRICS_NO_WEB_SESSION"));
+        forget().await;
+        CACHE.lock().await.failed(crate::paths::now_ms());
+        assert!(token().await.unwrap_err().starts_with("LYRICS_NO_TOKEN"));
+        forget().await;
+        assert_eq!(CACHE.lock().await.held(crate::paths::now_ms()), None);
     }
 
     #[test]

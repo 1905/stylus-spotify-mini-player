@@ -400,6 +400,11 @@ impl Engine {
         }))
     }
 
+    /// The app handle once `setup` stored it (webtoken.rs builds its window with it).
+    pub(crate) fn app(&self) -> Option<tauri::AppHandle> {
+        self.0.app.get().cloned()
+    }
+
     /// How this Mac plays: the mode `run` picked for the current loop (Premium until it did).
     pub fn mode(&self) -> Mode {
         *lock(&self.0.mode)
@@ -642,6 +647,8 @@ impl Engine {
         self.stop().await;
         let store = self.0.store.clone();
         let session = self.0.session.clone();
+        // the old account's web token and the lyrics' no-session hold go with the cookies `clear` wipes below
+        crate::webtoken::forget().await;
         let results = vec![
             ("credentials", blocking(move || store.clear()).await),
             ("list cache", blocking(crate::cache::clear_all).await),
@@ -1437,7 +1444,7 @@ fn login_result(settled: Result<(), String>, save_error: Option<String>) -> Resu
 }
 
 /// `f` on the blocking pool; a panic is an Err.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string()).and_then(|r| r)
 }
 
@@ -1488,6 +1495,8 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
                 return Err(e);
             }
         };
+        // a fresh login has web session cookies: the lyrics' no-session hold (webtoken.rs) is over
+        crate::webtoken::forget().await;
         // the login page is done: the window moves on to the web player, hidden (a Premium engine
         // destroys it at Ready, `run`)
         if let Err(e) = crate::webplayer::start(&app) {
