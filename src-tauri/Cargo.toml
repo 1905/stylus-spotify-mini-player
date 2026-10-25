@@ -15,7 +15,8 @@ tauri-build = { version = "2", features = [] }
 # tray-icon: the menu-bar mini player (tray.rs); macos-private-api: its transparent, rounded window
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 tauri-plugin-opener = "2"
-tauri-plugin-notification = "2"
+# the song-start notification with its cover (notify.rs): tauri-plugin-notification drops the image on macOS
+notify-rust = "4.18"
 # signed auto-updates from GitHub Releases (updater.rs)
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }

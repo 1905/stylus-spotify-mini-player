@@ -217,6 +217,12 @@ impl Store {
     }
 }
 
+/// The cover's file for the notification banner: on disk once `get` has it (downloaded when needed).
+pub(crate) async fn path_for(url: &str) -> Option<PathBuf> {
+    store().get(url, fetch).await.ok()?;
+    Some(store().dir.join(cover_key(url)))
+}
+
 /// The app's cover store: `<app dir>/cache/covers`.
 fn store() -> &'static Store {
     static STORE: OnceLock<Store> = OnceLock::new();

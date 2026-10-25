@@ -42,7 +42,6 @@ pub fn run() {
     internal::attach(engine.clone());
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
         // signed updates from GitHub Releases (updater.rs); config in tauri.conf.json plugins.updater
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine.clone())

@@ -5076,6 +5076,7 @@ dependencies = [
  "librespot-playback",
  "librespot-protocol",
  "log",
+ "notify-rust",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -5092,7 +5093,6 @@ dependencies = [
  "subtle",
  "tauri",
  "tauri-build",
- "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
  "tokio",
@@ -5508,26 +5508,6 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
-]
-
-[[package]]
-name = "tauri-plugin-notification"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b939d7b19c8af1381a72ef8474b3aba2b56c1ddac2c23f0c8e96abbcf86b198b"
-dependencies = [
- "log",
- "notify-rust",
- "rand 0.9.5",
- "serde",
- "serde_json",
- "serde_repr",
- "tauri",
- "tauri-plugin",
- "thiserror 2.0.21",
- "time",
- "url",
- "zbus",
 ]
 
 [[package]]

@@ -141,10 +141,10 @@ function notifyAd() {
   window.__TAURI__.core.invoke("notify", { message: "Реклама — пропускаем" }).catch(() => {});
 }
 
-function notifySongStart(artist, title) {
+function notifySongStart(artist, title, cover) {
   if (!window.__TAURI__ || !window.__TAURI__.core) return;
   const message = `${artist} — ${title}`;
-  window.__TAURI__.core.invoke("notify", { message }).catch(() => {});
+  window.__TAURI__.core.invoke("notify", { message, cover: cover || null }).catch(() => {});
 }
 
 // ---------- login ----------
@@ -571,7 +571,7 @@ async function refresh(epoch) {
       notifyAd();
       skipAd();
     }
-    if (changed && track) notifySongStart(track.artists, track.name);
+    if (changed && track) notifySongStart(track.artists, track.name, track.cover);
     // a song needs its queue (this Mac's comes with its state); with no song, the device list says
     // who could play. Each list at most every 30 s: a skipped one is fetched once it's due.
     const own = queueOf(s);
