@@ -10,6 +10,7 @@
 
 use std::sync::Mutex;
 
+use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::applog::AUTH;
@@ -118,12 +119,16 @@ fn open(app: &AppHandle, url: Option<&str>) -> Result<WebviewWindow, String> {
                 apply(r);
                 return false;
             }
-            // the second logged-out signal: the web player sent the page to Spotify's login. The OAuth
-            // login passes here too, while the engine isn't ready: nothing shows for it.
-            if url.host_str() == Some("accounts.spotify.com") {
+            true
+        })
+        // the second logged-out signal: the web player sent the page to Spotify's login. A page load
+        // is the main frame's (`on_navigation` sees every frame: an iframe from accounts.spotify.com
+        // must not log Here out). The OAuth login passes here too, while the engine isn't ready:
+        // nothing shows for it.
+        .on_page_load(|_, load| {
+            if matches!(load.event(), PageLoadEvent::Started) && load.url().host_str() == Some("accounts.spotify.com") {
                 apply(Report { device_id: None, logged_out: true });
             }
-            true
         })
         .visible(false)
         .skip_taskbar(true)
@@ -186,11 +191,14 @@ pub fn destroy(app: &AppHandle) {
 
 /// Logout: forgets the Spotify session in the window's data store (the OAuth cookies live there;
 /// without this the next login would silently pick the old account), then destroys the window.
+/// The store is shared by every window and outlives this one (a Premium engine destroyed it at
+/// Ready): without a window, a blank one is created for the clearing.
 pub fn clear(app: &AppHandle) -> Result<(), String> {
-    let cleared = match app.get_webview_window(LABEL) {
-        Some(w) => w.clear_all_browsing_data().map_err(|e| format!("web player data: {e}")),
-        None => Ok(()),
+    let w = match app.get_webview_window(LABEL) {
+        Some(w) => w,
+        None => open(app, Some("about:blank"))?,
     };
+    let cleared = w.clear_all_browsing_data().map_err(|e| format!("web player data: {e}"));
     destroy(app);
     cleared
 }

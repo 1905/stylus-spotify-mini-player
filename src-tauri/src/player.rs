@@ -650,7 +650,7 @@ impl Engine {
             ("MCP", crate::mcp::disable_for_logout().await),
             // the web player's data store holds the OAuth cookies: without this the next login
             // would silently pick the old account
-            ("web player", self.0.app.get().map_or(Ok(()), crate::webplayer::clear)),
+            ("web player", { let app = self.0.app.get().cloned(); blocking(move || app.map_or(Ok(()), |a| crate::webplayer::clear(&a))).await }),
         ];
         // the next login is a new start: it restores that account's session
         self.0.restore_tried.store(false, Ordering::SeqCst);
