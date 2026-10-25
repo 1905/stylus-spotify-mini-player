@@ -46,15 +46,7 @@ pub async fn get_lyrics(track_id: String) -> Result<Option<Lyrics>, String> {
         return Err("LYRICS_BAD_ID: not a track id".into());
     }
     let token = crate::webplayer::report().token.ok_or("LYRICS_NO_TOKEN: the web player has not sent its token yet")?;
-    let url = format!("{ENDPOINT}/{track_id}?format=json&vocalRemoval=false&market=from_token");
-    let resp = crate::paths::http()
-        .get(&url)
-        .header("authorization", token)
-        .header("app-platform", "WebPlayer")
-        .header("accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("lyrics: transport: {e}"))?;
+    let resp = request(&track_id, &token).send().await.map_err(|e| format!("lyrics: transport: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         log::info!(target: LOG, "lyrics {track_id}: HTTP {}", status.as_u16());
@@ -64,9 +56,30 @@ pub async fn get_lyrics(track_id: String) -> Result<Option<Lyrics>, String> {
     parse(&body).map(Some)
 }
 
+/// The endpoint call as the web player page makes it: its token, `app-platform: WebPlayer` (400
+/// without), and a browser User-Agent (403 without, tested 2026-10-25).
+fn request(track_id: &str, token: &str) -> reqwest::RequestBuilder {
+    crate::paths::http()
+        .get(format!("{ENDPOINT}/{track_id}?format=json&vocalRemoval=false&market=from_token"))
+        .header("authorization", token)
+        .header("app-platform", "WebPlayer")
+        .header("accept", "application/json")
+        .header("user-agent", crate::webplayer::SAFARI_UA)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_asks_like_the_web_player_page() {
+        let r = request("3gjHnylel3PTRpjS44ocqr", "Bearer abc").build().unwrap();
+        assert_eq!(r.url().path(), "/color-lyrics/v2/track/3gjHnylel3PTRpjS44ocqr");
+        assert_eq!(r.headers()["authorization"], "Bearer abc");
+        assert_eq!(r.headers()["app-platform"], "WebPlayer");
+        let ua = r.headers().get("user-agent").map(|v| v.to_str().unwrap().to_owned()).unwrap_or_default();
+        assert!(ua.starts_with("Mozilla/5.0 ") && ua.contains("Safari/"), "a browser user agent, got {ua:?}");
+    }
     const SYNCED: &str = r#"{"lyrics":{"syncType":"LINE_SYNCED","language":"en","lines":[{"startTimeMs":"13780","words":"Don't ask me","syllables":[],"endTimeMs":"0"},{"startTimeMs":"16050","words":"","syllables":[],"endTimeMs":"0"},{"startTimeMs":"15000","words":"out of order","syllables":[],"endTimeMs":"0"}]}}"#;
     const UNSYNCED: &str = r#"{"lyrics":{"syncType":"UNSYNCED","lines":[{"startTimeMs":"0","words":"la"},{"startTimeMs":"0","words":"la la"}]}}"#;
 
