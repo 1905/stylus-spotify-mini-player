@@ -1922,10 +1922,9 @@ function renderLyrics(p, t, frozen) {
   lastLyricsPaint = key;
   const step = i === lastLyricsLine + 1;
   lastLyricsLine = i;
-  // the two lines under the title; empty (not stale) while another placement or none is open
-  const { cur, next } = shown === "title" && ready && own.synced ? linePreview(own.lines, i) : { cur: "", next: "" };
-  $("lyricsCur").textContent = cur;
-  $("lyricsNext").textContent = next;
+  // the lines by the title; empty (not stale) while another placement or none is open
+  const four = shown === "title" && ready && own.synced ? linePreview(own.lines, i) : ["", "", "", ""];
+  [...$("lyricsPreview").children].forEach((row, n) => (row.textContent = four[n]));
   if (shown !== "cover") return;
   // the list: rebuilt per song (or per answer), the current row moved and kept in the middle
   const list = $("lyricsList");
@@ -2907,7 +2906,7 @@ function renderSettings() {
     else b.removeAttribute("aria-busy");
   }
   const lyricsPlacementBtn = $("lyricsPlacementBtn");
-  lyricsPlacementBtn.textContent = s.lyrics === "cover" ? "Instead of cover" : "Under title";
+  lyricsPlacementBtn.textContent = s.lyrics === "cover" ? "Instead of cover" : "Beside title";
   $("qualityNote").textContent = free
     ? "Quality is set by Spotify's web player."
     : qualityBusy

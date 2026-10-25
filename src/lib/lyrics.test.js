@@ -35,11 +35,11 @@ describe("lineAt", () => {
 });
 
 describe("preview", () => {
-  it("shows the current line and the next, ♪ for the intro and the gaps", () => {
-    expect(preview(L, -1)).toEqual({ cur: "♪", next: "a" });
-    expect(preview(L, 0)).toEqual({ cur: "a", next: "♪" });
-    expect(preview(L, 1)).toEqual({ cur: "♪", next: "c" });
-    expect(preview(L, 2)).toEqual({ cur: "c", next: "" });
-    expect(preview([], -1)).toEqual({ cur: "", next: "" });
+  it("shows the line just sung, the current one and the next two, ♪ for the intro and the gaps", () => {
+    expect(preview(L, -1)).toEqual(["", "♪", "a", "♪"]);
+    expect(preview(L, 0)).toEqual(["", "a", "♪", "c"]);
+    expect(preview(L, 1)).toEqual(["a", "♪", "c", ""]);
+    expect(preview(L, 2)).toEqual(["♪", "c", "", ""]);
+    expect(preview([], -1)).toEqual(["", "", "", ""]);
   });
 });

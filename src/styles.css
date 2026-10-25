@@ -154,10 +154,17 @@ body:has(.stage.is-solo) .bg {
   --ax: 50%;
 }
 
-/* lyrics under the title: the two-line block takes its room from the cover (on body: the .bg
-   glow layers, siblings of the stage, follow the cover) */
-body:has(.stage[data-lyrics="title"]) {
+/* lyrics under the title (the focus layout, a window under 560 px): the two-line block takes its
+   room from the cover (on body: the .bg glow layers, siblings of the stage, follow the cover).
+   Beside the title they take no room */
+body:has(.stage.is-solo[data-lyrics="title"]) {
   --now: min(320px, 35vh);
+}
+
+@media (max-width: 559px) {
+  body:has(.stage[data-lyrics="title"]) {
+    --now: min(210px, 30vh);
+  }
 }
 
 
@@ -916,7 +923,7 @@ body:has(.stage:not(.is-playing)) .bg {
   text-align: center;
 }
 
-.stage.is-solo :is(.now-title, .now-artist, .now-album, .lyrics-preview) {
+.stage.is-solo :is(.now-title, .now-artist, .now-album, .lyrics-preview > p) {
   margin-inline: auto;
 }
 
@@ -945,8 +952,7 @@ body:has(.stage:not(.is-playing)) .bg {
 
 .now-artist,
 .now-album,
-.lyrics-cur,
-.lyrics-next {
+.lyrics-preview > p {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -983,11 +989,17 @@ body:has(.stage:not(.is-playing)) .bg {
   font-weight: 400;
 }
 
-/* the two lines under the title (Lyrics: Under the title): the box keeps its height while the
-   lines load or a song has none, so the cover does not jump between songs */
+/* the lines by the title (Lyrics: Beside title). Under it (the focus layout, a window under 560 px):
+   the current line and the next; the box keeps its height while the lines load, so the cover does
+   not jump between songs */
 .lyrics-preview {
   height: 44px; /* 22 + 2 + 20 */
   margin-top: 10px;
+}
+
+.lyrics-prev,
+.lyrics-after {
+  display: none;
 }
 
 .lyrics-cur {
@@ -1001,6 +1013,44 @@ body:has(.stage:not(.is-playing)) .bg {
   font-size: 15px;
   line-height: 20px;
   opacity: 0.5;
+}
+
+/* beside the title (the cover row on, 560 px and wider): four lines at the right edge, the last one
+   on the album's line; fixed rows, so the current line stays second while the one before or after
+   is empty */
+@media (min-width: 560px) {
+  .stage:not(.is-solo)[data-lyrics="title"] .now {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) min(360px, 40%);
+    column-gap: 32px;
+  }
+
+  .stage:not(.is-solo)[data-lyrics="title"] .now > * {
+    grid-column: 1;
+  }
+
+  .stage:not(.is-solo)[data-lyrics="title"] .lyrics-preview {
+    display: grid;
+    grid-template-rows: 20px 22px 20px 20px;
+    row-gap: 2px;
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: end;
+    height: auto;
+    margin-top: 0;
+    text-align: right;
+  }
+
+  .stage:not(.is-solo)[data-lyrics="title"] :is(.lyrics-prev, .lyrics-after) {
+    display: block;
+    font-size: 15px;
+    line-height: 20px;
+    opacity: 0.35;
+  }
+
+  .stage:not(.is-solo)[data-lyrics="title"] .lyrics-next {
+    margin-top: 0;
+  }
 }
 
 /* ---------- lyrics: the column instead of the cover ---------- */
@@ -2487,7 +2537,7 @@ p.lyrics-line {
     --cap: 44px;
   }
 
-  body:has(.stage[data-lyrics="title"]) {
+  body:has(.stage.is-solo[data-lyrics="title"]) {
     --now: min(210px, 30vh);
   }
 

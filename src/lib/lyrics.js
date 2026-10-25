@@ -17,8 +17,8 @@ export function lineAt(lines, ms, hint = -1) {
 /** A line as sung: its words, or ♪ for an instrumental gap. */
 export const sung = (line) => (line ? line.text || "♪" : "");
 
-/** The two lines under the title: the current one (♪ before the first line and in the gaps) and the next. */
+/** The four lines by the title: the one just sung, the current one (♪ before the first line and in the gaps), the next two. */
 export function preview(lines, i) {
-  if (!lines.length) return { cur: "", next: "" };
-  return { cur: i < 0 ? "♪" : sung(lines[i]), next: sung(lines[i + 1]) };
+  if (!lines.length) return ["", "", "", ""];
+  return [sung(lines[i - 1]), i < 0 ? "♪" : sung(lines[i]), sung(lines[i + 1]), sung(lines[i + 2])];
 }
