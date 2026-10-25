@@ -134,6 +134,19 @@ function toast(msg) {
   toastTimer = setTimeout(() => (el.hidden = true), 3200);
 }
 
+// ---------- notification ----------
+
+function notifyAd() {
+  if (!window.__TAURI__ || !window.__TAURI__.core) return;
+  window.__TAURI__.core.invoke("notify", { message: "Реклама — пропускаем" }).catch(() => {});
+}
+
+function notifySongStart(artist, title) {
+  if (!window.__TAURI__ || !window.__TAURI__.core) return;
+  const message = `${artist} — ${title}`;
+  window.__TAURI__.core.invoke("notify", { message }).catch(() => {});
+}
+
 // ---------- login ----------
 
 const LOGIN_COPY = {
@@ -552,6 +565,14 @@ async function refresh(epoch) {
       renderChrome();
       if (track) paint(track.cover);
       syncDockArt();
+    }
+    if (modeChanged && mode === "other" && isFree(engine)) {
+      toast("Реклама — пропускаем");
+      notifyAd();
+      skipAd();
+    }
+    if (mode === "track" && track && (!state.now || state.now.uri !== track.uri)) {
+      notifySongStart(track.artists, track.name);
     }
     // a song needs its queue (this Mac's comes with its state); with no song, the device list says
     // who could play. Each list at most every 30 s: a skipped one is fetched once it's due.
@@ -1859,7 +1880,7 @@ async function readLyrics(id, gen) {
   }
 }
 
-/** The one place that sets what is visible: the stage's data-lyrics, the two-line block, the column, the panel and the
+/** The one place that sets what is visible: the stage's data-lyrics, the two-line block, the column and the
  *  Lyrics button; the cover re-measures when that changed. */
 function applyLyrics() {
   const s = getSettings();
@@ -1876,10 +1897,8 @@ function applyLyrics() {
     btn.classList.toggle("is-on", s.lyricsShown);
     $("lyricsStage").hidden = shown !== "cover";
     $("run").hidden = shown === "cover";
-    $("lyricsPanel").hidden = shown !== "panel";
     const list = $("lyricsList");
-    const target = shown === "panel" ? $("lyricsPanel") : $("lyricsStage");
-    if (list.parentElement !== target) target.append(list);
+    if (list.parentElement !== $("lyricsStage")) $("lyricsStage").append(list);
     resetPan();
     if (!$("stage").hidden) renderRun();
   }
@@ -2390,13 +2409,15 @@ function flipSetting(key, label, after) {
   putSetting(key, on, `${label} ${on ? "on" : "off"}`, after);
 }
 
-const setLyricsPlacement = (v) => putSetting("lyrics", v, `lyrics ${v}`, syncLyrics);
+const cycleLyricsPlacement = () => {
+  const s = getSettings();
+  const placements = ["title", "cover", "off"];
+  const currentIndex = placements.indexOf(s.lyrics);
+  const nextIndex = (currentIndex + 1) % placements.length;
+  const newLyrics = placements[nextIndex];
+  putSetting("lyrics", newLyrics, `lyrics ${newLyrics}`, syncLyrics);
+};
 const toggleLyricsShown = () => flipSetting("lyricsShown", "lyrics shown", syncLyrics);
-
-function onLyricsClick(e) {
-  const b = e.target.closest("[data-lyrics]");
-  if (b) setLyricsPlacement(b.dataset.lyrics);
-}
 
 const toggleMenuBar = () => flipSetting("menuBar", "menu bar", applyTray);
 const toggleMenuBarTitle = () => flipSetting("menuBarTitle", "song in menu bar", applyTray);
@@ -2521,6 +2542,12 @@ async function skip(cmd) {
     if (ok) wait.landedAt = performance.now();
     else endSkip();
   }
+  kick();
+}
+
+async function skipAd() {
+  const dev = state.device && state.device.id;
+  await changeTrack(() => routed(dev, () => invoke("local_next"), () => invoke("next_track"), "next"));
   kick();
 }
 
@@ -2886,11 +2913,9 @@ function renderSettings() {
     else b.removeAttribute("aria-busy");
   }
   $("lyricsGroup").hidden = !free;
-  for (const b of $("lyricsOpts").querySelectorAll("[data-lyrics]")) {
-    const on = b.dataset.lyrics === s.lyrics;
-    b.setAttribute("aria-checked", String(on));
-    b.tabIndex = on ? 0 : -1;
-  }
+  const lyricsPlacementBtn = $("lyricsPlacementBtn");
+  const placementLabels = { title: "Under title", cover: "Instead of cover", off: "Off" };
+  lyricsPlacementBtn.textContent = placementLabels[s.lyrics] || "Under title";
   $("qualityNote").textContent = free
     ? "Quality is set by Spotify's web player."
     : qualityBusy
@@ -4871,8 +4896,7 @@ async function boot() {
   $("settingsSheet").addEventListener("keydown", onSettingsTab);
   $("qualityOpts").addEventListener("click", onQualityClick);
   $("qualityOpts").addEventListener("keydown", onRadioKey);
-  $("lyricsOpts").addEventListener("click", onLyricsClick);
-  $("lyricsOpts").addEventListener("keydown", onRadioKey);
+  $("lyricsPlacementBtn").addEventListener("click", cycleLyricsPlacement);
   $("mcpSwitch").addEventListener("click", toggleMcp);
   $("mcpActions").addEventListener("click", (e) => {
     const b = e.target.closest("[data-copy]");

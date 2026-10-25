@@ -5,7 +5,7 @@
 import { isFree } from "./engine.js";
 
 /** A placement is picked, the engine plays through the web player, and a song (not an ad) plays. */
-export const lyricsActive = (settings, engine, mode) => settings.lyrics !== "off" && isFree(engine) && mode === "track";
+export const lyricsActive = (settings, engine, mode) => settings.lyrics && settings.lyrics !== "off" && isFree(engine) && mode === "track";
 
 /**
  * The index of the last line that has started by `ms`, -1 before the first. `lines` are sorted by

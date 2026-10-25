@@ -16,6 +16,7 @@ pub mod mcp;
 mod mcp_app;
 pub mod mcp_tools;
 mod media;
+mod notify;
 mod nowplaying;
 mod parse;
 mod paths;
@@ -40,6 +41,7 @@ pub fn run() {
     internal::attach(engine.clone());
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         // signed updates from GitHub Releases (updater.rs); config in tauri.conf.json plugins.updater
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(engine.clone())
@@ -152,7 +154,8 @@ pub fn run() {
             updater::update_check_now,
             updater::update_set_auto,
             updater::update_restart,
-            webplayer::webplayer_show
+            webplayer::webplayer_show,
+            notify::notify
         ])
         // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits.
         // The mini player hides when it loses focus (a click outside it).

@@ -160,14 +160,7 @@ body:has(.stage[data-lyrics="title"]) {
   --now: min(320px, 35vh);
 }
 
-/* the side panel: the main column lays out as a narrower window would */
-body:has(.stage[data-lyrics="panel"]) {
-  --now: min(380px, 43vh, calc(100vw - clamp(220px, 36vw, 380px) - 2 * var(--gutter)));
-}
 
-body:has(.stage.is-solo[data-lyrics="panel"]) .bg {
-  --ax: calc((100vw - clamp(220px, 36vw, 380px)) / 2);
-}
 
 .bg.is-on {
   opacity: 1;
@@ -1016,18 +1009,7 @@ body:has(.stage:not(.is-playing)) .bg {
   opacity: 0.5;
 }
 
-/* ---------- lyrics: the column instead of the cover and the side panel ---------- */
-
-/* the side panel adds a second column to the stage grid: the top bar and the transport span
-   both; the column (Instead of the cover) takes the cover row's cell */
-.topbar,
-.transport {
-  grid-column: 1 / -1;
-}
-
-.stage[data-lyrics="panel"] {
-  grid-template-columns: minmax(0, 1fr) clamp(220px, 36%, 380px);
-}
+/* ---------- lyrics: the column instead of the cover ---------- */
 
 .lyrics-stage {
   grid-row: 2;
@@ -1035,23 +1017,7 @@ body:has(.stage:not(.is-playing)) .bg {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding-bottom: var(--cap); /* the now block sits where it sits under the cover row */
-}
-
-.lyrics-panel {
-  grid-row: 2 / 4;
-  grid-column: 2;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 6px;
-  border-left: 1px solid var(--hair);
-  background: rgb(0 0 0 / 0.28);
-}
-
-.lyrics-panel .panel-kicker {
-  padding: 0 var(--gutter);
+  padding-bottom: var(--cap);
 }
 
 /* one row per line: the current one bright, the rest dimmed; a click on a synced line seeks */
@@ -1108,23 +1074,7 @@ p.lyrics-line {
   font-weight: 800;
 }
 
-/* the panel: a reading column at the window's text size */
-.lyrics-panel .lyrics-list {
-  padding: 0 var(--gutter) 30vh;
-  text-align: left;
-  font-size: 15px;
-  line-height: 1.35;
-  font-weight: 500;
-}
 
-.lyrics-panel .lyrics-line {
-  padding: 5px 0;
-}
-
-.lyrics-panel .lyrics-line.is-cur {
-  font-size: 17px;
-  font-weight: 700;
-}
 
 .now-empty {
   margin-top: 14px;
@@ -2549,10 +2499,6 @@ p.lyrics-line {
 
   body:has(.stage[data-lyrics="title"]) {
     --now: min(210px, 30vh);
-  }
-
-  body:has(.stage[data-lyrics="panel"]) {
-    --now: min(260px, 36vh, calc(100vw - clamp(220px, 36vw, 380px) - 2 * var(--gutter)));
   }
 
   .now-title,
