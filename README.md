@@ -13,9 +13,13 @@ The app is the same either way: the window tints to the album cover, the Library
 
 ## Install
 
-Build from source (below). The upstream project publishes a DMG and a Homebrew cask, but without Free mode.
+Download **Stylus.dmg** from [the latest release](https://github.com/SandQuattro/stylus-spotify-mini-player/releases/latest) and drag Stylus to Applications, or install the cask:
 
-Requirements: macOS 13 or later on Apple Silicon and a Spotify account.
+```sh
+brew install --cask SandQuattro/tap/stylus
+```
+
+Or build from source (below). Requirements: macOS 13 or later on Apple Silicon and a Spotify account.
 
 The app is not signed with an Apple Developer ID. If macOS refuses to open it, run once:
 
@@ -23,7 +27,7 @@ The app is not signed with an Apple Developer ID. If macOS refuses to open it, r
 xattr -dr com.apple.quarantine /Applications/Stylus.app
 ```
 
-**Updates:** the built-in updater follows the upstream releases, which have no Free mode. Turn off **Install updates automatically** in **Settings → Updates** until this fork has releases of its own.
+**Updates:** Stylus checks this fork's releases after launch and every 6 hours, downloads a signed update in the background and installs it when you quit. **Settings → Updates** shows the status; **Install updates automatically** turns it off. Updates work only when `Stylus.app` is in `/Applications` or `~/Applications`.
 
 ## Login
 

@@ -184,7 +184,7 @@
   const upd = {
     status: UPDATE_FROM,
     version: ["available", "downloading", "staged"].includes(UPDATE_FROM) ? UPDATE_NEXT : null,
-    message: UPDATE_FROM === "failed" ? "error sending request for url (https://github.com/1905/stylus-spotify-mini-player/releases/latest/download/latest.json)" : null,
+    message: UPDATE_FROM === "failed" ? "error sending request for url (https://github.com/SandQuattro/stylus-spotify-mini-player/releases/latest/download/latest.json)" : null,
     current: "0.4.0",
   };
   const updateJson = () => ({ ...upd, auto: (store.settings && store.settings.autoUpdate) !== false });

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import update_feed
 
-URL = "https://github.com/1905/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz"
+URL = "https://github.com/SandQuattro/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz"
 SIG = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQ==\n"
 NOW = datetime(2026, 10, 24, 16, 30, 5, tzinfo=timezone(timedelta(hours=8)))
 

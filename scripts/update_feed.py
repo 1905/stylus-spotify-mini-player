@@ -3,7 +3,7 @@
 
     python3 scripts/update_feed.py 0.4.0 --notes "Stylus 0.4.0" \\
         --sig src-tauri/target/release/bundle/macos/Stylus.app.tar.gz.sig \\
-        --url https://github.com/1905/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz \\
+        --url https://github.com/SandQuattro/stylus-spotify-mini-player/releases/download/v0.4.0/Stylus.app.tar.gz \\
         --out /tmp/latest.json
 
 The installed app reads it from releases/latest/download/latest.json (tauri.conf.json plugins.updater).
