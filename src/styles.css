@@ -1043,10 +1043,6 @@ p.lyrics-line {
   opacity: 1;
 }
 
-.lyrics-empty {
-  color: var(--fg-3);
-}
-
 /* the column: centred, big, faded at both ends; room above and below so the first and the
    last line can sit in the middle */
 .lyrics-stage .lyrics-list {

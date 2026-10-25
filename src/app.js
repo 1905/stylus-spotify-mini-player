@@ -1824,12 +1824,13 @@ let lyricsListOf = null; // the state.lyrics object the list's rows were built f
 let lyricsListIn = null; // the placement the list was last painted in: a move re-centres it
 let lyricsCurRow = null; // the row marked current
 let lyricsUserAt = -Infinity; // the user last scrolled the list (performance.now): auto-follow pauses 4 s
+let lyricsMissing = false; // the last song read has none: the button greys out, its on/off kept, until a song has some
 
-/** What shows now: null, or the placement the setting names (only while the ❝ button is on). */
+/** What shows now: null, or the placement the setting names (only while the ❝ button is on and the song has lyrics). */
 function lyricsShown() {
   const s = getSettings();
   if (!lyricsActive(s, state.mode)) return null;
-  return s.lyricsShown ? s.lyrics : null;
+  return s.lyricsShown && !lyricsMissing ? s.lyrics : null;
 }
 
 /** Fetch the playing song's lines when a placement can show them; drop them when lyrics are off. Idempotent. */
@@ -1840,7 +1841,7 @@ function syncLyrics() {
       state.lyrics = null;
       lyricsGen++;
     }
-  } else if (lyricsShown() && !document.hidden && track && (!state.lyrics || state.lyrics.uri !== track.uri)) {
+  } else if (getSettings().lyricsShown && !document.hidden && track && (!state.lyrics || state.lyrics.uri !== track.uri)) {
     loadLyrics(track);
   }
   applyLyrics();
@@ -1862,6 +1863,7 @@ async function loadLyrics(track) {
     }
     if (gen !== lyricsGen) return;
   }
+  lyricsMissing = !got;
   if (got) {
     state.lyrics = { uri: track.uri, status: "ready", synced: got.synced, lines: got.lines };
     note = `${got.synced ? "synced" : "unsynced"} ${got.lines.length} lines`;
@@ -1888,13 +1890,14 @@ function applyLyrics() {
   const s = getSettings();
   const active = lyricsActive(s, state.mode);
   const shown = lyricsShown();
-  const key = `${active}|${shown}|${s.lyrics}`;
+  const key = `${active}|${shown}|${s.lyrics}|${s.lyricsShown}|${lyricsMissing}`;
   if (key !== lastLyricsKey) {
     lastLyricsKey = key;
     $("stage").dataset.lyrics = shown || "off";
     $("lyricsPreview").hidden = shown !== "title";
     const btn = $("lyricsBtn");
     btn.hidden = !active;
+    btn.disabled = lyricsMissing;
     btn.setAttribute("aria-pressed", String(s.lyricsShown));
     btn.classList.toggle("is-on", s.lyricsShown);
     $("lyricsStage").hidden = shown !== "cover";
@@ -1937,19 +1940,12 @@ function renderLyrics(p, t, frozen) {
   if (row && performance.now() - lyricsUserAt > 4000) centerRow(list, row, step && !moved);
 }
 
-/** The list's rows for l: nothing while loading, a note when a song has none, one row per line (buttons seek when synced). */
+/** The list's rows for l: nothing until the lines come, one row per line (buttons seek when synced). */
 function buildLyricsList(list, l) {
   lyricsListOf = l;
   lyricsCurRow = null;
   list.replaceChildren();
-  if (!l || l.status === "loading") return;
-  if (l.status === "none") {
-    const p = document.createElement("p");
-    p.className = "lyrics-empty";
-    p.textContent = "No lyrics for this song";
-    list.append(p);
-    return;
-  }
+  if (!l || l.status !== "ready") return;
   list.append(
     ...l.lines.map((line, n) => {
       const el = document.createElement(l.synced ? "button" : "p");
