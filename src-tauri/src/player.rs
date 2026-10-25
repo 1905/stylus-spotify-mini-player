@@ -175,6 +175,9 @@ pub struct Status {
     device_id: Option<String>,
     /// How this Mac plays (`Mode`); meaningful once `ready`.
     mode: Mode,
+    /// Free mode, ready, and the web player shows Spotify's login button: its session is gone.
+    /// The device menu's Here row then offers the login (`webplayer_show`).
+    web_login: bool,
 }
 
 impl Status {
@@ -187,7 +190,7 @@ impl Status {
             State::Failed(r) => ("failed", Some(r.clone())),
         };
         let device_id = if *s == State::Ready { device_id.map(str::to_string) } else { None };
-        Status { state, name: DEVICE_NAME, reason, device_id, mode: Mode::Premium }
+        Status { state, name: DEVICE_NAME, reason, device_id, mode: Mode::Premium, web_login: false }
     }
 }
 
@@ -428,11 +431,14 @@ impl Engine {
     /// webplayer.rs) in Free mode.
     fn status(&self, state: &State) -> Status {
         let mode = self.mode();
-        let here = match mode {
-            Mode::Premium => self.0.device_id.get().cloned(),
-            Mode::Free => crate::webplayer::report().device_id,
+        let (here, web_login) = match mode {
+            Mode::Premium => (self.0.device_id.get().cloned(), false),
+            Mode::Free => {
+                let r = crate::webplayer::report();
+                (r.device_id, r.logged_out && *state == State::Ready)
+            }
         };
-        Status { mode, ..Status::new(state, here.as_deref()) }
+        Status { mode, web_login, ..Status::new(state, here.as_deref()) }
     }
 
     /// The persisted device id; reads or creates the file on the first call.
@@ -858,6 +864,18 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Reconnect));
                     }
                     _ => {}
+                }
+                // Free mode: the web player is the speaker (webplayer.rs); a Premium engine needs no
+                // window (the login's one goes). Off this task: building a window blocks on the main thread.
+                if let Some(app) = engine.0.app.get().cloned().filter(|_| engine.is_current(generation)) {
+                    tauri::async_runtime::spawn_blocking(move || match mode {
+                        Mode::Free => {
+                            if let Err(e) = crate::webplayer::start(&app) {
+                                log::warn!(target: AUTH, "web player: {e}");
+                            }
+                        }
+                        Mode::Premium => crate::webplayer::destroy(&app),
+                    });
                 }
                 // a restore still waiting for a cluster runs anyway once this fires;
                 // armed when the dealer has its connection id (`connect_ups`), not before
@@ -2250,14 +2268,32 @@ mod tests {
         assert_eq!(engine.apply(now, Event::Dropped), Reconnecting);
     }
 
+    #[tokio::test]
+    async fn web_login_only_when_free_and_ready() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        engine.restart(None).await; // needs_login
+        engine.retire();
+        let now = engine.0.generation.load(Ordering::SeqCst);
+        engine.apply(now, Event::Start { has_credentials: true });
+        assert_eq!(engine.apply(now, Event::Connected), Ready);
+        crate::webplayer::apply(crate::webplayer::Report { device_id: None, logged_out: true });
+        assert!(!engine.status(&engine.state()).web_login, "Premium mode never asks for the web login");
+        engine.set_mode(now, Mode::Free);
+        assert!(engine.status(&engine.state()).web_login);
+        assert_eq!(engine.status(&engine.state()).device_id, None);
+        crate::webplayer::apply(crate::webplayer::Report { device_id: Some("wp".into()), logged_out: false });
+        assert!(!engine.status(&engine.state()).web_login);
+        assert_eq!(engine.status(&engine.state()).device_id.as_deref(), Some("wp"), "the newest report is Here");
+    }
+
     #[test]
     fn status_payload() {
         let v = serde_json::to_value(Status::new(&Ready, Some("dev-1"))).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1", "mode": "premium"}));
+        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1", "mode": "premium", "web_login": false}));
         let v = serde_json::to_value(Status::new(&Failed("Premium required".into()), Some("dev-1"))).unwrap();
         assert_eq!(
             v,
-            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null, "mode": "premium"})
+            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null, "mode": "premium", "web_login": false})
         );
         let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting].iter().map(|s| Status::new(s, Some("dev-1")).state).collect();
         assert_eq!(names, ["needs_login", "starting", "reconnecting"]);
