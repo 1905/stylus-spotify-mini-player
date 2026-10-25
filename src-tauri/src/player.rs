@@ -45,7 +45,7 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// One connect attempt (access point, login, Connect registration) may take this long.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long the Premium check waits for the account type (ProductInfo can come after Spirc::new).
+/// How long `run` waits for the account type before it picks the mode (ProductInfo can come after Spirc::new).
 const ACCOUNT_TYPE_WAIT: Duration = Duration::from_secs(2);
 /// A session that stayed up this long resets the reconnect backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
@@ -90,23 +90,26 @@ const OAUTH_SCOPES: &[&str] = &[
 /// The UI matches it (src/lib/engine.js `LOGIN_NOT_SAVED`).
 pub const LOGIN_NOT_SAVED: &str = "logged in, but the login could not be saved";
 
-/// The `Fatal` reason for an account without Premium. `auth_status` matches it.
+/// The `Fatal` reason when Spotify's access point refuses the account ("Premium account required"
+/// in `classify`). `auth_status` matches it.
 pub const PREMIUM_REQUIRED: &str = "Spotify Premium is required to play on this Mac";
 
-/// Whether the account has Premium, by the session attribute `type`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Premium {
-    Yes,
-    No,
-    Unknown,
+/// How this Mac plays, by the session attribute `type`: Premium through librespot, Free through
+/// Spotify's web player in the hidden `webplayer` window (webplayer.rs). Decided once per engine
+/// generation, right after the account type is read (`run`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Premium,
+    Free,
 }
 
-/// `Some("premium")` → Yes, any other value → No, no attribute → Unknown.
-pub fn premium_from_attr(attr: Option<&str>) -> Premium {
+/// `Some("premium")` → Premium; any other value → Free; no attribute → Premium (librespot plays,
+/// as before the mode existed: a late ProductInfo never moves a Premium user to the web player).
+pub fn mode_from_attr(attr: Option<&str>) -> Mode {
     match attr {
-        Some("premium") => Premium::Yes,
-        Some(_) => Premium::No,
-        None => Premium::Unknown,
+        Some(t) if t != "premium" => Mode::Free,
+        _ => Mode::Premium,
     }
 }
 
@@ -169,6 +172,8 @@ pub struct Status {
     reason: Option<String>,
     /// The engine's Connect device id. Null until `ready`.
     device_id: Option<String>,
+    /// How this Mac plays (`Mode`); meaningful once `ready`.
+    mode: Mode,
 }
 
 impl Status {
@@ -181,7 +186,7 @@ impl Status {
             State::Failed(r) => ("failed", Some(r.clone())),
         };
         let device_id = if *s == State::Ready { device_id.map(str::to_string) } else { None };
-        Status { state, name: DEVICE_NAME, reason, device_id }
+        Status { state, name: DEVICE_NAME, reason, device_id, mode: Mode::Premium }
     }
 }
 
@@ -360,6 +365,8 @@ struct Inner {
     /// The credentials the current loop logs in with (`remember_live`). A restart without
     /// new credentials uses them before the store: they work even when their save failed.
     live_creds: Mutex<Option<Credentials>>,
+    /// How the current loop plays (`set_mode` in `run`, from the account type).
+    mode: Mutex<Mode>,
 }
 
 impl Engine {
@@ -385,7 +392,20 @@ impl Engine {
             pending_volume: Mutex::new(PendingVolume::default()),
             save_error: Mutex::new(None),
             live_creds: Mutex::new(None),
+            mode: Mutex::new(Mode::Premium),
         }))
+    }
+
+    /// How this Mac plays: the mode `run` picked for the current loop (Premium until it did).
+    pub fn mode(&self) -> Mode {
+        *lock(&self.0.mode)
+    }
+
+    /// The mode of the loop `generation`, from its account type. A stale loop sets nothing.
+    fn set_mode(&self, generation: u64, mode: Mode) {
+        if self.0.generation.load(Ordering::SeqCst) == generation {
+            *lock(&self.0.mode) = mode;
+        }
     }
 
     /// Where `engine-status` events go. Set once, in `setup`.
@@ -404,7 +424,7 @@ impl Engine {
     }
 
     fn status(&self, state: &State) -> Status {
-        Status::new(state, self.0.device_id.get().map(String::as_str))
+        Status { mode: self.mode(), ..Status::new(state, self.0.device_id.get().map(String::as_str)) }
     }
 
     /// The persisted device id; reads or creates the file on the first call.
@@ -797,22 +817,17 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 let waited = Instant::now();
                 let account_type = account_type(|| session.get_user_attribute("type"), ACCOUNT_TYPE_WAIT).await;
+                let mode = mode_from_attr(account_type.as_deref());
                 if !type_logged {
                     let ms = waited.elapsed().as_millis();
-                    log::info!(target: AUTH, "account type: {} (after {ms} ms)", account_type.as_deref().unwrap_or("unknown"));
+                    log::info!(target: AUTH, "account type: {} (after {ms} ms), mode: {mode:?}", account_type.as_deref().unwrap_or("unknown"));
                     type_logged = true;
                 }
-                match premium_from_attr(account_type.as_deref()) {
-                    Premium::No => {
-                        engine.apply(generation, Event::Fatal(PREMIUM_REQUIRED.into()));
-                        engine.stop_spirc();
-                        spirc_task.await;
-                        return;
-                    }
-                    Premium::Unknown => log::warn!(target: AUTH, "no account type from Spotify: the Premium check is skipped"),
-                    Premium::Yes => {}
+                if account_type.is_none() {
+                    log::warn!(target: AUTH, "no account type from Spotify: Premium mode assumed");
                 }
-                // after the Premium check: a Free account's login is never stored or kept
+                engine.set_mode(generation, mode);
+                // the mode is known: keep and save the login (Free included)
                 let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
                 creds = kept;
                 remember_live(&engine, generation, &creds);
@@ -1802,11 +1817,11 @@ mod tests {
     }
 
     #[test]
-    fn premium_from_the_session_attribute() {
-        assert_eq!(premium_from_attr(Some("premium")), Premium::Yes);
-        assert_eq!(premium_from_attr(Some("free")), Premium::No);
-        assert_eq!(premium_from_attr(Some("open")), Premium::No);
-        assert_eq!(premium_from_attr(None), Premium::Unknown);
+    fn mode_from_the_session_attribute() {
+        assert_eq!(mode_from_attr(Some("premium")), Mode::Premium);
+        assert_eq!(mode_from_attr(Some("free")), Mode::Free);
+        assert_eq!(mode_from_attr(Some("open")), Mode::Free);
+        assert_eq!(mode_from_attr(None), Mode::Premium, "no attribute in time: librespot plays, as today");
     }
 
     #[test]
@@ -2224,11 +2239,11 @@ mod tests {
     #[test]
     fn status_payload() {
         let v = serde_json::to_value(Status::new(&Ready, Some("dev-1"))).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1"}));
+        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1", "mode": "premium"}));
         let v = serde_json::to_value(Status::new(&Failed("Premium required".into()), Some("dev-1"))).unwrap();
         assert_eq!(
             v,
-            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null})
+            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null, "mode": "premium"})
         );
         let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting].iter().map(|s| Status::new(s, Some("dev-1")).state).collect();
         assert_eq!(names, ["needs_login", "starting", "reconnecting"]);
