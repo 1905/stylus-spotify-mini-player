@@ -1953,7 +1953,9 @@ function centerRow(list, row, smooth) {
 function onLyricsLineClick(e) {
   const b = e.target.closest("[data-i]");
   const lines = state.lyrics && state.lyrics.lines;
-  if (b && lines) seekTo(lines[Number(b.dataset.i)].ms);
+  if (!b || !lines) return;
+  lyricsUserAt = -Infinity; // a click is a jump, not a scroll: the list follows from here
+  seekTo(lines[Number(b.dataset.i)].ms);
 }
 
 const noteLyricsScroll = () => {
