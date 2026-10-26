@@ -1917,14 +1917,21 @@ function renderLyrics(p, t, frozen) {
   const own = l && t && l.uri === t.uri ? l : null; // the lines of the song on screen
   const ready = !frozen && own && own.status === "ready";
   const i = ready && own.synced ? lineAt(own.lines, p, lastLyricsLine) : -1;
-  const key = `${shown}|${own ? own.uri + own.status : ""}|${i}`;
+  const key = `${shown}|${own ? own.uri + own.status : ""}|${ready}|${i}`;
   if (key === lastLyricsPaint) return;
   lastLyricsPaint = key;
   const step = i === lastLyricsLine + 1;
   lastLyricsLine = i;
-  // the lines by the title; empty (not stale) while another placement or none is open
-  const four = shown === "title" && ready && own.synced ? linePreview(own.lines, i) : ["", "", "", ""];
-  [...$("lyricsPreview").children].forEach((row, n) => (row.textContent = four[n]));
+  // the lines by the title; empty (not stale) while another placement or none is open. A song
+  // without times (unsynced) shows its whole text there instead, scrolled by hand
+  const by = shown === "title" && ready;
+  const four = by && own.synced ? linePreview(own.lines, i) : ["", "", "", ""];
+  const rows = $("lyricsPreview").children;
+  four.forEach((line, n) => (rows[n].textContent = line));
+  const plain = by && !own.synced ? own.lines.map(sung).join("\n") : "";
+  $("lyricsPlain").textContent = plain;
+  $("lyricsPlain").scrollTop = 0;
+  $("lyricsPreview").classList.toggle("is-plain", plain !== "");
   if (shown !== "cover") return;
   // the list: rebuilt per song (or per answer), the current row moved and kept in the middle
   const list = $("lyricsList");

@@ -277,6 +277,7 @@
   ].map(([ms, text]) => ({ ms, text }));
   const NO_LYRICS = "2qKioq4HNraWk0DXH4Rdut"; // Infinity: Spotify has no lyrics for it
   const NO_SESSION = new URLSearchParams(location.search).get("lyrics") === "nosession"; // ?lyrics=nosession: Premium without a web session
+  const UNSYNCED = new URLSearchParams(location.search).get("lyrics") === "unsynced"; // ?lyrics=unsynced: lines without times, as Spotify sends for some songs
 
   // the in-app player
   const media = []; // media_update / media_clear calls, oldest first
@@ -477,7 +478,7 @@
     get_lyrics: async ({ trackId }) => {
       if (NO_SESSION) throw "LYRICS_NO_WEB_SESSION: no Spotify web session; log in again";
       await sleep(1500);
-      return trackId === NO_LYRICS ? null : { synced: true, lines: clone(LYRICS) };
+      return trackId === NO_LYRICS ? null : { synced: !UNSYNCED, lines: clone(LYRICS) };
     },
     get_recently_played: () =>
       clone(state.history.slice(0, 30)).map((r) => ({ context_uri: null, ...r })),

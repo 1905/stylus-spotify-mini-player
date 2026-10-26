@@ -1053,6 +1053,35 @@ body:has(.stage:not(.is-playing)) .bg {
   }
 }
 
+/* a song without times (unsynced): its whole text in the same box, scrolled by hand */
+.lyrics-plain {
+  display: none;
+}
+
+#lyricsPreview.is-plain > p {
+  display: none;
+}
+
+.lyrics-preview.is-plain > .lyrics-plain {
+  display: block;
+  grid-row: 1 / -1;
+  height: 40px; /* two whole lines */
+  overflow-y: auto;
+  white-space: pre-line;
+  color: var(--fg-2);
+  font-size: 15px;
+  line-height: 20px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair) transparent;
+}
+
+@media (min-width: 560px) {
+  .stage:not(.is-solo)[data-lyrics="title"] .lyrics-plain {
+    align-self: end;
+    height: 80px; /* four whole lines, the last on the album's line */
+  }
+}
+
 /* ---------- lyrics: the column instead of the cover ---------- */
 
 .lyrics-stage {
