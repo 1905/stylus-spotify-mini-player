@@ -16,5 +16,8 @@ pub async fn notify(app: AppHandle, message: String, cover: Option<String>) {
     if let Some(path) = image {
         n.image_path(&path.to_string_lossy());
     }
-    let _ = n.show(); // sent when the handle drops; never blocks
+    match n.show() { // the notification is sent when the handle drops; never blocks
+        Ok(_) => log::info!("notify: {message:?}"),
+        Err(why) => log::warn!("notify failed: {message:?} ({why})"),
+    }
 }
