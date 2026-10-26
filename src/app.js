@@ -6,6 +6,7 @@ import { panelRows } from "./lib/playlist.js";
 import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, DEFAULT_REPEAT, nextRepeat, stepVolume } from "./lib/transport.js";
+import { adSkipOnPoll } from "./lib/ads.js";
 import { noteMixes } from "./lib/mixes.js";
 import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isFree, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
@@ -553,6 +554,19 @@ async function refresh(epoch) {
   if (pending.onPoll({ isPlaying: Boolean(active && s.is_playing), trackUri: track && track.uri, at: startedAt })) clearPending();
   if (restoring && (track || mode === "other")) endRestoring(track && (!restoring.trackUri || track.uri === restoring.trackUri) ? "" : `replaced by ${track ? track.uri : "an ad or a podcast"}`);
 
+  // the ad break runs on every poll: inside it the mode stays "other" and the uri stays the same, so
+  // a change-gated skip would never see the second ad of a break
+  if (isFree(engine)) {
+    const ad = adSkipOnPoll({ mode, uri: track && track.uri || s.track_uri || null, at: performance.now() }, { free: true, state: adSkip });
+    adSkip = ad.state;
+    if (ad.log) applog("info", ad.log);
+    if (ad.toast) {
+      toast("Реклама — пропускаем");
+      notifyAd();
+    }
+    if (ad.skip) skipAd();
+  }
+
   if (changed || modeChanged || !state.loaded) {
     // show the new track now: what's on screen is what a seek or a skip acts on.
     // (Idle copy waits for the device list on first load, or it would flicker.)
@@ -565,30 +579,6 @@ async function refresh(epoch) {
       renderChrome();
       if (track) paint(track.cover);
       syncDockArt();
-    }
-    if (isFree(engine) && adSkip && (changed || modeChanged)) adSkip = null; // a different "now" ended the break
-    else if (modeChanged && mode === "other" && isFree(engine)) {
-      // the break's end is the uri the cluster stops reporting (the track after the break, named
-      // only when it starts; or nothing, when the break ends in a pause)
-      adSkip = { uri: track && track.uri || s.track_uri || null, until: performance.now() + AD_SETTLE_MS };
-      toast("Реклама — пропускаем");
-      notifyAd();
-      skipAd();
-    } else if (isFree(engine) && adSkip) {
-      if (performance.now() > adSkip.until) adSkip = null; // nothing ad-like for AD_SETTLE_MS: the break is over
-      else {
-        const uri = track && track.uri || s.track_uri || null;
-        if (!uri || uri === adSkip.uri) {
-          adSkip.until = performance.now() + AD_SETTLE_MS; // no ad reported: the break may be over
-        } else {
-          // an ad is playing and the uri is not the one after the break: the break goes on. An
-          // unnamed ad reports the track it precedes, so the break's end is that uri now
-          adSkip.uri = track && track.uri || uri; // an unnamed ad reports the pending track; a named one names the break's end itself
-          adSkip.until = performance.now() + AD_SETTLE_MS;
-          applog("info", `ad break: skipping again (uri ${uri})`);
-          skipAd();
-        }
-      }
     }
     if (changed && track) notifySongStart(track.artists, track.name, track.cover);
     // a song needs its queue (this Mac's comes with its state); with no song, the device list says
@@ -2528,12 +2518,9 @@ const SKIP_MS = 5000;
 const SKIP_SETTLE_MS = 1500;
 let skipWait = null; // {btn, landedAt, timer}
 
-// a free-mode ad break: Spotify names only the first ad (its uri is spotify:ad:*); a following ad
-// reports the uri of the track that waits after the break. While the break goes on, any poll whose
-// uri is not the remembered "after the break" uri is another ad: skip it, and if it named the track
-// itself, that uri becomes the break's end. Nothing ad-like for AD_SETTLE_MS means the break is over.
-const AD_SETTLE_MS = 1500;
-let adSkip = null; // {uri, until}
+// a free-mode ad break: see lib/ads.js. adSkip is the break so far ({uri, until}); the machine runs
+// on every poll in refresh, because inside the break the mode and the uri don't change between polls.
+let adSkip = null;
 
 function startSkip(btn) {
   endSkip();
