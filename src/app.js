@@ -567,7 +567,7 @@ async function refresh(epoch) {
       syncDockArt();
     }
     if (isFree(engine) && adSkip && (changed || modeChanged)) adSkip = null; // a different "now" ended the break
-    if (modeChanged && mode === "other" && isFree(engine)) {
+    else if (modeChanged && mode === "other" && isFree(engine)) {
       // the break's end is the uri the cluster stops reporting (the track after the break, named
       // only when it starts; or nothing, when the break ends in a pause)
       adSkip = { uri: track && track.uri || s.track_uri || null, until: performance.now() + AD_SETTLE_MS };
