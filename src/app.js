@@ -138,7 +138,7 @@ function toast(msg) {
 
 function notifyAd() {
   if (!window.__TAURI__ || !window.__TAURI__.core) return;
-  window.__TAURI__.core.invoke("notify", { message: "Реклама — пропускаем" }).catch(() => {});
+  window.__TAURI__.core.invoke("notify", { message: "Реклама — пропускаем", summary: "Stylus — реклама" }).catch(() => {});
 }
 
 function notifySongStart(artist, title, cover) {
