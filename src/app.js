@@ -566,10 +566,29 @@ async function refresh(epoch) {
       if (track) paint(track.cover);
       syncDockArt();
     }
+    if (isFree(engine) && adSkip && (changed || modeChanged)) adSkip = null; // a different "now" ended the break
     if (modeChanged && mode === "other" && isFree(engine)) {
+      // the break's end is the uri the cluster stops reporting (the track after the break, named
+      // only when it starts; or nothing, when the break ends in a pause)
+      adSkip = { uri: track && track.uri || s.track_uri || null, until: performance.now() + AD_SETTLE_MS };
       toast("Реклама — пропускаем");
       notifyAd();
       skipAd();
+    } else if (isFree(engine) && adSkip) {
+      if (performance.now() > adSkip.until) adSkip = null; // nothing ad-like for AD_SETTLE_MS: the break is over
+      else {
+        const uri = track && track.uri || s.track_uri || null;
+        if (!uri || uri === adSkip.uri) {
+          adSkip.until = performance.now() + AD_SETTLE_MS; // no ad reported: the break may be over
+        } else {
+          // an ad is playing and the uri is not the one after the break: the break goes on. An
+          // unnamed ad reports the track it precedes, so the break's end is that uri now
+          adSkip.uri = track && track.uri || uri; // an unnamed ad reports the pending track; a named one names the break's end itself
+          adSkip.until = performance.now() + AD_SETTLE_MS;
+          applog("info", `ad break: skipping again (uri ${uri})`);
+          skipAd();
+        }
+      }
     }
     if (changed && track) notifySongStart(track.artists, track.name, track.cover);
     // a song needs its queue (this Mac's comes with its state); with no song, the device list says
@@ -2508,6 +2527,13 @@ function onOutside(ev) {
 const SKIP_MS = 5000;
 const SKIP_SETTLE_MS = 1500;
 let skipWait = null; // {btn, landedAt, timer}
+
+// a free-mode ad break: Spotify names only the first ad (its uri is spotify:ad:*); a following ad
+// reports the uri of the track that waits after the break. While the break goes on, any poll whose
+// uri is not the remembered "after the break" uri is another ad: skip it, and if it named the track
+// itself, that uri becomes the break's end. Nothing ad-like for AD_SETTLE_MS means the break is over.
+const AD_SETTLE_MS = 1500;
+let adSkip = null; // {uri, until}
 
 function startSkip(btn) {
   endSkip();

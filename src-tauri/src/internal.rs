@@ -793,6 +793,8 @@ fn snapshot_shape(c: &Value, track: Value, devices: &Value) -> Value {
         "progress_ms": c["position_ms"],
         "device_id": c["device_id"],
         "device_name": dev["name"],
+        // what the cluster says plays, ad uris included: an ad with no metadata still shows what it is
+        "track_uri": c["track_uri"].clone(),
         "track": track,
         "shuffle": c["shuffle"].as_bool().unwrap_or(false),
         "repeat": c["repeat"].as_str().unwrap_or("off"),
@@ -1100,6 +1102,7 @@ mod tests {
         assert_eq!(
             s,
             json!({ "active": true, "is_playing": true, "progress_ms": 42, "device_id": "d1", "device_name": "Mac",
+                "track_uri": "spotify:track:1",
                 "track": { "id": "1", "uri": "spotify:track:1" }, "shuffle": true, "repeat": "context",
                 "volume_percent": 55, "supports_volume": true, "context_uri": "spotify:playlist:p1" })
         );
@@ -1111,6 +1114,7 @@ mod tests {
             "shuffle": false, "repeat": "track" });
         let s = snapshot_shape(&c, Value::Null, &json!([{ "id": "d2", "name": "Amp", "volume_percent": null }]));
         assert!(s["track"].is_null());
+        assert!(s["track_uri"].is_null());
         assert_eq!(s["shuffle"], false);
         assert_eq!(s["repeat"], "track");
         assert!(s["volume_percent"].is_null());
