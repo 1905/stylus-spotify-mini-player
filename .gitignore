@@ -13,5 +13,5 @@ __pycache__/
 # planning docs stay local
 plans/
 
-# spikes build on this Mac: their target dirs stay local
-spikes/*/target/
+# spikes stay local
+spikes/
