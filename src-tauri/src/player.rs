@@ -45,7 +45,7 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// One connect attempt (access point, login, Connect registration) may take this long.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long the Premium check waits for the account type (ProductInfo can come after Spirc::new).
+/// How long `run` waits for the account type before it picks the mode (ProductInfo can come after Spirc::new).
 const ACCOUNT_TYPE_WAIT: Duration = Duration::from_secs(2);
 /// A session that stayed up this long resets the reconnect backoff.
 const STABLE_AFTER: Duration = Duration::from_secs(60);
@@ -90,23 +90,26 @@ const OAUTH_SCOPES: &[&str] = &[
 /// The UI matches it (src/lib/engine.js `LOGIN_NOT_SAVED`).
 pub const LOGIN_NOT_SAVED: &str = "logged in, but the login could not be saved";
 
-/// The `Fatal` reason for an account without Premium. `auth_status` matches it.
+/// The `Fatal` reason when Spotify's access point refuses the account ("Premium account required"
+/// in `classify`). `auth_status` matches it.
 pub const PREMIUM_REQUIRED: &str = "Spotify Premium is required to play on this Mac";
 
-/// Whether the account has Premium, by the session attribute `type`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Premium {
-    Yes,
-    No,
-    Unknown,
+/// How this Mac plays, by the session attribute `type`: Premium through librespot, Free through
+/// Spotify's web player in the hidden `webplayer` window (webplayer.rs). Decided once per engine
+/// generation, right after the account type is read (`run`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mode {
+    Premium,
+    Free,
 }
 
-/// `Some("premium")` → Yes, any other value → No, no attribute → Unknown.
-pub fn premium_from_attr(attr: Option<&str>) -> Premium {
+/// `Some("premium")` → Premium; any other value → Free; no attribute → Premium (librespot plays,
+/// as before the mode existed: a late ProductInfo never moves a Premium user to the web player).
+pub fn mode_from_attr(attr: Option<&str>) -> Mode {
     match attr {
-        Some("premium") => Premium::Yes,
-        Some(_) => Premium::No,
-        None => Premium::Unknown,
+        Some(t) if t != "premium" => Mode::Free,
+        _ => Mode::Premium,
     }
 }
 
@@ -167,8 +170,14 @@ pub struct Status {
     name: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
-    /// The engine's Connect device id. Null until `ready`.
+    /// Here's Connect device id: this Mac's, or the web player's in Free mode. Null until `ready`
+    /// (and, in Free mode, until the web player reported one).
     device_id: Option<String>,
+    /// How this Mac plays (`Mode`); meaningful once `ready`.
+    mode: Mode,
+    /// Free mode, ready, and the web player shows Spotify's login button: its session is gone.
+    /// The device menu's Here row then offers the login (`webplayer_show`).
+    web_login: bool,
 }
 
 impl Status {
@@ -181,7 +190,7 @@ impl Status {
             State::Failed(r) => ("failed", Some(r.clone())),
         };
         let device_id = if *s == State::Ready { device_id.map(str::to_string) } else { None };
-        Status { state, name: DEVICE_NAME, reason, device_id }
+        Status { state, name: DEVICE_NAME, reason, device_id, mode: Mode::Premium, web_login: false }
     }
 }
 
@@ -360,6 +369,8 @@ struct Inner {
     /// The credentials the current loop logs in with (`remember_live`). A restart without
     /// new credentials uses them before the store: they work even when their save failed.
     live_creds: Mutex<Option<Credentials>>,
+    /// How the current loop plays (`set_mode` in `run`, from the account type).
+    mode: Mutex<Mode>,
 }
 
 impl Engine {
@@ -385,7 +396,25 @@ impl Engine {
             pending_volume: Mutex::new(PendingVolume::default()),
             save_error: Mutex::new(None),
             live_creds: Mutex::new(None),
+            mode: Mutex::new(Mode::Premium),
         }))
+    }
+
+    /// The app handle once `setup` stored it (webtoken.rs builds its window with it).
+    pub(crate) fn app(&self) -> Option<tauri::AppHandle> {
+        self.0.app.get().cloned()
+    }
+
+    /// How this Mac plays: the mode `run` picked for the current loop (Premium until it did).
+    pub fn mode(&self) -> Mode {
+        *lock(&self.0.mode)
+    }
+
+    /// The mode of the loop `generation`, from its account type. A stale loop sets nothing.
+    fn set_mode(&self, generation: u64, mode: Mode) {
+        if self.0.generation.load(Ordering::SeqCst) == generation {
+            *lock(&self.0.mode) = mode;
+        }
     }
 
     /// Where `engine-status` events go. Set once, in `setup`.
@@ -403,8 +432,21 @@ impl Engine {
         auth_status_for(self.0.store.load().is_some(), &self.state())
     }
 
+    /// The status, with Here's id: this Mac's in Premium mode, the web player's (once reported,
+    /// webplayer.rs) in Free mode.
     fn status(&self, state: &State) -> Status {
-        Status::new(state, self.0.device_id.get().map(String::as_str))
+        let mode = self.mode();
+        let (here, web_login) = match mode {
+            Mode::Premium => (self.0.device_id.get().cloned(), false),
+            Mode::Free => (self.web_player_device_id(), crate::webplayer::report().logged_out && *state == State::Ready),
+        };
+        Status { mode, web_login, ..Status::new(state, here.as_deref()) }
+    }
+
+    /// The web player's device id once it reported one (Free mode's Here): the cluster's full id
+    /// when the cluster lists it, `web_player_id`.
+    pub fn web_player_device_id(&self) -> Option<String> {
+        crate::webplayer::report().device_id.map(|id| web_player_id(id, self.0.now.cluster().as_deref()))
     }
 
     /// The persisted device id; reads or creates the file on the first call.
@@ -477,14 +519,20 @@ impl Engine {
             log::info!(target: AUTH, "engine: {prev} → {} ({name})", Status::new(&now, None).state);
         }
         if changed {
-            if let Some(app) = self.0.app.get() {
-                let _ = app.emit("engine-status", self.status(&now));
-            }
+            self.emit_status();
             if now != State::Ready {
                 self.0.now.set_inactive();
             }
         }
         now
+    }
+
+    /// Sends `engine-status` with the status now: on every state change (`apply`), and when the
+    /// web player reports (webplayer.rs): in Free mode Here is its device id.
+    pub fn emit_status(&self) {
+        if let Some(app) = self.0.app.get() {
+            let _ = app.emit("engine-status", self.status(&self.state()));
+        }
     }
 
     fn is_current(&self, generation: u64) -> bool {
@@ -599,12 +647,17 @@ impl Engine {
         self.stop().await;
         let store = self.0.store.clone();
         let session = self.0.session.clone();
+        // the old account's web token and the lyrics' no-session hold go with the cookies `clear` wipes below
+        crate::webtoken::forget().await;
         let results = vec![
             ("credentials", blocking(move || store.clear()).await),
             ("list cache", blocking(crate::cache::clear_all).await),
             ("saved state", blocking(|| crate::store::remove(&[crate::library::HOME_KEY, crate::library::KNOWN_KEY])).await),
             ("session", blocking(move || session.forget()).await),
             ("MCP", crate::mcp::disable_for_logout().await),
+            // the web player's data store holds the OAuth cookies: without this the next login
+            // would silently pick the old account
+            ("web player", { let app = self.0.app.get().cloned(); blocking(move || app.map_or(Ok(()), |a| crate::webplayer::clear(&a))).await }),
         ];
         // the next login is a new start: it restores that account's session
         self.0.restore_tried.store(false, Ordering::SeqCst);
@@ -797,22 +850,17 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                 }
                 let waited = Instant::now();
                 let account_type = account_type(|| session.get_user_attribute("type"), ACCOUNT_TYPE_WAIT).await;
+                let mode = mode_from_attr(account_type.as_deref());
                 if !type_logged {
                     let ms = waited.elapsed().as_millis();
-                    log::info!(target: AUTH, "account type: {} (after {ms} ms)", account_type.as_deref().unwrap_or("unknown"));
+                    log::info!(target: AUTH, "account type: {} (after {ms} ms), mode: {mode:?}", account_type.as_deref().unwrap_or("unknown"));
                     type_logged = true;
                 }
-                match premium_from_attr(account_type.as_deref()) {
-                    Premium::No => {
-                        engine.apply(generation, Event::Fatal(PREMIUM_REQUIRED.into()));
-                        engine.stop_spirc();
-                        spirc_task.await;
-                        return;
-                    }
-                    Premium::Unknown => log::warn!(target: AUTH, "no account type from Spotify: the Premium check is skipped"),
-                    Premium::Yes => {}
+                if account_type.is_none() {
+                    log::warn!(target: AUTH, "no account type from Spotify: Premium mode assumed");
                 }
-                // after the Premium check: a Free account's login is never stored or kept
+                engine.set_mode(generation, mode);
+                // the mode is known: keep and save the login (Free included)
                 let (kept, save_error) = keep_reusable(&engine, &session, creds).await;
                 creds = kept;
                 remember_live(&engine, generation, &creds);
@@ -829,6 +877,18 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                         tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), Restore::Reconnect));
                     }
                     _ => {}
+                }
+                // Free mode: the web player is the speaker (webplayer.rs); a Premium engine needs no
+                // window (the login's one goes). Off this task: building a window blocks on the main thread.
+                if let Some(app) = engine.0.app.get().cloned().filter(|_| engine.is_current(generation)) {
+                    tauri::async_runtime::spawn_blocking(move || match mode {
+                        Mode::Free => {
+                            if let Err(e) = crate::webplayer::start(&app) {
+                                log::warn!(target: AUTH, "web player: {e}");
+                            }
+                        }
+                        Mode::Premium => crate::webplayer::destroy(&app),
+                    });
                 }
                 // a restore still waiting for a cluster runs anyway once this fires;
                 // armed when the dealer has its connection id (`connect_ups`), not before
@@ -865,6 +925,10 @@ async fn run(engine: Engine, generation: u64, mut creds: Credentials) {
                                     follow_cluster(&tracker, &update, session.device_id());
                                 }
                                 now_playing.on_cluster(&update, session.device_id());
+                                // Free mode: Here's full id is known only once the cluster lists the web player
+                                if engine.mode() == Mode::Free {
+                                    engine.emit_status();
+                                }
                                 // the restore that found no Connect state runs once, now
                                 if let Some(why) = lock(&engine.0.restore_pending).take() {
                                     tauri::async_runtime::spawn(restore(engine.clone(), session.device_id().to_string(), why));
@@ -1084,6 +1148,11 @@ enum Restore {
 /// with no saved session it loads Liked Songs (`load_default`). It never starts sound.
 async fn restore(engine: Engine, device_id: String, why: Restore) {
     const LOG: &str = "stylus::session";
+    if engine.mode() == Mode::Free {
+        // ponytail: Free mode starts idle; a remote restore (transfer + pause + seek on the web player) is the upgrade if the user misses the last song
+        log::info!(target: LOG, "restore ({why:?}) skipped: Free mode plays on the web player");
+        return;
+    }
     let tracker = engine.0.session.clone();
     let saved = tracker.current();
     if saved.is_none() && why != Restore::Launch {
@@ -1172,6 +1241,13 @@ enum Gate {
 
 /// The cluster for the UI: the latest one; else, `QUIET_VIEW_AFTER` after Connect came up with none,
 /// an empty one (no device active, This Mac alone in the list); else None (ENGINE_NOT_READY).
+/// The web player's id in the cluster: the device whose id starts with the one the page reported
+/// (its `hobs_<id>` is the first 35 characters of the cluster's 40), the reported id until the
+/// cluster lists it.
+fn web_player_id(reported: String, cluster: Option<&librespot_protocol::connect::Cluster>) -> String {
+    cluster.and_then(|c| c.device.keys().find(|id| id.starts_with(&reported)).cloned()).unwrap_or(reported)
+}
+
 fn cluster_or_quiet(cluster: Option<Arc<librespot_protocol::connect::Cluster>>, since_session: Option<Duration>) -> Option<Arc<librespot_protocol::connect::Cluster>> {
     match cluster {
         Some(c) => Some(c),
@@ -1368,7 +1444,7 @@ fn login_result(settled: Result<(), String>, save_error: Option<String>) -> Resu
 }
 
 /// `f` on the blocking pool; a panic is an Err.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string()).and_then(|r| r)
 }
 
@@ -1407,7 +1483,25 @@ pub async fn engine_login(engine: Managed<'_, Engine>) -> Result<(), String> {
         // a logout bumps login_gen: the browser wait stops at once and frees the port
         let e = engine.inner().clone();
         let cancelled = move || e.0.login_gen.load(Ordering::SeqCst) != gen;
-        let token = crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT, cancelled).await?;
+        // the login page opens in the webplayer window (webplayer.rs): the web player, Free mode's
+        // speaker, inherits the session, so a Free account logs in once
+        let app = engine.0.app.get().cloned().ok_or_else(|| "no app handle".to_string())?;
+        let login_app = app.clone();
+        let open = move |url: &str| crate::webplayer::show_login(&login_app, url);
+        let token = match crate::auth::oauth_login(KEYMASTER_CLIENT_ID, LOGIN_PORT, LOGIN_PATH, OAUTH_SCOPES, LOGIN_TIMEOUT, open, cancelled).await {
+            Ok(token) => token,
+            Err(e) => {
+                crate::webplayer::destroy(&app);
+                return Err(e);
+            }
+        };
+        // a fresh login has web session cookies: the lyrics' no-session hold (webtoken.rs) is over
+        crate::webtoken::forget().await;
+        // the login page is done: the window moves on to the web player, hidden (a Premium engine
+        // destroys it at Ready, `run`)
+        if let Err(e) = crate::webplayer::start(&app) {
+            log::warn!(target: AUTH, "web player: {e}");
+        }
         let _op = engine.0.auth_op.lock().await;
         if engine.0.login_gen.load(Ordering::SeqCst) != gen {
             return Err(crate::auth::LOGIN_CANCELLED.to_string());
@@ -1802,11 +1896,11 @@ mod tests {
     }
 
     #[test]
-    fn premium_from_the_session_attribute() {
-        assert_eq!(premium_from_attr(Some("premium")), Premium::Yes);
-        assert_eq!(premium_from_attr(Some("free")), Premium::No);
-        assert_eq!(premium_from_attr(Some("open")), Premium::No);
-        assert_eq!(premium_from_attr(None), Premium::Unknown);
+    fn mode_from_the_session_attribute() {
+        assert_eq!(mode_from_attr(Some("premium")), Mode::Premium);
+        assert_eq!(mode_from_attr(Some("free")), Mode::Free);
+        assert_eq!(mode_from_attr(Some("open")), Mode::Free);
+        assert_eq!(mode_from_attr(None), Mode::Premium, "no attribute in time: librespot plays, as today");
     }
 
     #[test]
@@ -2221,14 +2315,44 @@ mod tests {
         assert_eq!(engine.apply(now, Event::Dropped), Reconnecting);
     }
 
+    #[tokio::test]
+    async fn web_login_only_when_free_and_ready() {
+        let engine = Engine::new(Arc::new(MemoryStore::default()));
+        engine.restart(None).await; // needs_login
+        engine.retire();
+        let now = engine.0.generation.load(Ordering::SeqCst);
+        engine.apply(now, Event::Start { has_credentials: true });
+        assert_eq!(engine.apply(now, Event::Connected), Ready);
+        crate::webplayer::apply(crate::webplayer::Report { device_id: None, logged_out: true, ..Default::default() });
+        assert!(!engine.status(&engine.state()).web_login, "Premium mode never asks for the web login");
+        engine.set_mode(now, Mode::Free);
+        assert!(engine.status(&engine.state()).web_login);
+        assert_eq!(engine.status(&engine.state()).device_id, None);
+        crate::webplayer::apply(crate::webplayer::Report { device_id: Some("wp".into()), logged_out: false, ..Default::default() });
+        assert!(!engine.status(&engine.state()).web_login);
+        assert_eq!(engine.status(&engine.state()).device_id.as_deref(), Some("wp"), "the newest report is Here");
+    }
+
+    #[test]
+    fn web_player_id_is_the_cluster_id_the_report_starts() {
+        let mut cluster = librespot_protocol::connect::Cluster::default();
+        cluster.device.insert("dc64dc52a9d2f7ec2ae79b16659111589f063796".into(), Default::default());
+        cluster.device.insert("other-device".into(), Default::default());
+        // the page's hobs_ id is the first 35 characters of the cluster's 40
+        assert_eq!(web_player_id("dc64dc52a9d2f7ec2ae79b16659111589f0".into(), Some(&cluster)), "dc64dc52a9d2f7ec2ae79b16659111589f063796");
+        // not listed yet (page load, no cluster): the reported id as is
+        assert_eq!(web_player_id("abc".into(), Some(&cluster)), "abc");
+        assert_eq!(web_player_id("abc".into(), None), "abc");
+    }
+
     #[test]
     fn status_payload() {
         let v = serde_json::to_value(Status::new(&Ready, Some("dev-1"))).unwrap();
-        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1"}));
+        assert_eq!(v, serde_json::json!({"state": "ready", "name": "This Mac", "device_id": "dev-1", "mode": "premium", "web_login": false}));
         let v = serde_json::to_value(Status::new(&Failed("Premium required".into()), Some("dev-1"))).unwrap();
         assert_eq!(
             v,
-            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null})
+            serde_json::json!({"state": "failed", "name": "This Mac", "reason": "Premium required", "device_id": null, "mode": "premium", "web_login": false})
         );
         let names: Vec<&str> = [NeedsLogin, Starting, Reconnecting].iter().map(|s| Status::new(s, Some("dev-1")).state).collect();
         assert_eq!(names, ["needs_login", "starting", "reconnecting"]);

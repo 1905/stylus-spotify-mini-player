@@ -105,14 +105,17 @@ pub async fn play_context(device_id: String, context_uri: String, track_uri: Opt
     control::play(src, Some(device_id)).await.map(drop)
 }
 
-/// Append a track URI to the device's up-next queue: a Connect player command to This Mac.
-/// Other devices: `NOT_AVAILABLE_REMOTE` (a remote `add_to_queue` wasn't probed).
+/// Append a track URI to the device's up-next queue: a Connect player command to This Mac, or to
+/// the web player (Here in Free mode). Other devices: `NOT_AVAILABLE_REMOTE` (not probed).
 #[tauri::command]
 pub async fn add_to_queue(device_id: String, uri: String) -> Result<(), String> {
-    if internal::own_device_id().as_deref() != Some(device_id.as_str()) {
-        return Err(control::not_available_remote("queue"));
+    if internal::own_device_id().as_deref() == Some(device_id.as_str()) {
+        return serve("add_to_queue", vec![(Primary, internal::add_to_queue(&device_id, &uri).boxed())]).await;
     }
-    serve("add_to_queue", vec![(Primary, internal::add_to_queue(&device_id, &uri).boxed())]).await
+    if internal::here_device_id().as_deref() == Some(device_id.as_str()) {
+        return internal::remote_command(&device_id, internal::RemoteCmd::Queue(uri)).await;
+    }
+    Err(control::not_available_remote("queue"))
 }
 
 /// Start playback of the given URIs on a specific device.

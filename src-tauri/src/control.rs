@@ -36,6 +36,9 @@ pub enum Path {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct View {
     pub own: Option<String>,
+    /// The device a command without a target falls back to, while ready: This Mac in Premium
+    /// mode, the web player in Free mode (`internal::here_device_id`).
+    pub here: Option<String>,
     pub ready: bool,
     pub active: Option<String>,
 }
@@ -61,11 +64,10 @@ pub fn route_transport(v: &View, target: Option<&str>) -> Result<Path, String> {
     }
 }
 
-/// A play (or a transfer) on `target`, else the active device, else This Mac when it's ready.
+/// A play (or a transfer) on `target`, else the active device, else Here when it's ready.
 /// This Mac loads directly, active or not (a load activates it).
 pub fn route_play(v: &View, target: Option<&str>) -> Result<Path, String> {
-    let fallback = if v.ready { v.own.as_deref() } else { None };
-    let t = target.or(v.active.as_deref()).or(fallback).ok_or(NO_DEVICE)?;
+    let t = target.or(v.active.as_deref()).or(v.here.as_deref()).ok_or(NO_DEVICE)?;
     if v.is_own(t) {
         return if v.ready { Ok(Path::Local) } else { Err(NOT_READY.into()) };
     }
@@ -103,7 +105,7 @@ pub fn view() -> View {
     } else {
         crate::internal::connect().ok().map(|(c, _, _)| c.active_device_id.clone()).filter(|id| !id.is_empty())
     };
-    View { active: active_device(own.as_deref(), ready, here, remote), own, ready }
+    View { active: active_device(own.as_deref(), ready, here, remote), own, here: crate::internal::here_device_id(), ready }
 }
 
 /// The routing view for a command on `device`: a named device needs no active one, so the
@@ -113,12 +115,12 @@ fn view_for(device: Option<&str>) -> View {
         return view();
     }
     let ready = crate::internal::engine().is_some_and(|e| e.is_ready());
-    View { own: crate::internal::own_device_id(), ready, active: None }
+    View { own: crate::internal::own_device_id(), here: crate::internal::here_device_id(), ready, active: None }
 }
 
-/// The device a volume command is for: `device`, else the active one, else This Mac when ready.
+/// The device a volume command is for: `device`, else the active one, else Here when ready.
 fn target(v: &View, device: Option<String>) -> Option<String> {
-    device.or_else(|| v.active.clone()).or_else(|| if v.ready { v.own.clone() } else { None })
+    device.or_else(|| v.active.clone()).or_else(|| v.here.clone())
 }
 
 /// The device list with This Mac's `is_active` from its own events (the cluster lags behind them).
@@ -366,7 +368,19 @@ mod tests {
     use super::*;
 
     fn view(own: Option<&str>, ready: bool, active: Option<&str>) -> View {
-        View { own: own.map(Into::into), ready, active: active.map(Into::into) }
+        View { own: own.map(Into::into), here: own.filter(|_| ready).map(Into::into), ready, active: active.map(Into::into) }
+    }
+
+    #[test]
+    fn free_mode_routes_nothing_locally() {
+        let v = View { own: None, here: Some("wp".into()), ready: true, active: None };
+        assert_eq!(route_play(&v, None), Ok(Path::Remote("wp".into())), "no target, nothing active: the web player");
+        assert_eq!(route_play(&v, Some("wp")), Ok(Path::Remote("wp".into())));
+        assert_eq!(route_transport(&v, Some("wp")), Ok(Path::Remote("wp".into())));
+        assert_eq!(route_transport(&v, None), Err(NOTHING_PLAYING.into()));
+        assert_eq!(target(&v, None).as_deref(), Some("wp"));
+        let unknown = View { own: None, here: None, ready: true, active: None };
+        assert_eq!(route_play(&unknown, None), Err(NO_DEVICE.into()), "the web player hasn't reported its id yet");
     }
 
     #[test]
@@ -423,7 +437,7 @@ mod tests {
         // the observed bug: This Mac plays, no cluster yet (remote None)
         let active = active_device(Some("mac"), true, true, None);
         assert_eq!(active.as_deref(), Some("mac"));
-        assert_eq!(route_transport(&View { own: Some("mac".into()), ready: true, active }, None), Ok(Path::Local), "next goes to Spirc");
+        assert_eq!(route_transport(&View { own: Some("mac".into()), here: Some("mac".into()), ready: true, active }, None), Ok(Path::Local), "next goes to Spirc");
         // its events win over a lagging cluster naming another device
         assert_eq!(active_device(Some("mac"), true, true, Some("phone".into())).as_deref(), Some("mac"));
         // the cluster still names This Mac after its events said it went inactive: stale

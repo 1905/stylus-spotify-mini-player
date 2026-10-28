@@ -12,3 +12,6 @@ __pycache__/
 
 # planning docs stay local
 plans/
+
+# spikes stay local
+spikes/

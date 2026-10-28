@@ -3,6 +3,7 @@
 // Scenario from ?s= : playing (default), paused, nothing, nodevice,
 // login (no player login yet: the login screen; "Log in with Spotify" logs the player in),
 // not_premium (the account has no Premium: the "Stylus needs Spotify Premium" login screen),
+// free (a Free account: the hidden web player is Here, mode "free" in engine_status),
 // logged_out (logged in, then the menu's "Log out" fires `logout-requested` after 1.5 s),
 // ended (Spotify refuses the player login after the first poll: the "session ended" screen),
 // error, library, library-detail, search, search-empty, long-titles, ad,
@@ -57,7 +58,7 @@
 
   const SCENARIOS = [
     "ended",
-    "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error",
+    "playing", "paused", "nothing", "nodevice", "login", "not_premium", "logged_out", "error", "free",
     "library", "library-detail", "search", "search-empty", "long-titles", "ad",
     "devices", "library-full", "artist", "mix-detail", "no-volume", "engine-down",
     "slow", "resume", "search-all", "library-all", "playlist", "here", "refused", "finished", "fresh", "library-search",
@@ -125,6 +126,7 @@
       scenario === "login" ? { state: "needs_login", name: RUN_NAME, device_id: null } // first run: no player login yet
       : scenario === "not_premium" ? { state: "failed", name: RUN_NAME, reason: PREMIUM_REQUIRED, device_id: null }
       : scenario === "engine-down" ? { state: "failed", name: RUN_NAME, reason: "Spotify changed its protocol (mock)", device_id: null }
+      : scenario === "free" ? { state: "ready", name: RUN_NAME, device_id: RUN_ID, mode: "free", web_login: false } // the web player is Here
       : { state: "ready", name: RUN_NAME, device_id: RUN_ID },
     quality: 160, // the in-app player's bitrate, kbps
   };
@@ -265,6 +267,17 @@
 
   const reject = (msg) => Promise.reject(msg);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // lyrics for every song but one: synced lines over the first minute, one instrumental gap
+  const LYRICS = [
+    [1200, "I know you're out there somewhere tonight"], [6800, "Counting the lights on the water"],
+    [12400, "I left the door open, the radio on"], [18000, ""], [24500, "Nobody told me the summer could end"],
+    [30100, "Nobody told me at all"], [36700, "So I keep the window down"], [42300, "And the song keeps playing"],
+    [48900, "Long after you're gone"], [55500, "Long after the lights are gone"],
+  ].map(([ms, text]) => ({ ms, text }));
+  const NO_LYRICS = "2qKioq4HNraWk0DXH4Rdut"; // Infinity: Spotify has no lyrics for it
+  const NO_SESSION = new URLSearchParams(location.search).get("lyrics") === "nosession"; // ?lyrics=nosession: Premium without a web session
+  const UNSYNCED = new URLSearchParams(location.search).get("lyrics") === "unsynced"; // ?lyrics=unsynced: lines without times, as Spotify sends for some songs
 
   // the in-app player
   const media = []; // media_update / media_clear calls, oldest first
@@ -462,6 +475,11 @@
       return { items: clone(items), has_more: items.length === 10 && offset + 10 < 1000 && offset + 10 < pool.length };
     },
     get_queue: () => clone(state.queue),
+    get_lyrics: async ({ trackId }) => {
+      if (NO_SESSION) throw "LYRICS_NO_WEB_SESSION: no Spotify web session; log in again";
+      await sleep(1500);
+      return trackId === NO_LYRICS ? null : { synced: !UNSYNCED, lines: clone(LYRICS) };
+    },
     get_recently_played: () =>
       clone(state.history.slice(0, 30)).map((r) => ({ context_uri: null, ...r })),
 

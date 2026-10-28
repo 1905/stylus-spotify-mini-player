@@ -1,5 +1,7 @@
 // The in-app player (a librespot Connect device) as the device menu shows it. Spotify lists it as
 // "This Mac"; our UI calls it "Here". It is known by the engine's device id, never by its name.
+// Free mode (a Spotify account without Premium): the engine's device id is the hidden web player's
+// (Rust webplayer.rs), which plays instead of librespot; Here is that window.
 
 export const HERE = "Here";
 
@@ -22,6 +24,9 @@ export function notSavedReason(e) {
 /** The engine stopped because the account has no Premium (Rust player.rs `PREMIUM_REQUIRED`). */
 export const isPremiumRequired = (st) => Boolean(st && st.state === "failed" && /Premium is required/.test(st.reason || ""));
 
+/** The engine plays through the hidden web player (engine_status.mode): commands take the remote path. */
+export const isFree = (engine) => Boolean(engine && engine.mode === "free");
+
 /** d is the in-app player: its id is the engine's device id (engine_status). */
 export const isHere = (d, engine) => Boolean(d && d.id && engine && engine.device_id && d.id === engine.device_id);
 
@@ -40,16 +45,17 @@ export const THE_RUN_MISSING_MS = 20000;
  */
 export function thisMacRow(engine, devices, busy = "", missingMs = 0) {
   if (!devices || devices.some((d) => isHere(d, engine))) return null;
-  if (busy === "login") return { type: "Waiting for login…", title: "Finish the player login in your browser" };
+  if (busy === "login") return { type: "Waiting for login…", title: "Finish the player login in the login window" };
   const connecting = { type: "Connecting…", title: "The player on this Mac is connecting to Spotify" };
   if (busy) return connecting;
   const st = engine && engine.state;
   if (!st || CONNECTING.has(st)) return connecting;
+  // the player login (needs_login), or the web player's own login in Free mode (web_login: ready, its Spotify session gone)
+  if (st === "needs_login" || engine.web_login) return { type: "Log in to play here", title: "Opens Spotify's login page once to log in the player on this Mac" };
   if (st === "ready") {
     if (missingMs < THE_RUN_MISSING_MS) return { type: "Connecting…", title: "Waiting for Spotify to list the player on this Mac" };
     return { type: "Not showing up — retry", title: "Spotify hasn't listed the player on this Mac yet" };
   }
-  if (st === "needs_login") return { type: "Log in to play here", title: "Opens your browser once to log in the player on this Mac" };
   return { type: "Not available right now", title: engine.reason || "The player on this Mac isn't available right now" };
 }
 

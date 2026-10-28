@@ -11,10 +11,12 @@ mod internal;
 mod library;
 pub mod links;
 pub mod logshare;
+mod lyrics;
 pub mod mcp;
 mod mcp_app;
 pub mod mcp_tools;
 mod media;
+mod notify;
 mod nowplaying;
 mod parse;
 mod paths;
@@ -26,6 +28,8 @@ mod spotify;
 mod store;
 mod tray;
 mod updater;
+mod webplayer;
+mod webtoken;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -78,6 +82,7 @@ pub fn run() {
             player::engine_status,
             player::engine_login,
             player::logout,
+            lyrics::get_lyrics,
             player::engine_get_quality,
             player::engine_set_quality,
             dock::set_dock_art,
@@ -148,7 +153,9 @@ pub fn run() {
             updater::update_status,
             updater::update_check_now,
             updater::update_set_auto,
-            updater::update_restart
+            updater::update_restart,
+            webplayer::webplayer_show,
+            notify::notify
         ])
         // Cmd+W / the close button hides the window (music keeps playing); Cmd+Q quits.
         // The mini player hides when it loses focus (a click outside it).

@@ -39,6 +39,10 @@ describe("thisMacRow", () => {
     expect(thisMacRow({ state: "ready" }, [MARANTZ], "", THE_RUN_MISSING_MS).type).toBe("Not showing up — retry");
   });
 
+  it("free mode: the web player asks for a login", () => {
+    expect(thisMacRow({ state: "ready", mode: "free", web_login: true, device_id: null }, [MARANTZ]).type).toBe("Log in to play here");
+  });
+
   it("the retry label is only for a ready engine", () => {
     expect(thisMacRow({ state: "needs_login" }, [], "", THE_RUN_MISSING_MS).type).toBe("Log in to play here");
     expect(thisMacRow({ state: "ready" }, [], "connecting", THE_RUN_MISSING_MS).type).toBe("Connecting…");

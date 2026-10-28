@@ -14,6 +14,9 @@ describe("isEngineDevice", () => {
     expect(isEngineDevice(null, "run")).toBe(false);
     expect(isEngineDevice(READY, null)).toBe(false);
   });
+  it("free mode: never the engine, the web player takes the remote path", () => {
+    expect(isEngineDevice({ state: "ready", mode: "free", device_id: "wp" }, "wp")).toBe(false);
+  });
 });
 
 describe("isLocal", () => {

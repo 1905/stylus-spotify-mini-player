@@ -66,6 +66,7 @@ pub(crate) async fn oauth_login(
     redirect_path: &str,
     scopes: &[&str],
     timeout: std::time::Duration,
+    open: impl FnOnce(&str) -> Result<(), String>,
     cancelled: impl Fn() -> bool + Send + 'static,
 ) -> Result<TokenResponse, String> {
     let redirect_uri = format!("http://127.0.0.1:{port}{redirect_path}");
@@ -80,14 +81,14 @@ pub(crate) async fn oauth_login(
     })?;
     log::info!(target: AUTH, "oauth: listening on 127.0.0.1:{port}");
 
-    // Open the browser (does not block).
-    tauri_plugin_opener::open_url(&auth_url, None::<&str>).map_err(|e| {
+    // Show the login page (`open`: the webplayer window, player.rs `engine_login`); does not block.
+    open(&auth_url).map_err(|e| {
         // the error text may quote the URL, and the URL holds the state
-        let e = e.to_string().replace(&auth_url, "<authorize url>");
-        log::warn!(target: AUTH, "oauth: browser open failed: {e}");
-        format!("could not open browser: {e}")
+        let e = e.replace(&auth_url, "<authorize url>");
+        log::warn!(target: AUTH, "oauth: login window failed: {e}");
+        format!("could not open the login window: {e}")
     })?;
-    log::info!(target: AUTH, "oauth: browser opened");
+    log::info!(target: AUTH, "oauth: login page opened");
 
     // Block on the one incoming request. Spawn to a blocking thread so we
     // don't stall the async runtime.
@@ -493,6 +494,14 @@ mod tests {
         let p = http_page("<script>&\"'");
         assert!(p.contains("&lt;script&gt;&amp;&quot;&#39;"));
         assert!(!p.contains("<script>"));
+    }
+
+    #[tokio::test]
+    async fn oauth_login_fails_when_the_login_window_cannot_open() {
+        let open = |_url: &str| Err("no window".to_string());
+        let r = oauth_login("id", 15588, "/login", &["streaming"], std::time::Duration::from_secs(1), open, || false).await;
+        assert!(r.unwrap_err().contains("no window"));
+        std::net::TcpListener::bind(("127.0.0.1", 15588)).expect("the port is free again");
     }
 
     #[test]

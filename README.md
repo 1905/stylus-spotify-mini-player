@@ -42,7 +42,7 @@ Or download **Stylus.dmg** from [the latest release](https://github.com/1905/sty
 > xattr -dr com.apple.quarantine /Applications/Stylus.app
 > ```
 
-**Requirements:** macOS 13 or later on Apple Silicon, and a **Spotify Premium** account (playback through Spotify Connect requires Premium).
+**Requirements:** macOS 13 or later on Apple Silicon and a Spotify account. With **Premium**, Stylus plays by itself through the built-in player (librespot). With **Free**, it plays through Spotify's web player in a hidden window, with Spotify's ads (see [Free accounts](#free-accounts-what-is-different)).
 
 ### Updates
 
@@ -85,7 +85,17 @@ Automatic updates work only when `Stylus.app` is in `/Applications` or `~/Applic
   </tr>
 </table>
 
-Also: control any of your Spotify Connect devices, smooth volume, instant skip and pause, and a light network footprint — while Stylus is the speaker, it reads playback from the speaker itself instead of polling Spotify.
+Also: lyrics under the title or instead of the cover (Settings → Appearance → Lyrics; the ❝ button hides them), the song's cover in notifications, control any of your Spotify Connect devices, smooth volume, instant skip and pause, and a light network footprint — while Stylus is the speaker, it reads playback from the speaker itself instead of polling Spotify.
+
+## Free accounts: what is different
+
+Stylus reads the account type at login. A Free account gets Spotify's web player (open.spotify.com) in a hidden window as the speaker, controlled over Spotify Connect like any other device; the window shows only the login page.
+
+- Spotify's ads play as Spotify sends them. During an ad Stylus shows an ad card; skip and seek wait until it ends.
+- Audio quality is set by Spotify's web player, so the quality setting is hidden.
+- After a launch Stylus starts idle instead of on the last song.
+- Your other Spotify apps list both "Web Player (Safari)" (Stylus's speaker) and "This Mac"; the second one plays nothing.
+- Memory: about 450 MB in total, most of it the web player's page.
 
 ## Control Stylus from AI tools (MCP)
 
@@ -142,7 +152,7 @@ npx tauri build --bundles app   # → src-tauri/target/release/bundle/macos/Styl
 
 ### Spotify login
 
-Stylus has one login: the player login. On first launch, select **Log in with Spotify**. Your browser opens the Spotify login page (OAuth with PKCE, no client secret), and Stylus gets the login for its built-in Spotify Connect speaker. Stylus uses this login for playback and also for your library, search and playlists. The account must have Spotify Premium: without Premium, the login screen says so. You do not need a Spotify developer app.
+Stylus has one login: the player login. On first launch, select **Log in with Spotify**. Spotify's login page opens inside Stylus (OAuth with PKCE, no client secret; passkeys don't work in that window, use a password or a one-time code), and Stylus gets the login for its built-in Spotify Connect speaker and, on a Free account, for the hidden web player. Stylus uses this login for playback and also for your library, search and playlists. **Stylus → Log Out** in the app menu forgets it, the web player's session included. You do not need a Spotify developer app.
 
 <details>
 <summary>How it works</summary>

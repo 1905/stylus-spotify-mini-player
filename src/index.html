@@ -25,7 +25,7 @@
       </div>
       <div class="login-copy">
         <h1 id="loginTitle" class="login-title">Your music, in order</h1>
-        <p id="loginSub" class="login-sub">Log in with Spotify to see what played, what's playing, and what's next. Stylus needs Spotify Premium.</p>
+        <p id="loginSub" class="login-sub">Log in with Spotify to see what played, what's playing, and what's next.</p>
         <button id="loginBtn" class="btn btn-solid" type="button">Log in with Spotify</button>
         <p id="loginError" class="login-error" role="alert" hidden></p>
       </div>
@@ -61,13 +61,17 @@
       </header>
 
       <div id="run" class="run" aria-label="Played, now playing, and up next"><div id="runTrack" class="run-track"></div></div>
+      <div id="lyricsStage" class="lyrics-stage" hidden><div id="lyricsList" class="lyrics-list"></div></div>
 
       <section class="now" aria-live="polite">
         <h1 id="nowTitle" class="now-title"></h1>
         <p id="nowArtist" class="now-artist"></p>
         <p id="nowAlbum" class="now-album"></p>
+        <div id="lyricsPreview" class="lyrics-preview" aria-live="off" hidden><p class="lyrics-prev"></p><p class="lyrics-cur"></p><p class="lyrics-next"></p><p class="lyrics-after"></p><div id="lyricsPlain" class="lyrics-plain"></div></div>
         <p id="emptyState" class="now-empty" hidden></p>
       </section>
+
+
 
       <footer class="transport">
         <div class="scrub-row">
@@ -84,6 +88,9 @@
             </button>
             <button id="shareBtn" class="ctl" type="button" aria-label="Copy song link" title="Copy song link" hidden>
               <svg class="ic ic-link" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M13.78 11.21A4 4 0 0 0 7.67 10.67l-3.5 3.5a4 4 0 0 0 5.66 5.66l2-2M10.22 12.79A4 4 0 0 0 16.33 13.33l3.5-3.5a4 4 0 0 0-5.66-5.66l-2 2"/></svg>
+            </button>
+            <button id="lyricsBtn" class="ctl ctl-toggle" type="button" aria-label="Lyrics" title="Lyrics" aria-pressed="false" hidden>
+              <svg class="ic ic-lyrics" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3z"/><path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v3.5M9 20.5h6"/></svg>
             </button>
           </div>
           <div class="controls-main">
@@ -311,6 +318,14 @@
             <div class="set-row">
               <span id="coverRowLabel" class="set-label">Show cover row</span>
               <button id="coverRowSwitch" class="switch" type="button" role="switch" aria-checked="true" aria-labelledby="coverRowLabel"></button>
+            </div>
+            <div id="lyricsGroup" class="set-group">
+              <span id="lyricsLabel" class="set-label">Lyrics</span>
+              <div class="set-row">
+                <span id="lyricsPlacementLabel" class="set-label">Lyrics placement</span>
+                <button id="lyricsPlacementBtn" class="chip" type="button" aria-labelledby="lyricsPlacementLabel">Beside title</button>
+              </div>
+              <p id="lyricsNote" class="set-note">Spotify's web player provides the lyrics; not every song has them.</p>
             </div>
           </section>
           <section class="set-sec" aria-labelledby="setMenuHead">

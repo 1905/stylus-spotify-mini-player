@@ -6,8 +6,9 @@ import { panelRows } from "./lib/playlist.js";
 import { SETTINGS_KEY, parseSettings, isQuality } from "./lib/settings.js";
 import { favoritesBy } from "./lib/favorites.js";
 import { createIntents, DEFAULT_REPEAT, nextRepeat, stepVolume } from "./lib/transport.js";
+import { adSkipOnPoll } from "./lib/ads.js";
 import { noteMixes } from "./lib/mixes.js";
-import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
+import { CONNECTING, NEEDS_LOGIN, HERE, isHere, isFree, isPremiumRequired, notSavedReason, deviceLabel, thisMacRow, preferredDevice } from "./lib/engine.js";
 import { mediaAction, mediaChanged, mediaPayload } from "./lib/media.js";
 import { GIVE_UP_FAILURES, HIDDEN_POLL_MS, gaveUp, pollDelay, pollMode, modeReason, sanityDue, listDue } from "./lib/poll.js";
 import { isEngineDevice, isLocal, refusedText, volumeTiming } from "./lib/route.js";
@@ -24,6 +25,7 @@ import { coverSrc } from "./lib/cover.js";
 import { miniPayload, miniChanged } from "./lib/mini.js";
 import { sleeveBackHtml, SLEEVE_LOADING, SLEEVE_ERROR } from "./lib/albuminfo.js";
 import { isNowRow, matchIndexes, searchLibrary } from "./lib/libsearch.js";
+import { lyricsActive, lineAt, preview as linePreview, sung } from "./lib/lyrics.js";
 
 // Every call belongs to a login session. A result or error from an older session
 // (still in flight across a logout) never settles, so it can't touch the new one.
@@ -59,6 +61,7 @@ const state = {
   supportsVolume: false,
   contextUri: null, // what the current song plays from (playlist, album, mix)
   saved: null, // the current song is in Liked Songs; null = unknown
+  lyrics: null, // the current song's lyrics: null | { uri, status: "loading" | "ready" | "none", synced?, lines? }
   progressMs: 0,
   progressAt: 0,
   seekHoldUntil: 0,
@@ -132,12 +135,20 @@ function toast(msg) {
   toastTimer = setTimeout(() => (el.hidden = true), 3200);
 }
 
+// ---------- notification ----------
+
+function notifySongStart(artist, title, cover) {
+  if (!window.__TAURI__ || !window.__TAURI__.core) return;
+  const message = `${artist} — ${title}`;
+  window.__TAURI__.core.invoke("notify", { message, cover: cover || null }).catch(() => {});
+}
+
 // ---------- login ----------
 
 const LOGIN_COPY = {
   login: {
     title: "Your music, in order",
-    sub: "Log in with Spotify to see what played, what's playing, and what's next. Stylus needs Spotify Premium.",
+    sub: "Log in with Spotify to see what played, what's playing, and what's next.",
     btn: "Log in with Spotify",
   },
   ended: {
@@ -538,6 +549,23 @@ async function refresh(epoch) {
   if (pending.onPoll({ isPlaying: Boolean(active && s.is_playing), trackUri: track && track.uri, at: startedAt })) clearPending();
   if (restoring && (track || mode === "other")) endRestoring(track && (!restoring.trackUri || track.uri === restoring.trackUri) ? "" : `replaced by ${track ? track.uri : "an ad or a podcast"}`);
 
+  // the ad break runs on every poll: inside it the mode stays "other" and the uri stays the same, so
+  // a change-gated skip would never see the second ad of a break
+  if (isFree(engine)) {
+    const at = performance.now();
+    const uri = track && track.uri || s.track_uri || null;
+    const was = adSkip;
+    const ad = adSkipOnPoll({ mode, uri, at }, { free: true, state: adSkip });
+    adSkip = ad.state;
+    if (ad.log) applog("info", ad.log);
+    // inside a break every poll is logged: what the cluster says, and what the break made of it
+    if (was || ad.state) {
+      const verdict = ad.skip ? "next" : !ad.state ? "break over" : `wait, re-skip in ${Math.max(0, Math.round((ad.state.skipAt - at) / 1000))} s`;
+      applog("info", `ad poll: ${mode} ${uri || "none"}, ${s.is_playing ? "playing" : "paused"} at ${s.progress_ms ?? "?"} ms → ${verdict}`);
+    }
+    if (ad.skip) skipAd();
+  }
+
   if (changed || modeChanged || !state.loaded) {
     // show the new track now: what's on screen is what a seek or a skip acts on.
     // (Idle copy waits for the device list on first load, or it would flicker.)
@@ -551,6 +579,7 @@ async function refresh(epoch) {
       if (track) paint(track.cover);
       syncDockArt();
     }
+    if (changed && track) notifySongStart(track.artists, track.name, track.cover);
     // a song needs its queue (this Mac's comes with its state); with no song, the device list says
     // who could play. Each list at most every 30 s: a skipped one is fetched once it's due.
     const own = queueOf(s);
@@ -683,6 +712,7 @@ let runItems = new Map(); // the covers on screen: key → buildRun item
 let runNowUri = null; // the song the run was last built around: a new one returns a pan to rest
 
 function renderRun() {
+  if ($("run").hidden) return void (panelOpen && renderPanel());
   const track = $("runTrack");
   const prev = measure(track);
   // while a play loads, its preview is the big cover and the old queue is gone
@@ -1119,6 +1149,7 @@ function renderChrome() {
   heart.title = heartLabel;
 
   renderVolume();
+  syncLyrics();
   renderProgress();
   startFrames();
   syncMedia();
@@ -1178,6 +1209,7 @@ function renderProgress() {
     $("scrub").setAttribute("aria-valuenow", String(Math.round(pct)));
     $("scrub").setAttribute("aria-valuetext", `${fmtTime(p)} of ${fmtTime(dur)}`);
   }
+  renderLyrics(p, t, frozen);
 }
 
 let framing = false;
@@ -1790,6 +1822,177 @@ function volumeKey(ev) {
 // ---------- heart: the current song in Liked Songs (not a player command) ----------
 
 // Bumped on each track change and heart click: an is_saved answer from before either is stale.
+// ---------- lyrics (the token page's token reads them, Rust lyrics.rs) ----------
+
+let lyricsGen = 0; // bumped whenever state.lyrics is replaced or dropped: a late answer is ignored
+let lastLyricsKey = ""; // what applyLyrics last set up
+let lastLyricsPaint = ""; // what renderLyrics last painted
+let lastLyricsLine = -1; // the line painted last: lineAt's hint
+let lyricsListOf = null; // the state.lyrics object the list's rows were built from
+let lyricsListIn = null; // the placement the list was last painted in: a move re-centres it
+let lyricsCurRow = null; // the row marked current
+let lyricsUserAt = -Infinity; // the user last scrolled the list (performance.now): auto-follow pauses 4 s
+let lyricsMissing = false; // the last song read has none: the button greys out, its on/off kept, until a song has some
+
+/** What shows now: null, or the placement the setting names (only while the ❝ button is on and the song has lyrics). */
+function lyricsShown() {
+  const s = getSettings();
+  if (!lyricsActive(s, state.mode)) return null;
+  return s.lyricsShown && !lyricsMissing ? s.lyrics : null;
+}
+
+/** Fetch the playing song's lines when a placement can show them; drop them when lyrics are off. Idempotent. */
+function syncLyrics() {
+  const track = state.now;
+  if (!lyricsActive(getSettings(), state.mode)) {
+    if (state.lyrics) {
+      state.lyrics = null;
+      lyricsGen++;
+    }
+  } else if (getSettings().lyricsShown && !document.hidden && track && (!state.lyrics || state.lyrics.uri !== track.uri)) {
+    loadLyrics(track);
+  }
+  applyLyrics();
+}
+
+/** Read one song's lines; a web player that has not sent its token yet gets one more try after 3 s. */
+async function loadLyrics(track) {
+  const gen = ++lyricsGen;
+  state.lyrics = { uri: track.uri, status: "loading" };
+  let got = null;
+  let note = "none";
+  let noSession = false;
+  if (track.id && !isLocalFile(track.uri)) {
+    try {
+      got = await readLyrics(track.id, gen);
+    } catch (e) {
+      note = String(e);
+      noSession = isCode(e, "LYRICS_NO_WEB_SESSION");
+    }
+    if (gen !== lyricsGen) return;
+  }
+  lyricsMissing = !got;
+  if (got) {
+    state.lyrics = { uri: track.uri, status: "ready", synced: got.synced, lines: got.lines };
+    note = `${got.synced ? "synced" : "unsynced"} ${got.lines.length} lines`;
+  } else state.lyrics = { uri: track.uri, status: "none" };
+  // the Settings note is the one place the no-session state lives: a new login clears it with the next song's lyrics
+  $("lyricsNote").textContent = noSession ? "Log in again to see lyrics." : "Spotify's web player provides the lyrics; not every song has them.";
+  applog(got || note === "none" ? "info" : "warn", `lyrics: ${track.id || track.uri} ${note}`);
+  applyLyrics();
+}
+
+async function readLyrics(id, gen) {
+  try {
+    return await invoke("get_lyrics", { trackId: id });
+  } catch (e) {
+    if (!isCode(e, "LYRICS_NO_TOKEN")) throw e;
+    await new Promise((r) => setTimeout(r, 3000));
+    return gen === lyricsGen ? invoke("get_lyrics", { trackId: id }) : null;
+  }
+}
+
+/** The one place that sets what is visible: the stage's data-lyrics, the two-line block, the column and the
+ *  Lyrics button; the cover re-measures when that changed. */
+function applyLyrics() {
+  const s = getSettings();
+  const active = lyricsActive(s, state.mode);
+  const shown = lyricsShown();
+  const key = `${active}|${shown}|${s.lyrics}|${s.lyricsShown}|${lyricsMissing}`;
+  if (key !== lastLyricsKey) {
+    lastLyricsKey = key;
+    $("stage").dataset.lyrics = shown || "off";
+    $("lyricsPreview").hidden = shown !== "title";
+    const btn = $("lyricsBtn");
+    btn.hidden = !active;
+    btn.disabled = lyricsMissing;
+    btn.setAttribute("aria-pressed", String(s.lyricsShown));
+    btn.classList.toggle("is-on", s.lyricsShown);
+    $("lyricsStage").hidden = shown !== "cover";
+    $("run").hidden = shown === "cover";
+    const list = $("lyricsList");
+    if (list.parentElement !== $("lyricsStage")) $("lyricsStage").append(list);
+    resetPan();
+    if (!$("stage").hidden) renderRun();
+  }
+  renderProgress(); // → renderLyrics with the bar's position, song and frozen state
+}
+
+/** Paint the current line for the open placement; nothing of a song that is not the one on screen. */
+function renderLyrics(p, t, frozen) {
+  const l = state.lyrics;
+  const shown = lyricsShown();
+  const own = l && t && l.uri === t.uri ? l : null; // the lines of the song on screen
+  const ready = !frozen && own && own.status === "ready";
+  const i = ready && own.synced ? lineAt(own.lines, p, lastLyricsLine) : -1;
+  const key = `${shown}|${own ? own.uri + own.status : ""}|${ready}|${i}`;
+  if (key === lastLyricsPaint) return;
+  lastLyricsPaint = key;
+  const step = i === lastLyricsLine + 1;
+  lastLyricsLine = i;
+  // the lines by the title; empty (not stale) while another placement or none is open. A song
+  // without times (unsynced) shows its whole text there instead, scrolled by hand
+  const by = shown === "title" && ready;
+  const four = by && own.synced ? linePreview(own.lines, i) : ["", "", "", ""];
+  const rows = $("lyricsPreview").children;
+  four.forEach((line, n) => (rows[n].textContent = line));
+  const plain = by && !own.synced ? own.lines.map(sung).join("\n") : "";
+  $("lyricsPlain").textContent = plain;
+  $("lyricsPlain").scrollTop = 0;
+  $("lyricsPreview").classList.toggle("is-plain", plain !== "");
+  if (shown !== "cover") return;
+  // the list: rebuilt per song (or per answer), the current row moved and kept in the middle
+  const list = $("lyricsList");
+  if (own !== lyricsListOf) buildLyricsList(list, own);
+  const moved = shown !== lyricsListIn;
+  lyricsListIn = shown;
+  const row = i >= 0 ? list.children[i] : null;
+  if (row === lyricsCurRow && !moved) return;
+  if (lyricsCurRow) lyricsCurRow.classList.remove("is-cur");
+  if (row) row.classList.add("is-cur");
+  lyricsCurRow = row;
+  if (row && performance.now() - lyricsUserAt > 4000) centerRow(list, row, step && !moved);
+}
+
+/** The list's rows for l: nothing until the lines come, one row per line (buttons seek when synced). */
+function buildLyricsList(list, l) {
+  lyricsListOf = l;
+  lyricsCurRow = null;
+  list.replaceChildren();
+  if (!l || l.status !== "ready") return;
+  list.append(
+    ...l.lines.map((line, n) => {
+      const el = document.createElement(l.synced ? "button" : "p");
+      el.className = "lyrics-line";
+      if (l.synced) {
+        el.type = "button";
+        el.tabIndex = -1; // a click seeks; the scrub bar is the keyboard's way
+        el.dataset.i = String(n);
+      }
+      el.textContent = sung(line);
+      return el;
+    }),
+  );
+  list.scrollTop = 0;
+}
+
+/** Scroll list so that row sits in its middle; smooth only for a one-line step (and no reduced motion). */
+function centerRow(list, row, smooth) {
+  list.scrollTo({ top: row.offsetTop - list.offsetTop - (list.clientHeight - row.offsetHeight) / 2, behavior: smooth && !reducedMotion() ? "smooth" : "auto" });
+}
+
+function onLyricsLineClick(e) {
+  const b = e.target.closest("[data-i]");
+  const lines = state.lyrics && state.lyrics.lines;
+  if (!b || !lines) return;
+  lyricsUserAt = -Infinity; // a click is a jump, not a scroll: the list follows from here
+  seekTo(lines[Number(b.dataset.i)].ms);
+}
+
+const noteLyricsScroll = () => {
+  lyricsUserAt = performance.now();
+};
+
 let heartGen = 0;
 let savedChain = Promise.resolve(); // save/unsave in click order, so the last click wins
 
@@ -1995,6 +2198,7 @@ function setEngine(st) {
     applog("info", `engine: ${engine ? engine.state : "unknown"} → ${st.state}${st.reason ? ` (${st.reason})` : ""}${st.device_id ? ` id ${st.device_id}` : ""}`);
   }
   engine = st;
+  syncLyrics();
   if (st.device_id) hereId = st.device_id;
   // a player that can't run won't load the saved session back
   if (restoring && (NEEDS_LOGIN.has(st.state) || st.state === "failed")) endRestoring(`stopped: engine ${st.state}`);
@@ -2089,6 +2293,8 @@ async function playOnThisMac() {
       await refreshEngine(); // its device id: how the list shows it
       if (sess !== authSession) return;
       setBusy("connecting");
+    } else if (st.web_login) {
+      await invoke("webplayer_show"); // Free mode: the web player's own login page; it hides itself once logged in
     } else if (st.state !== "ready") {
       return void fail(`This Mac isn't available right now${st.reason ? `: ${st.reason}` : ""}`);
     }
@@ -2115,6 +2321,7 @@ let lastMediaAt = 0;
  * force: a local seek, sent even when it moved less than the jump threshold. Never from frames.
  */
 function syncMedia(force = false) {
+  if (isFree(engine)) return; // the web player's WebKit owns Now Playing and the media keys for what it plays
   const next = mediaPayload({ mode: state.mode, now: state.now, isPlaying: state.isPlaying, positionMs: progress() });
   const t = performance.now();
   if (!(force && next) && !mediaChanged(lastMedia, next, t - lastMediaAt)) return;
@@ -2200,14 +2407,25 @@ function applyTray() {
 }
 
 /** Flip an on/off setting: save, log it as `label`, redraw Settings, then `after(on)`. */
-function flipSetting(key, label, after) {
-  const s = getSettings();
-  s[key] = !s[key];
+/** Store one setting, log it, redraw the sheet and apply it. */
+function putSetting(key, value, label, after) {
+  getSettings()[key] = value;
   saveSettings();
-  applog("info", `setting: ${label} ${s[key] ? "on" : "off"}`);
+  applog("info", `setting: ${label}`);
   renderSettings();
-  after(s[key]);
+  after(value);
 }
+
+function flipSetting(key, label, after) {
+  const on = !getSettings()[key];
+  putSetting(key, on, `${label} ${on ? "on" : "off"}`, after);
+}
+
+const flipLyricsPlacement = () => {
+  const v = getSettings().lyrics === "title" ? "cover" : "title";
+  putSetting("lyrics", v, `lyrics ${v}`, syncLyrics);
+};
+const toggleLyricsShown = () => flipSetting("lyricsShown", "lyrics shown", syncLyrics);
 
 const toggleMenuBar = () => flipSetting("menuBar", "menu bar", applyTray);
 const toggleMenuBarTitle = () => flipSetting("menuBarTitle", "song in menu bar", applyTray);
@@ -2299,6 +2517,10 @@ const SKIP_MS = 5000;
 const SKIP_SETTLE_MS = 1500;
 let skipWait = null; // {btn, landedAt, timer}
 
+// a free-mode ad break: see lib/ads.js. adSkip is the break so far ({uri, until}); the machine runs
+// on every poll in refresh, because inside the break the mode and the uri don't change between polls.
+let adSkip = null;
+
 function startSkip(btn) {
   endSkip();
   const wait = { btn, landedAt: 0, timer: setTimeout(endSkip, SKIP_MS) };
@@ -2332,6 +2554,12 @@ async function skip(cmd) {
     if (ok) wait.landedAt = performance.now();
     else endSkip();
   }
+  kick();
+}
+
+async function skipAd() {
+  const dev = state.device && state.device.id;
+  await changeTrack(() => routed(dev, () => invoke("local_next"), () => invoke("next_track"), "next"));
   kick();
 }
 
@@ -2584,7 +2812,7 @@ function panelHtml(view) {
 function centerPanelNow() {
   const list = $("panelList");
   const row = list.querySelector('[aria-current="true"]');
-  if (row) list.scrollTop = row.offsetTop - list.offsetTop - (list.clientHeight - row.offsetHeight) / 2;
+  if (row) centerRow(list, row, false);
 }
 
 function onPanelClick(e) {
@@ -2684,6 +2912,8 @@ function renderSettings() {
   for (const [id, key] of Object.entries(SWITCHES)) $(id).setAttribute("aria-checked", String(s[key]));
   $("menuBarTitleSwitch").disabled = !s.menuBar; // no icon, no song next to it
   const ready = engineReady();
+  const free = isFree(engine); // the web player picks its own quality
+  $("qualityOpts").hidden = free;
   for (const b of $("qualityOpts").querySelectorAll("[data-kbps]")) {
     const kbps = Number(b.dataset.kbps);
     const on = qualityBusy ? kbps === qualityBusy : kbps === quality;
@@ -2694,11 +2924,15 @@ function renderSettings() {
     if (kbps === qualityBusy) b.setAttribute("aria-busy", "true");
     else b.removeAttribute("aria-busy");
   }
-  $("qualityNote").textContent = qualityBusy
-    ? "Restarting the player…"
-    : ready
-      ? "Changing restarts the player for a moment."
-      : "Available once the player here is ready.";
+  const lyricsPlacementBtn = $("lyricsPlacementBtn");
+  lyricsPlacementBtn.textContent = s.lyrics === "cover" ? "Instead of cover" : "Beside title";
+  $("qualityNote").textContent = free
+    ? "Quality is set by Spotify's web player."
+    : qualityBusy
+      ? "Restarting the player…"
+      : ready
+        ? "Changing restarts the player for a moment."
+        : "Available once the player here is ready.";
 }
 
 // ---------- settings: updates (Rust updater.rs): the status line, Check now, Restart now ----------
@@ -3002,12 +3236,12 @@ function onQualityClick(e) {
   if (b && !b.disabled) setQuality(Number(b.dataset.kbps));
 }
 
-/** Arrows move the choice inside the radio group, like the page tabs. */
-function onQualityKey(e) {
+/** Arrows move the choice inside a radio group, like the page tabs. */
+function onRadioKey(e) {
   const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
   if (!step) return;
   e.preventDefault();
-  const opts = [...$("qualityOpts").querySelectorAll("[data-kbps]")];
+  const opts = [...e.currentTarget.querySelectorAll("[role=radio]")];
   const at = Math.max(0, opts.indexOf(document.activeElement));
   opts[(at + step + opts.length) % opts.length].focus();
 }
@@ -4671,7 +4905,8 @@ async function boot() {
   $("settingsModal").addEventListener("click", (e) => e.target.closest("[data-close]") && closeSettings(true));
   $("settingsSheet").addEventListener("keydown", onSettingsTab);
   $("qualityOpts").addEventListener("click", onQualityClick);
-  $("qualityOpts").addEventListener("keydown", onQualityKey);
+  $("qualityOpts").addEventListener("keydown", onRadioKey);
+  $("lyricsPlacementBtn").addEventListener("click", flipLyricsPlacement);
   $("mcpSwitch").addEventListener("click", toggleMcp);
   $("mcpActions").addEventListener("click", (e) => {
     const b = e.target.closest("[data-copy]");
@@ -4682,6 +4917,9 @@ async function boot() {
   $("mcpResetYes").addEventListener("click", resetMcpKey);
   $("panelBtn").addEventListener("click", togglePanel);
   $("panelList").addEventListener("click", onPanelClick);
+  $("lyricsBtn").addEventListener("click", toggleLyricsShown);
+  $("lyricsList").addEventListener("click", onLyricsLineClick);
+  for (const ev of ["wheel", "pointerdown", "touchstart", "keydown"]) $("lyricsList").addEventListener(ev, noteLyricsScroll, { passive: true });
   $("panel").addEventListener("error", onImgError, true);
   $("panelLayer").addEventListener("click", (e) => e.target.closest("[data-close]") && closePanel(true));
   document.addEventListener("pointerdown", onOutside);
@@ -4776,6 +5014,7 @@ async function boot() {
     if ($("stage").hidden) return;
     // hidden keeps polling, slower (pollDelay); visible again restarts with a fresh poll
     if (!document.hidden) startPolling();
+    syncLyrics(); // visible again: the song's lines, if a placement shows them
   });
   listenEvent("engine-status", setEngine);
   // Rust loaded the saved session back (paused): show it, and let a poll pick it up now
