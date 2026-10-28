@@ -137,11 +137,6 @@ function toast(msg) {
 
 // ---------- notification ----------
 
-function notifyAd() {
-  if (!window.__TAURI__ || !window.__TAURI__.core) return;
-  window.__TAURI__.core.invoke("notify", { message: "Реклама — пропускаем", summary: "Stylus — реклама" }).catch(() => {});
-}
-
 function notifySongStart(artist, title, cover) {
   if (!window.__TAURI__ || !window.__TAURI__.core) return;
   const message = `${artist} — ${title}`;
@@ -557,12 +552,16 @@ async function refresh(epoch) {
   // the ad break runs on every poll: inside it the mode stays "other" and the uri stays the same, so
   // a change-gated skip would never see the second ad of a break
   if (isFree(engine)) {
-    const ad = adSkipOnPoll({ mode, uri: track && track.uri || s.track_uri || null, at: performance.now() }, { free: true, state: adSkip });
+    const at = performance.now();
+    const uri = track && track.uri || s.track_uri || null;
+    const was = adSkip;
+    const ad = adSkipOnPoll({ mode, uri, at }, { free: true, state: adSkip });
     adSkip = ad.state;
     if (ad.log) applog("info", ad.log);
-    if (ad.toast) {
-      toast("Реклама — пропускаем");
-      notifyAd();
+    // inside a break every poll is logged: what the cluster says, and what the break made of it
+    if (was || ad.state) {
+      const verdict = ad.skip ? "next" : !ad.state ? "break over" : `wait, re-skip in ${Math.max(0, Math.round((ad.state.skipAt - at) / 1000))} s`;
+      applog("info", `ad poll: ${mode} ${uri || "none"}, ${s.is_playing ? "playing" : "paused"} at ${s.progress_ms ?? "?"} ms → ${verdict}`);
     }
     if (ad.skip) skipAd();
   }
